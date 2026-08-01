@@ -19,6 +19,7 @@ const theme = {
 test("both icon modes provide every footer semantic", () => {
 	const keys = [
 		"cwd",
+		"session",
 		"git",
 		"working",
 		"done",
@@ -68,6 +69,7 @@ test("ASCII footer renders icons as semantic labels", () => {
 		sessionManager: {
 			getCwd: () => "C:\\work\\project",
 			getEntries: () => entries,
+			getSessionName: () => undefined,
 		},
 		getContextUsage: () => ({ tokens: 250, contextWindow: 1_000, percent: 25 }),
 	} as unknown as ExtensionContext;
@@ -129,4 +131,92 @@ test("ASCII footer renders icons as semantic labels", () => {
 	assert.equal(hiddenOutput.length, 2);
 	assert.doesNotMatch(hiddenOutput.join("\n"), /goal active/);
 	assert.equal(extensionStatusReads, 1);
+});
+
+function renderFooterWithSession(opts: {
+	sessionName?: string | null;
+	mode?: "nerd" | "ascii";
+	sessionNameEnabled?: boolean;
+	width?: number;
+}): string {
+	const {
+		sessionName,
+		mode = "ascii",
+		sessionNameEnabled = true,
+		width = 160,
+	} = opts;
+	const name = sessionName === undefined ? "test-session" : sessionName;
+	let footerFactory: NonNullable<Parameters<ExtensionContext["ui"]["setFooter"]>[0]> | undefined;
+	const ctx = {
+		model: { provider: "openai", contextWindow: 1_000 },
+		ui: {
+			setFooter(factory: typeof footerFactory) {
+				footerFactory = factory;
+			},
+		},
+		sessionManager: {
+			getCwd: () => "/work/project",
+			getEntries: () => [],
+			getSessionName: () => name,
+		},
+		getContextUsage: () => ({ tokens: 0, contextWindow: 1_000, percent: 0 }),
+	} as unknown as ExtensionContext;
+	const config = structuredClone(DEFAULT_CONFIG);
+	config.icons.mode = mode;
+	config.footerSegments.sessionName = sessionNameEnabled;
+	const state: FooterState = {
+		git: emptyGitStatus(),
+		runtime: null,
+		sessionStartEpoch: Date.now(),
+		workingSince: undefined,
+		lastDoneIn: undefined,
+	};
+	installFooter(
+		ctx,
+		() => state,
+		() => config,
+		() => ({ provider: "OpenAI", model: "gpt-5", effort: "off" }),
+		{ setRequestRender() {}, scheduleGitRefresh() {} },
+	);
+	assert.ok(footerFactory);
+	const footerData = {
+		onBranchChange: () => () => {},
+		getExtensionStatuses: () => new Map(),
+	} as unknown as ReadonlyFooterDataProvider;
+	const component = footerFactory(
+		{ requestRender() {} } as TUI,
+		theme,
+		footerData,
+	) as Component;
+	return component.render(width).join("\n");
+}
+
+test("footer shows session name next to cwd when set", () => {
+	const out = renderFooterWithSession({ sessionName: "my-session" });
+	assert.ok(out.includes("my-session"), `missing session name\n${out}`);
+});
+
+test("footer hides session name when getSessionName returns empty", () => {
+	const out = renderFooterWithSession({ sessionName: null });
+	assert.ok(!out.includes("test-session"), `should not render name\n${out}`);
+});
+
+test("footer hides session name when footerSegments.sessionName is false", () => {
+	const out = renderFooterWithSession({ sessionName: "my-session", sessionNameEnabled: false });
+	assert.ok(!out.includes("my-session"), `should be hidden when disabled\n${out}`);
+});
+
+test("footer truncates long session names to 24 width units", () => {
+	const longName = "x".repeat(60);
+	const out = renderFooterWithSession({ sessionName: longName, width: 200 });
+	const clean = out.replace(/\x1b\[[0-9;]*m/g, "");
+	assert.ok(!clean.includes(longName), "full name must not appear\n" + clean);
+	assert.match(clean, /x{10,}\.\.\./, "truncated name should keep a prefix and ellipsis\n" + clean);
+});
+
+test("session name uses matching glyph in nerd and ascii modes", () => {
+	const asciiOut = renderFooterWithSession({ mode: "ascii", sessionName: "sess" });
+	assert.ok(asciiOut.includes(resolveGlyphs("ascii").session), `ascii glyph missing\n${asciiOut}`);
+	const nerdOut = renderFooterWithSession({ mode: "nerd", sessionName: "sess" });
+	assert.ok(nerdOut.includes(resolveGlyphs("nerd").session), `nerd glyph missing\n${nerdOut}`);
 });
