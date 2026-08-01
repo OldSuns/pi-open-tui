@@ -2,6 +2,7 @@ export type IconMode = "auto" | "nerd" | "ascii";
 
 export interface IconGlyphs {
 	cwd: string;
+	session: string;
 	git: string;
 	working: string;
 	done: string;
@@ -30,6 +31,7 @@ export interface IconGlyphs {
 
 const NERD_GLYPHS: IconGlyphs = {
 	cwd: "",
+	session: "",
 	git: "",
 	working: "",
 	done: "",
@@ -62,6 +64,7 @@ const NERD_GLYPHS: IconGlyphs = {
 // avoid collisions with the git-status set {= S ! A ? r x ^ v}.
 const ASCII_GLYPHS: IconGlyphs = {
 	cwd: "@",
+	session: "s",
 	git: "*",
 	working: "o",
 	done: "+",
