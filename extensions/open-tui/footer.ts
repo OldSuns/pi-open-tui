@@ -218,7 +218,8 @@ export function installFooter(
 					const maxCwd = Math.min(30, Math.max(10, Math.floor(width * 0.4)));
 					leftParts.push({
 						text: `${theme.fg("mdLink", glyphs.cwd)} ${theme.fg("accent", truncatePath(formatCwd(ctx.sessionManager.getCwd()), maxCwd))}`,
-						priority: 0,
+						// Keep the project directory visible longer than metadata segments.
+						priority: 4,
 					});
 				}
 				const gitSeg = renderGitSegment(theme, state.git, glyphs, segments);

@@ -11,10 +11,17 @@ import { installFooter } from "../extensions/open-tui/footer.ts";
 import { emptyGitStatus } from "../extensions/open-tui/git.ts";
 import { resolveGlyphs } from "../extensions/open-tui/icons.ts";
 import type { FooterState } from "../extensions/open-tui/state.ts";
+import { truncatePath } from "../extensions/open-tui/utils.ts";
 
 const theme = {
 	fg: (_color: string, text: string) => text,
 } as Theme;
+
+test("cwd truncation preserves the basename", () => {
+	assert.equal(truncatePath("~/projects/pi-open-tui", 14), ".../pi-open-tui");
+	assert.equal(truncatePath("~/projects/pi-open-tui", 9), "...en-tui");
+	assert.equal(truncatePath("C:\\work\\project", 11), "...\\project");
+});
 
 test("both icon modes provide every footer semantic", () => {
 	const keys = [
