@@ -11,16 +11,34 @@ import { installFooter } from "../extensions/open-tui/footer.ts";
 import { emptyGitStatus } from "../extensions/open-tui/git.ts";
 import { resolveGlyphs } from "../extensions/open-tui/icons.ts";
 import type { FooterState } from "../extensions/open-tui/state.ts";
-import { truncatePath } from "../extensions/open-tui/utils.ts";
+import { fitSegmentsByPriority, truncateBranch, truncatePath } from "../extensions/open-tui/utils.ts";
 
 const theme = {
 	fg: (_color: string, text: string) => text,
 } as Theme;
 
+test("branch truncation preserves the branch prefix", () => {
+	assert.equal(truncateBranch("fix/cwd-footer-truncation", 20), "fix/cwd-footer-tr...");
+});
+
 test("cwd truncation preserves the basename", () => {
-	assert.equal(truncatePath("~/projects/pi-open-tui", 14), ".../pi-open-tui");
+	assert.equal(truncatePath("~/projects/pi-open-tui", 14), "pi-open-tui");
 	assert.equal(truncatePath("~/projects/pi-open-tui", 9), "...en-tui");
-	assert.equal(truncatePath("C:\\work\\project", 11), "...\\project");
+	assert.equal(truncatePath("C:\\work\\project", 11), "project");
+});
+
+test("footer compacts cwd before truncating runtime and branch", () => {
+	assert.deepEqual(
+		fitSegmentsByPriority(
+			[
+				{ text: "@ ~/projects/pi-open-tui", compactText: "@ pi-open-tui", priority: 4 },
+				{ text: "* fix/cwd-footer-truncation", priority: 2 },
+				{ text: "node 24.6.0", priority: 1 },
+			],
+			53,
+		),
+		["@ pi-open-tui", "* fix/cwd-footer-truncation", "node 24.6.0"],
+	);
 });
 
 test("both icon modes provide every footer semantic", () => {
@@ -81,7 +99,7 @@ test("ASCII footer renders icons as semantic labels", () => {
 	const config = structuredClone(DEFAULT_CONFIG);
 	config.icons.mode = "ascii";
 	const state: FooterState = {
-		git: { ...emptyGitStatus(), branch: "main", modified: 2 },
+		git: { ...emptyGitStatus(), branch: "fix/cwd-footer-truncation", modified: 2 },
 		runtime: { name: "nodejs", version: "24.6.0" },
 		sessionStartEpoch: Date.now(),
 		workingSince: Date.now() - 2_000,
@@ -114,7 +132,7 @@ test("ASCII footer renders icons as semantic labels", () => {
 
 	for (const expected of [
 		"@",
-		"* main",
+		"* fix/cwd-footer-truncation",
 		"!2",
 		"node 24.6.0",
 		"o working",

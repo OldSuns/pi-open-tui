@@ -7,6 +7,7 @@ import type { GitStatus } from "./git.ts";
 import type { RuntimeInfo } from "./runtime.ts";
 import {
 	alignRight,
+	basenamePath,
 	cacheHitColor,
 	effortColor,
 	fitSegmentsByPriority,
@@ -17,6 +18,7 @@ import {
 	providerColor,
 	sanitizeStatus,
 	stressColor,
+	truncateBranch,
 	truncatePath,
 } from "./utils.ts";
 import type { FooterState, ModelMeta, UsageTotals } from "./state.ts";
@@ -41,13 +43,15 @@ function renderGitSegment(
 	git: GitStatus,
 	glyphs: IconGlyphs,
 	segments: OpenTuiConfig["footerSegments"],
-	maxBranchLen = 20,
+	maxBranchLen: number,
 ): string {
 	const parts: string[] = [];
 	if (segments.gitBranch) {
 		if (git.branch) {
 			parts.push(theme.fg("mdLink", glyphs.git));
-			parts.push(theme.fg("mdLink", truncatePath(git.branch, maxBranchLen)));
+			// Bound this only by the total footer width; the priority fitter below
+			// applies the actual available width when other segments need space.
+			parts.push(theme.fg("mdLink", truncateBranch(git.branch, maxBranchLen)));
 		} else if (git.commit?.detached) {
 			parts.push(theme.fg("warning", glyphs.git));
 			parts.push(theme.fg("warning", "HEAD"));
@@ -213,23 +217,39 @@ export function installFooter(
 
 				const totals = getUsageTotals(ctx);
 
-				const leftParts: { text: string; priority: number }[] = [];
+				const leftParts: {
+					text: string;
+					priority: number;
+					compactText?: string;
+					truncate?: (text: string, maxWidth: number, ellipsis: string) => string;
+				}[] = [];
 				if (segments.cwd) {
+					const cwd = formatCwd(ctx.sessionManager.getCwd());
 					const maxCwd = Math.min(30, Math.max(10, Math.floor(width * 0.4)));
+					const cwdPrefix = `${theme.fg("mdLink", glyphs.cwd)} `;
+					const cwdText = `${cwdPrefix}${theme.fg("accent", truncatePath(cwd, maxCwd))}`;
+					const cwdBasename = `${cwdPrefix}${theme.fg("accent", truncatePath(basenamePath(cwd), maxCwd))}`;
 					leftParts.push({
-						text: `${theme.fg("mdLink", glyphs.cwd)} ${theme.fg("accent", truncatePath(formatCwd(ctx.sessionManager.getCwd()), maxCwd))}`,
-						// Keep the project directory visible longer than metadata segments.
+						text: cwdText,
+						compactText: cwdBasename,
+						truncate: (_text, maxWidth, ellipsis) => {
+							const pathWidth = maxWidth - visibleWidth(cwdPrefix);
+							if (pathWidth <= 0) return truncateToWidth(cwdPrefix, maxWidth, ellipsis);
+							return `${cwdPrefix}${theme.fg("accent", truncatePath(basenamePath(cwd), pathWidth))}`;
+						},
+						// Higher priorities survive longer: keep the cwd basename, then
+						// reduce runtime, branch/status, and finally the timer.
 						priority: 4,
 					});
 				}
-				const gitSeg = renderGitSegment(theme, state.git, glyphs, segments);
-				if (gitSeg) leftParts.push({ text: gitSeg, priority: 3 });
+				const gitSeg = renderGitSegment(theme, state.git, glyphs, segments, width);
+				if (gitSeg) leftParts.push({ text: gitSeg, priority: 2 });
 				if (segments.runtime) {
 					const runtimeSeg = renderRuntimeSegment(theme, state.runtime, config.icons.mode);
 					if (runtimeSeg) leftParts.push({ text: runtimeSeg, priority: 1 });
 				}
 				const timerSeg = renderTimerSegment(theme, state, glyphs);
-				if (timerSeg) leftParts.push({ text: timerSeg, priority: 2 });
+				if (timerSeg) leftParts.push({ text: timerSeg, priority: 3 });
 
 				let rightBlock = "";
 				if (segments.context) {

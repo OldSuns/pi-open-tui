@@ -24,19 +24,28 @@ export function formatCwd(cwd: string): string {
 	return rel === "" ? "~" : `~${sep}${rel}`;
 }
 
+export function basenamePath(path: string): string {
+	return path.split(/[\\/]/).filter(Boolean).at(-1) ?? path;
+}
+
 export function truncatePath(path: string, maxLen: number): string {
 	if (path.length <= maxLen) return path;
 	if (maxLen <= 3) return "...".slice(0, maxLen);
 
 	// The basename is the useful part of a cwd. Keep it intact before spending
 	// space on parent directories.
-	const sepChar = path.includes("/") ? "/" : "\\";
-	const basename = path.split(/[\\/]/).filter(Boolean).at(-1) ?? "";
-	const suffix = `${sepChar}${basename}`;
-	if (suffix.length + 3 <= maxLen) return `...${suffix}`;
+	const basename = basenamePath(path);
+	if (basename.length <= maxLen) return basename;
 
 	// If even the basename does not fit, show as much of its end as possible.
 	return `...${basename.slice(-(maxLen - 3))}`;
+}
+
+/** Truncate branch names from the end so the branch's prefix remains visible. */
+export function truncateBranch(branch: string, maxLen: number): string {
+	if (branch.length <= maxLen) return branch;
+	if (maxLen <= 3) return "...".slice(0, maxLen);
+	return `${branch.slice(0, maxLen - 3)}...`;
 }
 
 export function fmtTokens(n: number): string {
@@ -88,24 +97,47 @@ export function alignRight(left: string, right: string, width: number, theme: Th
 export type PrioritizedSegment = {
 	text: string;
 	priority: number;
+	/** Optional compact form used before lower-priority segments are shrunk. */
+	compactText?: string;
+	/** Optional segment-aware truncation, used when a generic prefix is not useful. */
+	truncate?: (text: string, maxWidth: number, ellipsis: string) => string;
 };
 
 /**
- * Pack segments into maxWidth, shrinking/dropping lowest-priority segments first.
- * Higher priority = survives longer. Returns the surviving segment texts in
- * original order, space-joined. Each segment is either kept whole, truncated
- * with ellipsis, or dropped entirely.
+ * Pack segments into maxWidth, compacting segments first and then
+ * shrinking/dropping lowest-priority segments. Higher priority = survives
+ * longer. Returns the surviving segment texts in original order, space-joined.
+ * Each segment is either kept whole, compacted, truncated with ellipsis, or
+ * dropped entirely.
  */
 export function fitSegmentsByPriority(
 	segs: readonly PrioritizedSegment[],
 	maxW: number,
 	ellipsis = "...",
 ): string[] {
-	const items = segs.map((s) => ({ text: s.text, priority: s.priority, w: visibleWidth(s.text) }));
+	const items = segs.map((s) => ({
+		text: s.text,
+		compactText: s.compactText,
+		priority: s.priority,
+		truncate: s.truncate,
+		w: visibleWidth(s.text),
+	}));
 	const totalW = () => {
 		const active = items.filter((it) => it.text !== "");
 		return active.reduce((a, it) => a + it.w, 0) + Math.max(0, active.length - 1);
 	};
+
+	// Compact in display order before sacrificing any segment content. This is
+	// used by the footer to discard cwd parents while keeping the basename.
+	if (totalW() > maxW) {
+		for (const item of items) {
+			if (!item.compactText || visibleWidth(item.compactText) >= item.w) continue;
+			item.text = item.compactText;
+			item.w = visibleWidth(item.text);
+			if (totalW() <= maxW) break;
+		}
+	}
+
 	while (totalW() > maxW) {
 		let target = -1;
 		for (let i = 0; i < items.length; i++) {
@@ -121,7 +153,10 @@ export function fitSegmentsByPriority(
 			items[target].text = "";
 			items[target].w = 0;
 		} else if (avail < items[target].w) {
-			items[target].text = truncateToWidth(items[target].text, avail, ellipsis);
+			const truncate = items[target].truncate;
+			items[target].text = truncate
+				? truncate(items[target].text, avail, ellipsis)
+				: truncateToWidth(items[target].text, avail, ellipsis);
 			items[target].w = visibleWidth(items[target].text);
 		} else {
 			break;
