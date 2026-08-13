@@ -22,11 +22,13 @@ async function openSettings(initialConfig = structuredClone(DEFAULT_CONFIG)): Pr
 	component: SettingsComponent;
 	getConfig: () => OpenTuiConfig;
 	isClosed: () => boolean;
+	isOverlayClosed: () => boolean;
 }> {
 	let commandHandler: ((args: string, ctx: ExtensionContext) => Promise<void> | void) | undefined;
 	let component: SettingsComponent | undefined;
 	let config = initialConfig;
 	let closed = false;
+	let overlayClosed = false;
 
 	const pi = {
 		registerCommand: (_name: string, options: { handler: typeof commandHandler }) => {
@@ -38,6 +40,9 @@ async function openSettings(initialConfig = structuredClone(DEFAULT_CONFIG)): Pr
 		getConfig: () => config,
 		onConfigChanged: (nextConfig) => {
 			config = nextConfig;
+		},
+		onOverlayClosed: () => {
+			overlayClosed = true;
 		},
 	});
 
@@ -65,12 +70,26 @@ async function openSettings(initialConfig = structuredClone(DEFAULT_CONFIG)): Pr
 	await commandHandler("", ctx);
 	assert.ok(component);
 
-	return { component, getConfig: () => config, isClosed: () => closed };
+	return {
+		component,
+		getConfig: () => config,
+		isClosed: () => closed,
+		isOverlayClosed: () => overlayClosed,
+	};
 }
 
 function selectedLine(component: SettingsComponent): string {
 	return component.render(80).find((line) => line.includes("→ ")) ?? "";
 }
+
+test("calls onOverlayClosed after the overlay promise settles", async () => {
+	const settings = await openSettings();
+	assert.equal(settings.isClosed(), false);
+	assert.equal(settings.isOverlayClosed(), true);
+
+	settings.component.handleInput("q");
+	assert.equal(settings.isClosed(), true);
+});
 
 test("keeps the changed setting selected", async () => {
 	const settings = await openSettings();

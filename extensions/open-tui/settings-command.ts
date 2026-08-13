@@ -334,6 +334,7 @@ export function registerSettingsCommand(
 	hooks: {
 		getConfig: () => OpenTuiConfig;
 		onConfigChanged: (config: OpenTuiConfig) => void;
+		onOverlayClosed?: () => void;
 	},
 ): void {
 	pi.registerCommand("open-tui", {
@@ -356,6 +357,10 @@ export function registerSettingsCommand(
 				},
 			};
 		}, { overlay: true });
+		// Overlay is closed and focus is back on the editor. Deferred UI changes
+		// (e.g. toggling the extension) run here, so pi core's focus restore
+		// cannot strand the overlay without keyboard input.
+		hooks.onOverlayClosed?.();
 		},
 	});
 }

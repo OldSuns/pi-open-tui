@@ -54,6 +54,7 @@ export default function (pi: ExtensionAPI) {
 	let cleanupHeader: (() => void) | undefined;
 	let cleanupFooter: (() => void) | undefined;
 	let cleanupEditor: (() => void) | undefined;
+	let pendingUiChange: "install" | "uninstall" | undefined;
 
 	const getThinkingLevel = () => (sessionLifecycle.isCurrent() ? pi.getThinkingLevel() : "off");
 
@@ -268,11 +269,10 @@ export default function (pi: ExtensionAPI) {
 			saveConfig(newConfig);
 			config = newConfig;
 			if (lastCtx && wasEnabled !== newConfig.enabled) {
-				if (newConfig.enabled) {
-					applyUi(lastCtx);
-				} else {
-					uninstallUi(lastCtx);
-				}
+				// Both directions defer to onOverlayClosed: while the settings overlay
+				// is open, pi core's setEditorComponent() steals focus from the overlay
+				// and strands it without keyboard input.
+				pendingUiChange = newConfig.enabled ? "install" : "uninstall";
 			}
 			const gitNeeded = newConfig.footerSegments.gitBranch || newConfig.footerSegments.gitStatus || newConfig.footerSegments.gitCommit;
 			if (lastCtx && gitNeeded) {
@@ -281,6 +281,16 @@ export default function (pi: ExtensionAPI) {
 				state.git = emptyGitStatus();
 			}
 			requestFooterRender?.();
+		},
+		onOverlayClosed: () => {
+			if (!lastCtx || pendingUiChange === undefined) return;
+			const change = pendingUiChange;
+			pendingUiChange = undefined;
+			if (change === "uninstall") {
+				uninstallUi(lastCtx);
+			} else {
+				applyUi(lastCtx);
+			}
 		},
 	});
 }
