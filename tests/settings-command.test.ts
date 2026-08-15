@@ -104,6 +104,17 @@ test("closes cleanly after enabling or disabling the UI", async () => {
 	}
 });
 
+test("cycles cursor style from the General tab", async () => {
+	const settings = await openSettings();
+
+	settings.component.handleInput("\x1b[B");
+	settings.component.handleInput("\x1b[B");
+	settings.component.handleInput("\r");
+
+	assert.equal(settings.getConfig().cursorStyle, "bar");
+	assert.match(selectedLine(settings.component), /Cursor style/);
+});
+
 test("keeps the changed setting selected", async () => {
 	const settings = await openSettings();
 
@@ -203,8 +214,9 @@ test("falls back to English for an invalid settings language", () => {
 	const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
 	try {
 		process.env.PI_CODING_AGENT_DIR = agentDir;
-		writeFileSync(join(agentDir, "open-tui.json"), JSON.stringify({ settingsLanguage: "de" }), "utf8");
+		writeFileSync(join(agentDir, "open-tui.json"), JSON.stringify({ settingsLanguage: "de", cursorStyle: "invalid" }), "utf8");
 		assert.equal(loadConfig().settingsLanguage, "en");
+		assert.equal(loadConfig().cursorStyle, "block");
 	} finally {
 		if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
 		else process.env.PI_CODING_AGENT_DIR = previousAgentDir;

@@ -54,7 +54,7 @@ export default function (pi: ExtensionAPI) {
 	let cleanupHeader: (() => void) | undefined;
 	let cleanupFooter: (() => void) | undefined;
 	let cleanupEditor: (() => void) | undefined;
-	let pendingUiChange: "install" | "uninstall" | undefined;
+	let pendingUiChange: "install" | "uninstall" | "reinstall" | undefined;
 
 	const getThinkingLevel = () => (sessionLifecycle.isCurrent() ? pi.getThinkingLevel() : "off");
 
@@ -80,7 +80,7 @@ export default function (pi: ExtensionAPI) {
 					},
 				},
 			);
-			cleanupEditor = installEditor(pi, ctx);
+			cleanupEditor = installEditor(pi, ctx, config.cursorStyle);
 			active = true;
 		}
 	};
@@ -266,6 +266,7 @@ export default function (pi: ExtensionAPI) {
 		getConfig: () => config,
 		onConfigChanged: (newConfig) => {
 			const wasEnabled = config.enabled;
+			const cursorStyleChanged = config.cursorStyle !== newConfig.cursorStyle;
 			saveConfig(newConfig);
 			config = newConfig;
 			if (lastCtx && wasEnabled !== newConfig.enabled) {
@@ -273,6 +274,8 @@ export default function (pi: ExtensionAPI) {
 				// is open, pi core's setEditorComponent() steals focus from the overlay
 				// and strands it without keyboard input.
 				pendingUiChange = newConfig.enabled ? "install" : "uninstall";
+			} else if (lastCtx && cursorStyleChanged && active) {
+				pendingUiChange = "reinstall";
 			}
 			const gitNeeded = newConfig.footerSegments.gitBranch || newConfig.footerSegments.gitStatus || newConfig.footerSegments.gitCommit;
 			if (lastCtx && gitNeeded) {
@@ -288,6 +291,9 @@ export default function (pi: ExtensionAPI) {
 			pendingUiChange = undefined;
 			if (change === "uninstall") {
 				uninstallUi(lastCtx);
+			} else if (change === "reinstall") {
+				cleanupEditor?.();
+				cleanupEditor = installEditor(pi, lastCtx, config.cursorStyle);
 			} else {
 				applyUi(lastCtx);
 			}

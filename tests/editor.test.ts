@@ -36,6 +36,38 @@ test("compensates Pi editor padding for the custom left rail", () => {
 	assert.equal(contentLine.indexOf("x"), 2);
 });
 
+test("uses the terminal hardware cursor for non-block styles", () => {
+	for (const [cursorStyle, sequence] of [
+		["bar", "\x1b[6 q"],
+		["underline", "\x1b[4 q"],
+	] as const) {
+		const writes: string[] = [];
+		let hardwareCursor: boolean | undefined;
+		const hardwareTui = {
+			...tui,
+			terminal: {
+				rows: 24,
+				write: (data: string) => writes.push(data),
+			},
+			setShowHardwareCursor: (enabled: boolean) => {
+				hardwareCursor = enabled;
+			},
+		} as unknown as TUI;
+		const editor = new OpenTuiEditor(
+			hardwareTui,
+			editorTheme,
+			{ matches: () => false } as unknown as KeybindingsManager,
+			cursorStyle,
+		);
+
+		const lines = editor.render(40);
+
+		assert.equal(hardwareCursor, true);
+		assert.ok(writes.includes(sequence), `${cursorStyle} cursor sequence was sent`);
+		assert.ok(lines.every((line) => !line.includes("\x1b[7m")), "software block cursor was removed");
+	}
+});
+
 test("frame recolors via borderColor (bash mode / thinking level hook)", () => {
 	let painted = "";
 	const theme = {

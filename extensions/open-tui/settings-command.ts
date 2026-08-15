@@ -8,7 +8,7 @@ import {
 	type TUI,
 	Text,
 } from "@earendil-works/pi-tui";
-import type { IconMode, OpenTuiConfig, SettingsLanguage } from "./config.ts";
+import type { CursorStyle, IconMode, OpenTuiConfig, SettingsLanguage } from "./config.ts";
 
 interface SettingItem {
 	id: string;
@@ -28,6 +28,7 @@ const COPY = {
 		labels: {
 			enabled: "Enabled",
 			language: "Language",
+			cursorStyle: "Cursor style",
 			iconMode: "Icon mode",
 			cwd: "CWD",
 			sessionName: "Session name",
@@ -48,6 +49,7 @@ const COPY = {
 			on: "On",
 			off: "Off",
 			languages: { en: "English", zh: "简体中文" },
+			cursorStyles: { block: "Block", bar: "Bar", underline: "Underline" },
 			icons: { auto: "Auto", nerd: "Nerd", ascii: "ASCII" },
 		},
 	},
@@ -58,6 +60,7 @@ const COPY = {
 		labels: {
 			enabled: "启用",
 			language: "语言",
+			cursorStyle: "光标样式",
 			iconMode: "图标模式",
 			cwd: "当前目录",
 			sessionName: "会话名",
@@ -78,6 +81,7 @@ const COPY = {
 			on: "开启",
 			off: "关闭",
 			languages: { en: "English", zh: "简体中文" },
+			cursorStyles: { block: "块", bar: "竖线", underline: "下划线" },
 			icons: { auto: "自动", nerd: "Nerd", ascii: "ASCII" },
 		},
 	},
@@ -110,6 +114,13 @@ function toggleLanguage(config: OpenTuiConfig): OpenTuiConfig {
 	return { ...config, settingsLanguage: config.settingsLanguage === "en" ? "zh" : "en" };
 }
 
+function cycleCursorStyle(config: OpenTuiConfig): OpenTuiConfig {
+	const order: CursorStyle[] = ["block", "bar", "underline"];
+	const currentIdx = order.indexOf(config.cursorStyle);
+	const next = order[(currentIdx + 1) % order.length]!;
+	return { ...config, cursorStyle: next };
+}
+
 function toggleTelemetry(config: OpenTuiConfig, key: keyof OpenTuiConfig["telemetry"]): OpenTuiConfig {
 	return {
 		...config,
@@ -121,6 +132,7 @@ function buildFeaturesItems(config: OpenTuiConfig, copy: SettingsCopy): SettingI
 	return [
 		{ id: "enabled", label: copy.labels.enabled, currentValue: config.enabled ? copy.values.on : copy.values.off },
 		{ id: "settingsLanguage", label: copy.labels.language, currentValue: copy.values.languages[config.settingsLanguage] },
+		{ id: "cursorStyle", label: copy.labels.cursorStyle, currentValue: copy.values.cursorStyles[config.cursorStyle] },
 	];
 }
 
@@ -177,6 +189,7 @@ function handleSettingChange(
 	if (tab === "features") {
 		if (itemId === "enabled") return toggleEnabled(config);
 		if (itemId === "settingsLanguage") return toggleLanguage(config);
+		if (itemId === "cursorStyle") return cycleCursorStyle(config);
 	}
 	if (tab === "icons" && itemId === "mode") return cycleIconMode(config);
 	if (tab === "segments") {

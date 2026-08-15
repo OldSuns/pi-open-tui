@@ -4,6 +4,7 @@ import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import type { IconMode } from "./icons.ts";
 
 export type SettingsLanguage = "en" | "zh";
+export type CursorStyle = "block" | "bar" | "underline";
 
 export type { IconMode } from "./icons.ts";
 
@@ -33,6 +34,7 @@ export interface TelemetryConfig {
 export interface OpenTuiConfig {
 	enabled: boolean;
 	settingsLanguage: SettingsLanguage;
+	cursorStyle: CursorStyle;
 	icons: {
 		mode: IconMode;
 	};
@@ -43,6 +45,7 @@ export interface OpenTuiConfig {
 export const DEFAULT_CONFIG: OpenTuiConfig = {
 	enabled: true,
 	settingsLanguage: "en",
+	cursorStyle: "block",
 	icons: {
 		mode: "auto",
 	},
@@ -121,6 +124,9 @@ export function loadConfig(notify?: (msg: string, level: "warning" | "info") => 
 		const config = deepMerge(DEFAULT_CONFIG, parsed);
 		if (config.settingsLanguage !== "en" && config.settingsLanguage !== "zh") {
 			config.settingsLanguage = DEFAULT_CONFIG.settingsLanguage;
+		}
+		if (config.cursorStyle !== "block" && config.cursorStyle !== "bar" && config.cursorStyle !== "underline") {
+			config.cursorStyle = DEFAULT_CONFIG.cursorStyle;
 		}
 		return config;
 	} catch (err) {

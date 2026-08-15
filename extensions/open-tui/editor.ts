@@ -6,12 +6,28 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import type { EditorTheme, TUI } from "@earendil-works/pi-tui";
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import type { CursorStyle } from "./config.ts";
 import { findBottomBorderIndex, isEditorBorderLine, stripAnsi } from "./utils.ts";
 
 function fillLine(content: string, width: number): string {
 	const truncated = truncateToWidth(content, Math.max(0, width), "");
 	const pad = " ".repeat(Math.max(0, width - visibleWidth(truncated)));
 	return `${truncated}${pad}`;
+}
+
+const CURSOR_STYLE_SEQUENCES: Partial<Record<CursorStyle, string>> = {
+	bar: "\x1b[6 q",
+	underline: "\x1b[4 q",
+};
+
+function removeSoftwareCursor(line: string): string {
+	return line.replace(/\x1b\[7m([\s\S]*?)\x1b\[0m/g, "$1");
+}
+
+function configureCursor(tui: TUI, cursorStyle: CursorStyle): void {
+	tui.setShowHardwareCursor?.(cursorStyle !== "block");
+	const sequence = CURSOR_STYLE_SEQUENCES[cursorStyle];
+	if (sequence) tui.terminal.write?.(sequence);
 }
 
 function roundedBorder(
@@ -39,13 +55,17 @@ function roundedBorder(
 export class OpenTuiEditor extends CustomEditor {
 	private readonly getRail: () => string;
 	private readonly getBorder: (s: string) => string;
+	private readonly cursorStyle: CursorStyle;
 
 	constructor(
 		tui: TUI,
 		editorTheme: EditorTheme,
 		keybindings: KeybindingsManager,
+		cursorStyle: CursorStyle = "block",
 	) {
 		super(tui, editorTheme, keybindings, { paddingX: 0 });
+		this.cursorStyle = cursorStyle;
+		configureCursor(tui, cursorStyle);
 		// ponytail: route the frame through this.borderColor so Pi can recolor it
 		// via updateEditorBorderColor() — bash mode ("! " prefix → green) and
 		// thinking-level borders both flow through this one property.
@@ -58,14 +78,21 @@ export class OpenTuiEditor extends CustomEditor {
 		super.setPaddingX(0);
 	}
 
+	private renderBase(width: number): string[] {
+		const renderedLines = super.render(width);
+		return this.cursorStyle === "block"
+			? renderedLines
+			: renderedLines.map(removeSoftwareCursor);
+	}
+
 	render(width: number): string[] {
-		if (width < 4) return super.render(width);
+		if (width < 4) return this.renderBase(width);
 
 		const rail = this.getRail();
 		const borderPaint = this.getBorder;
 		// ponytail: 1-char rail + 1-char gap on each side = 4 chars of chrome.
 		const innerWidth = Math.max(0, width - 4);
-		const baseLines = super.render(innerWidth);
+		const baseLines = this.renderBase(innerWidth);
 		const bottomIdx = findBottomBorderIndex(baseLines);
 
 		const result: string[] = [];
@@ -90,11 +117,23 @@ export class OpenTuiEditor extends CustomEditor {
 	}
 }
 
-export function installEditor(_pi: ExtensionAPI, ctx: ExtensionContext): () => void {
-	ctx.ui.setEditorComponent((tui, editorTheme, keybindings) =>
-		new OpenTuiEditor(tui, editorTheme, keybindings),
-	);
+export function installEditor(
+	_pi: ExtensionAPI,
+	ctx: ExtensionContext,
+	cursorStyle: CursorStyle = "block",
+): () => void {
+	let activeTui: TUI | undefined;
+	let previousHardwareCursor: boolean | undefined;
+
+	ctx.ui.setEditorComponent((tui, editorTheme, keybindings) => {
+		activeTui = tui;
+		previousHardwareCursor = tui.getShowHardwareCursor?.();
+		return new OpenTuiEditor(tui, editorTheme, keybindings, cursorStyle);
+	});
 	return () => {
 		ctx.ui.setEditorComponent(undefined);
+		if (activeTui && previousHardwareCursor !== undefined) {
+			activeTui.setShowHardwareCursor?.(previousHardwareCursor);
+		}
 	};
 }

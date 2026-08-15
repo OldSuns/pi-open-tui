@@ -36,6 +36,7 @@ Run `/open-tui` to open the interactive settings UI. Configuration is stored at 
 {
   "enabled": true,
   "settingsLanguage": "en",
+  "cursorStyle": "block",
   "icons": {
     "mode": "auto"
   },
@@ -64,6 +65,7 @@ Run `/open-tui` to open the interactive settings UI. Configuration is stored at 
 ```
 
 - `settingsLanguage`: language for the `/open-tui` settings UI only; `en` or `zh`
+- `cursorStyle`: editor cursor style; `block` (default), `bar`, or `underline`. The latter two use the terminal's hardware cursor and require a terminal that supports cursor-shape escape sequences.
 - `icons.mode`: `auto` (detect Nerd Font), `nerd` (force Nerd Font glyphs), or `ascii` (plain fallbacks)
 - `footerSegments.sessionName`: shows the current session name next to cwd (off by default); hidden when the session has no name
 - `footerSegments.gitCommit`: shows short hash + tag on detached HEAD (off by default)
