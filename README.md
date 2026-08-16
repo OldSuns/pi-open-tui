@@ -14,7 +14,7 @@ A polished TUI for [Pi](https://pi.dev) coding agent. Combines the best of pi-ha
 - **Working timer** — live elapsed time while the agent is working, done duration when finished
 - **Turn telemetry** — generation speed, TTFT, stalls, tokens, and list-price rate after each complete agent run
 - **Zero prototype patches** — uses public Pi APIs (setHeader/setFooter/setEditorComponent), safe across Pi updates
-- **Interactive settings UI** — `/open-tui` opens a tabbed settings dialog (General / Icons / Footer / Telemetry)
+- **Interactive settings UI** — `/open-tui` opens a tabbed settings dialog (General / Appearance / Footer / Telemetry)
 
 ## Install
 

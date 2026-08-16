@@ -23,7 +23,7 @@ const TABS: Tab[] = ["features", "icons", "segments", "telemetry"];
 const COPY = {
 	en: {
 		title: "Open TUI Settings",
-		tabs: { features: "General", icons: "Icons", segments: "Footer", telemetry: "Telemetry" },
+		tabs: { features: "General", icons: "Appearance", segments: "Footer", telemetry: "Telemetry" },
 		hint: "Tab/Shift+Tab/←/→: tabs · ↑/↓: move · Enter/Space: change · Esc/q: close",
 		labels: {
 			enabled: "Enabled",
@@ -55,7 +55,7 @@ const COPY = {
 	},
 	zh: {
 		title: "Open TUI 设置",
-		tabs: { features: "常规", icons: "图标", segments: "Footer", telemetry: "遥测" },
+		tabs: { features: "常规", icons: "外观", segments: "Footer", telemetry: "遥测" },
 		hint: "Tab/Shift+Tab/←/→：切页 · ↑/↓：移动 · Enter/Space：更改 · Esc/q：关闭",
 		labels: {
 			enabled: "启用",
@@ -132,12 +132,14 @@ function buildFeaturesItems(config: OpenTuiConfig, copy: SettingsCopy): SettingI
 	return [
 		{ id: "enabled", label: copy.labels.enabled, currentValue: config.enabled ? copy.values.on : copy.values.off },
 		{ id: "settingsLanguage", label: copy.labels.language, currentValue: copy.values.languages[config.settingsLanguage] },
-		{ id: "cursorStyle", label: copy.labels.cursorStyle, currentValue: copy.values.cursorStyles[config.cursorStyle] },
 	];
 }
 
 function buildIconsItems(config: OpenTuiConfig, copy: SettingsCopy): SettingItem[] {
-	return [{ id: "mode", label: copy.labels.iconMode, currentValue: copy.values.icons[config.icons.mode] }];
+	return [
+		{ id: "mode", label: copy.labels.iconMode, currentValue: copy.values.icons[config.icons.mode] },
+		{ id: "cursorStyle", label: copy.labels.cursorStyle, currentValue: copy.values.cursorStyles[config.cursorStyle] },
+	];
 }
 
 function buildSegmentsItems(config: OpenTuiConfig, copy: SettingsCopy): SettingItem[] {
@@ -189,9 +191,11 @@ function handleSettingChange(
 	if (tab === "features") {
 		if (itemId === "enabled") return toggleEnabled(config);
 		if (itemId === "settingsLanguage") return toggleLanguage(config);
+	}
+	if (tab === "icons") {
+		if (itemId === "mode") return cycleIconMode(config);
 		if (itemId === "cursorStyle") return cycleCursorStyle(config);
 	}
-	if (tab === "icons" && itemId === "mode") return cycleIconMode(config);
 	if (tab === "segments") {
 		return toggleSetting(config, itemId as keyof OpenTuiConfig["footerSegments"]);
 	}

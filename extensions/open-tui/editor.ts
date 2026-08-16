@@ -19,15 +19,17 @@ const CURSOR_STYLE_SEQUENCES: Partial<Record<CursorStyle, string>> = {
 	bar: "\x1b[6 q",
 	underline: "\x1b[4 q",
 };
+const DEFAULT_CURSOR_STYLE_SEQUENCE = "\x1b[0 q";
 
 function removeSoftwareCursor(line: string): string {
 	return line.replace(/\x1b\[7m([\s\S]*?)\x1b\[0m/g, "$1");
 }
 
 function configureCursor(tui: TUI, cursorStyle: CursorStyle): void {
-	tui.setShowHardwareCursor?.(cursorStyle !== "block");
+	if (cursorStyle === "block") return;
+	tui.setShowHardwareCursor(true);
 	const sequence = CURSOR_STYLE_SEQUENCES[cursorStyle];
-	if (sequence) tui.terminal.write?.(sequence);
+	if (sequence) tui.terminal.write(sequence);
 }
 
 function roundedBorder(
@@ -127,13 +129,14 @@ export function installEditor(
 
 	ctx.ui.setEditorComponent((tui, editorTheme, keybindings) => {
 		activeTui = tui;
-		previousHardwareCursor = tui.getShowHardwareCursor?.();
+		previousHardwareCursor = tui.getShowHardwareCursor();
 		return new OpenTuiEditor(tui, editorTheme, keybindings, cursorStyle);
 	});
 	return () => {
 		ctx.ui.setEditorComponent(undefined);
-		if (activeTui && previousHardwareCursor !== undefined) {
-			activeTui.setShowHardwareCursor?.(previousHardwareCursor);
+		if (activeTui) {
+			if (cursorStyle !== "block") activeTui.terminal.write(DEFAULT_CURSOR_STYLE_SEQUENCE);
+			if (previousHardwareCursor !== undefined) activeTui.setShowHardwareCursor(previousHardwareCursor);
 		}
 	};
 }

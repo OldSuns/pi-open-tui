@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { KeybindingsManager } from "@earendil-works/pi-coding-agent";
 import type { EditorTheme, TUI } from "@earendil-works/pi-tui";
-import { OpenTuiEditor } from "../extensions/open-tui/editor.ts";
+import { installEditor, OpenTuiEditor } from "../extensions/open-tui/editor.ts";
 import { stripAnsi } from "../extensions/open-tui/utils.ts";
 
 const tui = {
@@ -66,6 +66,53 @@ test("uses the terminal hardware cursor for non-block styles", () => {
 		assert.ok(writes.includes(sequence), `${cursorStyle} cursor sequence was sent`);
 		assert.ok(lines.every((line) => !line.includes("\x1b[7m")), "software block cursor was removed");
 	}
+});
+
+test("preserves block hardware cursor settings", () => {
+	let changes = 0;
+	const hardwareTui = {
+		...tui,
+		getShowHardwareCursor: () => true,
+		setShowHardwareCursor: () => changes++,
+	} as unknown as TUI;
+
+	new OpenTuiEditor(
+		hardwareTui,
+		editorTheme,
+		{ matches: () => false } as unknown as KeybindingsManager,
+		"block",
+	);
+
+	assert.equal(changes, 0);
+});
+
+test("restores cursor shape and visibility when the editor is removed", () => {
+	const writes: string[] = [];
+	const visibility: boolean[] = [];
+	const hardwareTui = {
+		...tui,
+		terminal: {
+			rows: 24,
+			write: (data: string) => writes.push(data),
+		},
+		getShowHardwareCursor: () => false,
+		setShowHardwareCursor: (enabled: boolean) => visibility.push(enabled),
+	} as unknown as TUI;
+	const ctx = {
+		ui: {
+			setEditorComponent: (factory: unknown) => {
+				if (typeof factory === "function") {
+					factory(hardwareTui, editorTheme, { matches: () => false });
+				}
+			},
+		},
+	} as unknown as import("@earendil-works/pi-coding-agent").ExtensionContext;
+
+	const cleanup = installEditor({} as import("@earendil-works/pi-coding-agent").ExtensionAPI, ctx, "bar");
+	cleanup();
+
+	assert.ok(writes.includes("\x1b[0 q"), "cursor shape was reset");
+	assert.deepEqual(visibility, [true, false]);
 });
 
 test("frame recolors via borderColor (bash mode / thinking level hook)", () => {
