@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { KeybindingsManager } from "@earendil-works/pi-coding-agent";
-import type { EditorTheme, TUI } from "@earendil-works/pi-tui";
+import { TUI, type EditorTheme, type Terminal } from "@earendil-works/pi-tui";
 import { installEditor, OpenTuiEditor } from "../extensions/open-tui/editor.ts";
 import { stripAnsi } from "../extensions/open-tui/utils.ts";
 
@@ -68,6 +68,43 @@ test("uses the terminal hardware cursor for non-block styles", () => {
 	}
 });
 
+test("shows a hardware cursor while previewing a non-block style under an overlay", () => {
+	const cursorEvents: string[] = [];
+	const terminal = {
+		columns: 80,
+		rows: 24,
+		kittyProtocolActive: false,
+		start() {},
+		stop() {},
+		write() {},
+		hideCursor: () => cursorEvents.push("hide"),
+		showCursor: () => cursorEvents.push("show"),
+	} as unknown as Terminal;
+	const overlayTui = new TUI(terminal, false);
+	const editor = new OpenTuiEditor(
+		overlayTui,
+		editorTheme,
+		{ matches: () => false } as unknown as KeybindingsManager,
+	);
+	overlayTui.addChild(editor);
+	overlayTui.setFocus(editor);
+	overlayTui.showOverlay({ render: () => ["settings"], invalidate() {} });
+	cursorEvents.length = 0;
+
+	editor.setCursorStyle("bar");
+	(overlayTui as unknown as { doRender(): void }).doRender();
+
+	assert.equal(cursorEvents.at(-1), "show");
+
+	overlayTui.hideOverlay();
+	(overlayTui as unknown as { doRender(): void }).doRender();
+	overlayTui.showOverlay({ render: () => ["other overlay"], invalidate() {} });
+	cursorEvents.length = 0;
+	(overlayTui as unknown as { doRender(): void }).doRender();
+	assert.equal(cursorEvents.at(-1), "hide");
+	overlayTui.stop();
+});
+
 test("preserves block hardware cursor settings", () => {
 	let changes = 0;
 	const hardwareTui = {
@@ -108,8 +145,8 @@ test("restores cursor shape and visibility when the editor is removed", () => {
 		},
 	} as unknown as import("@earendil-works/pi-coding-agent").ExtensionContext;
 
-	const cleanup = installEditor({} as import("@earendil-works/pi-coding-agent").ExtensionAPI, ctx, "bar");
-	cleanup();
+	const editor = installEditor({} as import("@earendil-works/pi-coding-agent").ExtensionAPI, ctx, "bar");
+	editor.cleanup();
 
 	assert.ok(writes.includes("\x1b[0 q"), "cursor shape was reset");
 	assert.deepEqual(visibility, [true, false]);

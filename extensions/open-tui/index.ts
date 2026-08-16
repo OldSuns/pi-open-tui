@@ -1,5 +1,5 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { type CursorStyle, type OpenTuiConfig, DEFAULT_CONFIG, ensureConfigExists, loadConfig, saveConfig } from "./config.ts";
+import { type OpenTuiConfig, DEFAULT_CONFIG, ensureConfigExists, loadConfig, saveConfig } from "./config.ts";
 import { installEditor } from "./editor.ts";
 import { installFooter } from "./footer.ts";
 import { installHeader } from "./header.ts";
@@ -26,21 +26,11 @@ function isInteractiveLaunch(): boolean {
 	return true;
 }
 
-type PendingUiChange = "install" | "uninstall" | "reinstall";
+type PendingUiChange = "install" | "uninstall";
 
-export function getPendingUiChange(
-	wasEnabled: boolean,
-	enabled: boolean,
-	cursorStyle: CursorStyle,
-	active: boolean,
-	installedCursorStyle: CursorStyle | undefined,
-): PendingUiChange | undefined {
-	if (wasEnabled !== enabled) {
-		if (!enabled) return "uninstall";
-		return active && installedCursorStyle !== cursorStyle ? "reinstall" : "install";
-	}
-	if (enabled && active && installedCursorStyle !== cursorStyle) return "reinstall";
-	return undefined;
+export function getPendingUiChange(enabled: boolean, active: boolean): PendingUiChange | undefined {
+	if (enabled === active) return undefined;
+	return enabled ? "install" : "uninstall";
 }
 
 function clearVisibleScreen(): void {
@@ -70,9 +60,8 @@ export default function (pi: ExtensionAPI) {
 	let workingTimer: ReturnType<typeof setInterval> | undefined;
 	let cleanupHeader: (() => void) | undefined;
 	let cleanupFooter: (() => void) | undefined;
-	let cleanupEditor: (() => void) | undefined;
+	let editor: ReturnType<typeof installEditor> | undefined;
 	let pendingUiChange: PendingUiChange | undefined;
-	let installedCursorStyle: CursorStyle | undefined;
 
 	const getThinkingLevel = () => (sessionLifecycle.isCurrent() ? pi.getThinkingLevel() : "off");
 
@@ -98,8 +87,7 @@ export default function (pi: ExtensionAPI) {
 					},
 				},
 			);
-			cleanupEditor = installEditor(pi, ctx, config.cursorStyle);
-			installedCursorStyle = config.cursorStyle;
+			editor = installEditor(pi, ctx, config.cursorStyle);
 			active = true;
 		}
 	};
@@ -109,12 +97,11 @@ export default function (pi: ExtensionAPI) {
 		if (active) {
 			cleanupHeader?.();
 			cleanupFooter?.();
-			cleanupEditor?.();
+			editor?.cleanup();
 			cleanupHeader = undefined;
 			cleanupFooter = undefined;
-			cleanupEditor = undefined;
+			editor = undefined;
 			requestFooterRender = undefined;
-			installedCursorStyle = undefined;
 			active = false;
 		}
 	};
@@ -285,22 +272,14 @@ export default function (pi: ExtensionAPI) {
 	registerSettingsCommand(pi, {
 		getConfig: () => config,
 		onConfigChanged: (newConfig) => {
-			const wasEnabled = config.enabled;
+			const cursorStyleChanged = config.cursorStyle !== newConfig.cursorStyle;
 			saveConfig(newConfig);
 			config = newConfig;
+			if (cursorStyleChanged && active && editor) {
+				editor.setCursorStyle(newConfig.cursorStyle);
+			}
 			if (lastCtx) {
-				const nextUiChange = getPendingUiChange(
-					wasEnabled,
-					newConfig.enabled,
-					newConfig.cursorStyle,
-					active,
-					installedCursorStyle,
-				);
-				if (wasEnabled !== newConfig.enabled) {
-					pendingUiChange = nextUiChange;
-				} else if (nextUiChange) {
-					pendingUiChange = nextUiChange;
-				}
+				pendingUiChange = getPendingUiChange(newConfig.enabled, active);
 			}
 			const gitNeeded = newConfig.footerSegments.gitBranch || newConfig.footerSegments.gitStatus || newConfig.footerSegments.gitCommit;
 			if (lastCtx && gitNeeded) {
@@ -316,10 +295,6 @@ export default function (pi: ExtensionAPI) {
 			pendingUiChange = undefined;
 			if (!config.enabled || change === "uninstall") {
 				uninstallUi(lastCtx);
-			} else if (change === "reinstall") {
-				cleanupEditor?.();
-				cleanupEditor = installEditor(pi, lastCtx, config.cursorStyle);
-				installedCursorStyle = config.cursorStyle;
 			} else {
 				applyUi(lastCtx);
 			}

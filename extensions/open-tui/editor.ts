@@ -5,7 +5,7 @@ import {
 	type KeybindingsManager,
 } from "@earendil-works/pi-coding-agent";
 import type { EditorTheme, TUI } from "@earendil-works/pi-tui";
-import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import { CURSOR_MARKER, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import type { CursorStyle } from "./config.ts";
 import { findBottomBorderIndex, isEditorBorderLine, stripAnsi } from "./utils.ts";
 
@@ -21,8 +21,12 @@ const CURSOR_STYLE_SEQUENCES: Partial<Record<CursorStyle, string>> = {
 };
 const DEFAULT_CURSOR_STYLE_SEQUENCE = "\x1b[0 q";
 
-function removeSoftwareCursor(line: string): string {
-	return line.replace(/\x1b\[7m([\s\S]*?)\x1b\[0m/g, "$1");
+function removeSoftwareCursor(line: string, cursorMarker = ""): string {
+	return line.replace(/\x1b\[7m([\s\S]*?)\x1b\[0m/g, (_match, cursor: string) => {
+		const replacement = `${cursorMarker}${cursor}`;
+		cursorMarker = "";
+		return replacement;
+	});
 }
 
 function configureCursor(tui: TUI, cursorStyle: CursorStyle): void {
@@ -57,7 +61,8 @@ function roundedBorder(
 export class OpenTuiEditor extends CustomEditor {
 	private readonly getRail: () => string;
 	private readonly getBorder: (s: string) => string;
-	private readonly cursorStyle: CursorStyle;
+	private cursorStyle: CursorStyle;
+	private previewHardwareCursor = false;
 
 	constructor(
 		tui: TUI,
@@ -80,11 +85,34 @@ export class OpenTuiEditor extends CustomEditor {
 		super.setPaddingX(0);
 	}
 
+	setCursorStyle(cursorStyle: CursorStyle, blockHardwareCursor = false): void {
+		const styleChanged = cursorStyle !== this.cursorStyle;
+		this.previewHardwareCursor = cursorStyle !== "block";
+		this.cursorStyle = cursorStyle;
+		if (styleChanged) {
+			if (cursorStyle === "block") {
+				this.tui.terminal.write(DEFAULT_CURSOR_STYLE_SEQUENCE);
+				this.tui.setShowHardwareCursor(blockHardwareCursor);
+			} else {
+				configureCursor(this.tui, cursorStyle);
+			}
+		}
+		this.tui.requestRender();
+	}
+
 	private renderBase(width: number): string[] {
 		const renderedLines = super.render(width);
-		return this.cursorStyle === "block"
-			? renderedLines
-			: renderedLines.map(removeSoftwareCursor);
+		if (this.cursorStyle === "block") return renderedLines;
+
+		// A focused overlay suppresses the editor's cursor marker. Preserve its
+		// position only for the live settings preview, then clear it on refocus.
+		let cursorMarker = this.previewHardwareCursor && !this.focused ? CURSOR_MARKER : "";
+		if (this.focused) this.previewHardwareCursor = false;
+		return renderedLines.map((line) => {
+			const rendered = removeSoftwareCursor(line, cursorMarker);
+			if (rendered !== line) cursorMarker = "";
+			return rendered;
+		});
 	}
 
 	render(width: number): string[] {
@@ -123,20 +151,29 @@ export function installEditor(
 	_pi: ExtensionAPI,
 	ctx: ExtensionContext,
 	cursorStyle: CursorStyle = "block",
-): () => void {
+) {
 	let activeTui: TUI | undefined;
+	let activeEditor: OpenTuiEditor | undefined;
 	let previousHardwareCursor: boolean | undefined;
+	let currentCursorStyle = cursorStyle;
 
 	ctx.ui.setEditorComponent((tui, editorTheme, keybindings) => {
 		activeTui = tui;
 		previousHardwareCursor = tui.getShowHardwareCursor();
-		return new OpenTuiEditor(tui, editorTheme, keybindings, cursorStyle);
+		activeEditor = new OpenTuiEditor(tui, editorTheme, keybindings, currentCursorStyle);
+		return activeEditor;
 	});
-	return () => {
-		ctx.ui.setEditorComponent(undefined);
-		if (activeTui) {
-			if (cursorStyle !== "block") activeTui.terminal.write(DEFAULT_CURSOR_STYLE_SEQUENCE);
-			if (previousHardwareCursor !== undefined) activeTui.setShowHardwareCursor(previousHardwareCursor);
-		}
+	return {
+		setCursorStyle(nextCursorStyle: CursorStyle): void {
+			currentCursorStyle = nextCursorStyle;
+			activeEditor?.setCursorStyle(nextCursorStyle, previousHardwareCursor);
+		},
+		cleanup(): void {
+			ctx.ui.setEditorComponent(undefined);
+			if (activeTui) {
+				if (currentCursorStyle !== "block") activeTui.terminal.write(DEFAULT_CURSOR_STYLE_SEQUENCE);
+				if (previousHardwareCursor !== undefined) activeTui.setShowHardwareCursor(previousHardwareCursor);
+			}
+		},
 	};
 }

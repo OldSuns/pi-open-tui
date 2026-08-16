@@ -6,6 +6,7 @@ import test from "node:test";
 import type { ExtensionAPI, ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
 import { visibleWidth, type Component, type KeybindingsManager, type TUI } from "@earendil-works/pi-tui";
 import { DEFAULT_CONFIG, loadConfig, type OpenTuiConfig } from "../extensions/open-tui/config.ts";
+import { installEditor } from "../extensions/open-tui/editor.ts";
 import { getPendingUiChange } from "../extensions/open-tui/index.ts";
 import { registerSettingsCommand } from "../extensions/open-tui/settings-command.ts";
 
@@ -19,7 +20,10 @@ const theme = {
 	bold: (text: string) => text,
 } as Theme;
 
-async function openSettings(initialConfig = structuredClone(DEFAULT_CONFIG)): Promise<{
+async function openSettings(
+	initialConfig = structuredClone(DEFAULT_CONFIG),
+	onChange?: (config: OpenTuiConfig) => void,
+): Promise<{
 	component: SettingsComponent;
 	getConfig: () => OpenTuiConfig;
 	isClosed: () => boolean;
@@ -42,6 +46,7 @@ async function openSettings(initialConfig = structuredClone(DEFAULT_CONFIG)): Pr
 		getConfig: () => config,
 		onConfigChanged: (nextConfig) => {
 			config = nextConfig;
+			onChange?.(nextConfig);
 		},
 		onOverlayClosed: () => {
 			overlayClosed = true;
@@ -105,23 +110,66 @@ test("closes cleanly after enabling or disabling the UI", async () => {
 	}
 });
 
-test("cycles cursor style from the Appearance tab", async () => {
-	const settings = await openSettings();
+test("previews cursor styles from the Appearance tab", async () => {
+	const writes: string[] = [];
+	let editorInstalls = 0;
+	let hardwareCursor = false;
+	const editorTui = {
+		terminal: { rows: 24, write: (data: string) => writes.push(data) },
+		requestRender() {},
+		getShowHardwareCursor: () => hardwareCursor,
+		setShowHardwareCursor: (enabled: boolean) => {
+			hardwareCursor = enabled;
+		},
+	} as unknown as TUI;
+	const editor = installEditor({} as ExtensionAPI, {
+		ui: {
+			setEditorComponent: (factory: unknown) => {
+				editorInstalls++;
+				if (typeof factory === "function") {
+					factory(editorTui, {
+						borderColor: (text: string) => text,
+						selectList: {},
+					}, { matches: () => false });
+				}
+			},
+		},
+	} as unknown as ExtensionContext);
+	const settings = await openSettings(undefined, (config) => editor.setCursorStyle(config.cursorStyle));
 
 	settings.component.handleInput("\t");
 	settings.component.handleInput("\x1b[B");
 	settings.component.handleInput("\r");
 
 	assert.equal(settings.getConfig().cursorStyle, "bar");
+	assert.equal(settings.isClosed(), false);
+	assert.equal(editorInstalls, 1);
+	assert.equal(hardwareCursor, true);
+	assert.ok(writes.includes("\x1b[6 q"));
+
+	settings.component.handleInput("\r");
+	assert.equal(settings.getConfig().cursorStyle, "underline");
+	assert.ok(writes.includes("\x1b[4 q"));
+
+	settings.component.handleInput("\r");
+	assert.equal(settings.getConfig().cursorStyle, "block");
+	assert.equal(hardwareCursor, false);
+	assert.ok(writes.includes("\x1b[0 q"));
+	assert.equal(editorInstalls, 1);
 	assert.match(selectedLine(settings.component), /Cursor style/);
 	assert.match(settings.component.render(80).join("\n"), /\[Appearance\].*Icon mode.*Cursor style/s);
+
+	settings.component.handleInput("q");
+	await settings.waitForClose();
+	assert.equal(settings.isOverlayClosed(), true);
+	editor.cleanup();
 });
 
-test("reconciles enabled and cursor style changes from the final config", () => {
-	assert.equal(getPendingUiChange(true, false, "block", true, "block"), "uninstall");
-	assert.equal(getPendingUiChange(false, false, "bar", true, "block"), undefined);
-	assert.equal(getPendingUiChange(false, true, "bar", true, "block"), "reinstall");
-	assert.equal(getPendingUiChange(false, true, "bar", false, undefined), "install");
+test("reconciles enabled changes with the installed UI", () => {
+	assert.equal(getPendingUiChange(true, false), "install");
+	assert.equal(getPendingUiChange(false, true), "uninstall");
+	assert.equal(getPendingUiChange(true, true), undefined);
+	assert.equal(getPendingUiChange(false, false), undefined);
 });
 
 test("keeps the changed setting selected", async () => {
