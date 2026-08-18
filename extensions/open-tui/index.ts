@@ -87,7 +87,7 @@ export default function (pi: ExtensionAPI) {
 					},
 				},
 			);
-			editor = installEditor(pi, ctx, config.cursorStyle);
+			editor = installEditor(pi, ctx, config.cursorStyle, config.fullscreen.wheelScrollLines);
 			active = true;
 		}
 	};
@@ -273,10 +273,14 @@ export default function (pi: ExtensionAPI) {
 		getConfig: () => config,
 		onConfigChanged: (newConfig) => {
 			const cursorStyleChanged = config.cursorStyle !== newConfig.cursorStyle;
+			const wheelScrollLinesChanged = config.fullscreen.wheelScrollLines !== newConfig.fullscreen.wheelScrollLines;
 			saveConfig(newConfig);
 			config = newConfig;
 			if (cursorStyleChanged && active && editor) {
 				editor.setCursorStyle(newConfig.cursorStyle);
+			}
+			if (wheelScrollLinesChanged && active && editor) {
+				editor.setWheelScrollLines(newConfig.fullscreen.wheelScrollLines);
 			}
 			if (lastCtx) {
 				pendingUiChange = getPendingUiChange(newConfig.enabled, active);

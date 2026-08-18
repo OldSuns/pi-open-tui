@@ -14,7 +14,7 @@ A polished terminal interface for the [Pi](https://pi.dev) coding agent. It brin
 - **Project awareness** for 50+ runtimes and detailed Git states, including ahead/behind, staged, modified, untracked, stashed, and detached HEAD
 - **Turn telemetry** for TPS, time to first token (TTFT), duration, stalls, tokens, and list-price rate
 - **Interactive settings** through `/open-tui`, available in English and Simplified Chinese
-- **Public Pi APIs only**: no prototype patching
+- **Version-guarded Pi compatibility shim**: fullscreen wheel speed falls back to Pi's default if its runtime support changes
 
 ## Requirements
 
@@ -57,6 +57,9 @@ Run `/open-tui` to open the settings dialog. It provides **General**, **Appearan
   "enabled": true,
   "settingsLanguage": "en",
   "cursorStyle": "block",
+  "fullscreen": {
+    "wheelScrollLines": 4
+  },
   "icons": {
     "mode": "auto"
   },
@@ -90,11 +93,14 @@ Key options:
 | --- | --- | --- |
 | `settingsLanguage` | `en`, `zh` | Changes the `/open-tui` interface language |
 | `cursorStyle` | `block`, `bar`, `underline` | `bar` and `underline` require terminal cursor-shape support |
+| `fullscreen.wheelScrollLines` | `1`-`10` | Lines scrolled per mouse-wheel notch in fullscreen mode; defaults to `4`. `/open-tui` cycles through `1`, `4`, `7`, and `10` for quick switching |
 | `icons.mode` | `auto`, `nerd`, `ascii` | Controls footer and telemetry icons |
 | `footerSegments` | Boolean flags | Shows or hides individual footer data |
 | `telemetry` | Boolean flags | Enables telemetry and its individual measurements |
 
 `sessionName` appears only when the session has a name. `gitCommit` shows the short hash and tag in detached HEAD state. Disabling `extensionStatuses` hides the entire extension status line, including MCP status.
+
+Fullscreen wheel speed uses an isolated compatibility shim for Pi 0.84.2's runtime field because Pi does not yet expose a public setter. On Pi versions without a compatible field, the setting is ignored and Pi's default scrolling remains active.
 
 ## Turn telemetry
 

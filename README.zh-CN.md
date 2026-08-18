@@ -14,7 +14,7 @@
 - **项目环境感知**：识别 50 多种运行环境，并展示 ahead/behind、已暂存、已修改、未跟踪、stash 和 detached HEAD 等 Git 状态
 - **单轮遥测**：展示 TPS、首 Token 延迟（TTFT）、耗时、停顿、Token 数量和模型标价速率
 - **交互式设置**：通过 `/open-tui` 配置，并支持英文和简体中文界面
-- **仅使用 Pi 公共 API**：不修改原型，降低 Pi 升级带来的兼容风险
+- **带版本保护的 Pi 兼容层**：全屏滚轮速度所依赖的运行时支持发生变化时，会回退为 Pi 默认行为
 
 ## 环境要求
 
@@ -57,6 +57,9 @@ pi -e npm:pi-open-tui
   "enabled": true,
   "settingsLanguage": "zh",
   "cursorStyle": "block",
+  "fullscreen": {
+    "wheelScrollLines": 4
+  },
   "icons": {
     "mode": "auto"
   },
@@ -90,11 +93,14 @@ pi -e npm:pi-open-tui
 | --- | --- | --- |
 | `settingsLanguage` | `en`、`zh` | 切换 `/open-tui` 设置界面的语言 |
 | `cursorStyle` | `block`、`bar`、`underline` | `bar` 和 `underline` 需要终端支持光标形状转义序列 |
+| `fullscreen.wheelScrollLines` | `1`-`10` | 全屏模式下滚轮每格滚动的行数，默认值为 `4`；`/open-tui` 使用 `1`、`4`、`7`、`10` 四档快速切换 |
 | `icons.mode` | `auto`、`nerd`、`ascii` | 控制底栏和遥测通知使用的图标 |
 | `footerSegments` | 布尔开关 | 分别控制底栏中的各项数据 |
 | `telemetry` | 布尔开关 | 控制遥测总开关和各项指标 |
 
 `sessionName` 仅在会话有名称时显示；`gitCommit` 会在 detached HEAD 状态下显示短哈希和标签；关闭 `extensionStatuses` 会隐藏整行扩展状态，其中也包括 MCP 状态。
+
+全屏滚轮速度通过隔离的兼容层写入 Pi 0.84.2 的运行时字段，因为 Pi 尚未提供公开 setter。若后续 Pi 版本不再包含兼容字段，该设置会被忽略并继续使用 Pi 的默认滚动行为。
 
 ## 单轮遥测
 

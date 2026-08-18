@@ -10,6 +10,8 @@ import {
 } from "@earendil-works/pi-tui";
 import type { CursorStyle, IconMode, OpenTuiConfig, SettingsLanguage } from "./config.ts";
 
+const WHEEL_SCROLL_PRESETS = [1, 4, 7, 10] as const;
+
 interface SettingItem {
 	id: string;
 	label: string;
@@ -28,6 +30,7 @@ const COPY = {
 		labels: {
 			enabled: "Enabled",
 			language: "Language",
+			wheelScrollLines: "Mouse wheel speed",
 			cursorStyle: "Cursor style",
 			iconMode: "Icon mode",
 			cwd: "CWD",
@@ -49,6 +52,7 @@ const COPY = {
 			on: "On",
 			off: "Off",
 			languages: { en: "English", zh: "简体中文" },
+			wheelLines: (count: number) => `${count} ${count === 1 ? "line" : "lines"} / notch`,
 			cursorStyles: { block: "Block", bar: "Bar", underline: "Underline" },
 			icons: { auto: "Auto", nerd: "Nerd", ascii: "ASCII" },
 		},
@@ -60,6 +64,7 @@ const COPY = {
 		labels: {
 			enabled: "启用",
 			language: "语言",
+			wheelScrollLines: "鼠标滚轮速度",
 			cursorStyle: "光标样式",
 			iconMode: "图标模式",
 			cwd: "当前目录",
@@ -81,6 +86,7 @@ const COPY = {
 			on: "开启",
 			off: "关闭",
 			languages: { en: "English", zh: "简体中文" },
+			wheelLines: (count: number) => `每格 ${count} 行`,
 			cursorStyles: { block: "块", bar: "竖线", underline: "下划线" },
 			icons: { auto: "自动", nerd: "Nerd", ascii: "ASCII" },
 		},
@@ -121,6 +127,12 @@ function cycleCursorStyle(config: OpenTuiConfig): OpenTuiConfig {
 	return { ...config, cursorStyle: next };
 }
 
+function cycleWheelScrollLines(config: OpenTuiConfig): OpenTuiConfig {
+	const current = config.fullscreen.wheelScrollLines;
+	const wheelScrollLines = WHEEL_SCROLL_PRESETS.find((value) => value > current) ?? WHEEL_SCROLL_PRESETS[0];
+	return { ...config, fullscreen: { ...config.fullscreen, wheelScrollLines } };
+}
+
 function toggleTelemetry(config: OpenTuiConfig, key: keyof OpenTuiConfig["telemetry"]): OpenTuiConfig {
 	return {
 		...config,
@@ -132,6 +144,11 @@ function buildFeaturesItems(config: OpenTuiConfig, copy: SettingsCopy): SettingI
 	return [
 		{ id: "enabled", label: copy.labels.enabled, currentValue: config.enabled ? copy.values.on : copy.values.off },
 		{ id: "settingsLanguage", label: copy.labels.language, currentValue: copy.values.languages[config.settingsLanguage] },
+		{
+			id: "wheelScrollLines",
+			label: copy.labels.wheelScrollLines,
+			currentValue: copy.values.wheelLines(config.fullscreen.wheelScrollLines),
+		},
 	];
 }
 
@@ -191,6 +208,7 @@ function handleSettingChange(
 	if (tab === "features") {
 		if (itemId === "enabled") return toggleEnabled(config);
 		if (itemId === "settingsLanguage") return toggleLanguage(config);
+		if (itemId === "wheelScrollLines") return cycleWheelScrollLines(config);
 	}
 	if (tab === "icons") {
 		if (itemId === "mode") return cycleIconMode(config);

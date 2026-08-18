@@ -7,6 +7,10 @@ import {
 import type { EditorTheme, TUI } from "@earendil-works/pi-tui";
 import { CURSOR_MARKER, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import type { CursorStyle } from "./config.ts";
+import {
+	applyFullscreenWheelScrollLines,
+	DEFAULT_FULLSCREEN_WHEEL_SCROLL_LINES,
+} from "./fullscreen-scroll.ts";
 import { findBottomBorderIndex, isEditorBorderLine, stripAnsi } from "./utils.ts";
 
 function fillLine(content: string, width: number): string {
@@ -151,14 +155,17 @@ export function installEditor(
 	_pi: ExtensionAPI,
 	ctx: ExtensionContext,
 	cursorStyle: CursorStyle = "block",
+	wheelScrollLines = DEFAULT_FULLSCREEN_WHEEL_SCROLL_LINES,
 ) {
 	let activeTui: TUI | undefined;
 	let activeEditor: OpenTuiEditor | undefined;
 	let previousHardwareCursor: boolean | undefined;
 	let currentCursorStyle = cursorStyle;
+	let currentWheelScrollLines = wheelScrollLines;
 
 	ctx.ui.setEditorComponent((tui, editorTheme, keybindings) => {
 		activeTui = tui;
+		applyFullscreenWheelScrollLines(tui, currentWheelScrollLines);
 		previousHardwareCursor = tui.getShowHardwareCursor();
 		activeEditor = new OpenTuiEditor(tui, editorTheme, keybindings, currentCursorStyle);
 		return activeEditor;
@@ -167,6 +174,10 @@ export function installEditor(
 		setCursorStyle(nextCursorStyle: CursorStyle): void {
 			currentCursorStyle = nextCursorStyle;
 			activeEditor?.setCursorStyle(nextCursorStyle, previousHardwareCursor);
+		},
+		setWheelScrollLines(nextWheelScrollLines: number): void {
+			currentWheelScrollLines = nextWheelScrollLines;
+			if (activeTui) applyFullscreenWheelScrollLines(activeTui, currentWheelScrollLines);
 		},
 		cleanup(): void {
 			ctx.ui.setEditorComponent(undefined);

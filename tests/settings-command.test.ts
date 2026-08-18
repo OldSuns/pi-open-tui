@@ -110,6 +110,27 @@ test("closes cleanly after enabling or disabling the UI", async () => {
 	}
 });
 
+test("updates fullscreen mouse wheel speed while settings stay open", async () => {
+	const applied: number[] = [];
+	const settings = await openSettings(undefined, (config) => {
+		applied.push(config.fullscreen.wheelScrollLines);
+	});
+
+	settings.component.handleInput("\x1b[B");
+	settings.component.handleInput("\x1b[B");
+	assert.match(selectedLine(settings.component), /Mouse wheel speed/);
+
+	settings.component.handleInput(" ");
+	assert.equal(settings.getConfig().fullscreen.wheelScrollLines, 7);
+	assert.deepEqual(applied, [7]);
+	assert.equal(settings.isClosed(), false);
+	assert.match(selectedLine(settings.component), /Mouse wheel speed/);
+
+	settings.component.handleInput("\r");
+	settings.component.handleInput("\r");
+	assert.equal(settings.getConfig().fullscreen.wheelScrollLines, 1);
+});
+
 test("previews cursor styles from the Appearance tab", async () => {
 	const writes: string[] = [];
 	let editorInstalls = 0;
