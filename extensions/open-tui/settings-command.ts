@@ -10,7 +10,7 @@ import {
 } from "@earendil-works/pi-tui";
 import type { CursorStyle, IconMode, OpenTuiConfig, SettingsLanguage } from "./config.ts";
 
-const WHEEL_SCROLL_PRESETS = [1, 4, 7, 10] as const;
+const WHEEL_SCROLL_PRESETS = [1, 2, 3, 4, 7, 10] as const;
 
 interface SettingItem {
 	id: string;

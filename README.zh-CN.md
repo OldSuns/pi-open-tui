@@ -93,7 +93,7 @@ pi -e npm:pi-open-tui
 | --- | --- | --- |
 | `settingsLanguage` | `en`、`zh` | 切换 `/open-tui` 设置界面的语言 |
 | `cursorStyle` | `block`、`bar`、`underline` | `bar` 和 `underline` 需要终端支持光标形状转义序列 |
-| `fullscreen.wheelScrollLines` | `1`-`10` | 全屏模式下滚轮每格滚动的行数，默认值为 `4`；`/open-tui` 使用 `1`、`4`、`7`、`10` 四档快速切换 |
+| `fullscreen.wheelScrollLines` | `1`-`10` | 全屏模式下滚轮每格滚动的行数，默认值为 `4`；`/open-tui` 使用 `1`、`2`、`3`、`4`、`7`、`10` 快速切换 |
 | `icons.mode` | `auto`、`nerd`、`ascii` | 控制底栏和遥测通知使用的图标 |
 | `footerSegments` | 布尔开关 | 分别控制底栏中的各项数据 |
 | `telemetry` | 布尔开关 | 控制遥测总开关和各项指标 |

@@ -127,8 +127,13 @@ test("updates fullscreen mouse wheel speed while settings stay open", async () =
 	assert.match(selectedLine(settings.component), /Mouse wheel speed/);
 
 	settings.component.handleInput("\r");
+	assert.equal(settings.getConfig().fullscreen.wheelScrollLines, 10);
 	settings.component.handleInput("\r");
 	assert.equal(settings.getConfig().fullscreen.wheelScrollLines, 1);
+	settings.component.handleInput("\r");
+	assert.equal(settings.getConfig().fullscreen.wheelScrollLines, 2);
+	settings.component.handleInput("\r");
+	assert.equal(settings.getConfig().fullscreen.wheelScrollLines, 3);
 });
 
 test("previews cursor styles from the Appearance tab", async () => {
