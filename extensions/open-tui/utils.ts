@@ -55,6 +55,10 @@ export function truncatePath(path: string, maxLen: number): string {
 	return result.length > maxLen ? result.slice(0, maxLen - 3) + "..." : result;
 }
 
+export function finiteOrZero(value: unknown): number {
+	return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
 export function fmtTokens(n: number): string {
 	if (n < 1000) return n.toString();
 	if (n < 10_000) return `${(n / 1000).toFixed(1)}k`;

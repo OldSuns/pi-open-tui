@@ -10,7 +10,7 @@ import { DEFAULT_CONFIG } from "../extensions/open-tui/config.ts";
 import { installFooter } from "../extensions/open-tui/footer.ts";
 import { emptyGitStatus } from "../extensions/open-tui/git.ts";
 import { resolveGlyphs } from "../extensions/open-tui/icons.ts";
-import type { FooterState } from "../extensions/open-tui/state.ts";
+import { getUsageTotals, invalidateUsageCache, type FooterState } from "../extensions/open-tui/state.ts";
 import { fitSegmentsByPriority, truncateBranch, truncatePath } from "../extensions/open-tui/utils.ts";
 
 const theme = {
@@ -173,6 +173,27 @@ test("both icon modes provide every footer semantic", () => {
 		const glyphs = resolveGlyphs(mode);
 		for (const key of keys) assert.notEqual(glyphs[key], "", `${mode}.${key}`);
 	}
+});
+
+test("normalizes invalid usage totals", () => {
+	const usage = {
+		input: Number.POSITIVE_INFINITY,
+		output: undefined,
+		cacheRead: 100,
+		cacheWrite: null,
+		cost: { total: Number.NaN },
+	};
+	const ctx = {
+		sessionManager: {
+			getEntries: () => [{ id: "invalid-usage", timestamp: 1, type: "message", message: { role: "assistant", usage } }],
+		},
+	} as unknown as ExtensionContext;
+
+	invalidateUsageCache();
+	assert.deepEqual(getUsageTotals(ctx), {
+		input: 0, output: 0, cacheRead: 100, cacheWrite: 0, cost: 0, latestCacheHitRate: 100,
+	});
+	invalidateUsageCache();
 });
 
 test("ASCII footer renders icons as semantic labels", () => {

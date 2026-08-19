@@ -11,7 +11,7 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import type { IconMode, TelemetryConfig } from "./config.ts";
 import { resolveGlyphs } from "./icons.ts";
-import { fmtTokens, formatDuration } from "./utils.ts";
+import { finiteOrZero, fmtTokens, formatDuration } from "./utils.ts";
 
 const STALL_THRESHOLD_MS = 1000;
 
@@ -168,7 +168,7 @@ export class TurnTelemetryTracker {
 		if (current) {
 			const endMs = this.now();
 			turn.generationMs = endMs - turn.startMs;
-			if (current.firstOutputMs === null && message.usage.output > 0) {
+			if (current.firstOutputMs === null && finiteOrZero(message.usage?.output) > 0) {
 				turn.firstTokenMs ??= endMs;
 			}
 			turn.currentMessage = null;
@@ -193,13 +193,10 @@ export class TurnTelemetryTracker {
 		let totalTokens = 0;
 		let costUsd = 0;
 		for (const message of turn.messages) {
-			inputTokens += message.usage.input;
-			outputTokens += message.usage.output;
-			totalTokens += message.usage.totalTokens;
-			costUsd += message.usage.cost.total;
-		}
-		if (![inputTokens, outputTokens, totalTokens, costUsd].every(Number.isFinite)) {
-			throw new Error("Invalid assistant usage in turn telemetry");
+			inputTokens += finiteOrZero(message.usage?.input);
+			outputTokens += finiteOrZero(message.usage?.output);
+			totalTokens += finiteOrZero(message.usage?.totalTokens);
+			costUsd += finiteOrZero(message.usage?.cost?.total);
 		}
 
 		const measurementMs = outputTokens > 0 && turn.generationMs > 0 ? turn.generationMs : null;

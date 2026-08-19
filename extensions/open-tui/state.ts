@@ -3,7 +3,7 @@ import type { AssistantMessage } from "@earendil-works/pi-ai";
 import type { GitStatus } from "./git.ts";
 import { emptyGitStatus } from "./git.ts";
 import type { RuntimeInfo } from "./runtime.ts";
-import { fmtTokens, formatProviderLabel } from "./utils.ts";
+import { finiteOrZero, fmtTokens, formatProviderLabel } from "./utils.ts";
 
 export interface FooterState {
 	git: GitStatus;
@@ -43,14 +43,17 @@ export function getUsageTotals(ctx: ExtensionContext): UsageTotals {
 			const m = entry.message as AssistantMessage;
 			const u = m.usage;
 			if (!u) continue;
-			totals.input += u.input ?? 0;
-			totals.output += u.output ?? 0;
-			totals.cacheRead += u.cacheRead ?? 0;
-			totals.cacheWrite += u.cacheWrite ?? 0;
-			totals.cost += u.cost?.total ?? 0;
-			const promptTokens = (u.input ?? 0) + (u.cacheRead ?? 0) + (u.cacheWrite ?? 0);
+			const input = finiteOrZero(u.input);
+			const cacheRead = finiteOrZero(u.cacheRead);
+			const cacheWrite = finiteOrZero(u.cacheWrite);
+			totals.input += input;
+			totals.output += finiteOrZero(u.output);
+			totals.cacheRead += cacheRead;
+			totals.cacheWrite += cacheWrite;
+			totals.cost += finiteOrZero(u.cost?.total);
+			const promptTokens = input + cacheRead + cacheWrite;
 			if (promptTokens > 0) {
-				totals.latestCacheHitRate = ((u.cacheRead ?? 0) / promptTokens) * 100;
+				totals.latestCacheHitRate = (cacheRead / promptTokens) * 100;
 			}
 		}
 	}

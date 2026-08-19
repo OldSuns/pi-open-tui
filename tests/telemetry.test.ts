@@ -94,6 +94,30 @@ test("uses total output over full generation time", () => {
 	);
 });
 
+test("normalizes invalid usage without breaking turn telemetry", () => {
+	let now = 0;
+	const tracker = new TurnTelemetryTracker(() => now);
+	const messages = [makeMessage(), makeMessage()];
+	Object.assign(messages[0]!.usage, { input: Number.POSITIVE_INFINITY, totalTokens: null, cost: { total: Number.NaN } });
+	Object.assign(messages[1]!.usage, { output: undefined, cost: undefined });
+
+	tracker.handle({ type: "turn_start", turnIndex: 0, timestamp: Date.now() });
+	for (const message of messages) {
+		tracker.handle({ type: "message_start", message });
+		now += 100;
+		tracker.handle(update(message));
+		now += 100;
+		tracker.handle({ type: "message_end", message });
+	}
+	const telemetry = tracker.handle({ type: "turn_end", turnIndex: 0, message: messages[1]!, toolResults: [] })!;
+
+	assert.equal(telemetry.inputTokens, 50);
+	assert.equal(telemetry.outputTokens, 20);
+	assert.equal(telemetry.totalTokens, 70);
+	assert.equal(telemetry.costUsd, 0);
+	assert.equal(telemetry.rateUsdPerMTokens, null);
+});
+
 test("measures non-streamed responses from turn start", () => {
 	let now = 0;
 	const tracker = new TurnTelemetryTracker(() => now);
