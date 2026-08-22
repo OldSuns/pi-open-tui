@@ -1,6 +1,7 @@
 import type { ExtensionAPI, ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
 import {
 	Box,
+	Input,
 	Key,
 	matchesKey,
 	SelectList,
@@ -9,8 +10,10 @@ import {
 	Text,
 } from "@earendil-works/pi-tui";
 import type { CursorStyle, IconMode, OpenTuiConfig, SettingsLanguage } from "./config.ts";
-
-const WHEEL_SCROLL_PRESETS = [1, 4, 7, 10] as const;
+import {
+	DEFAULT_FULLSCREEN_WHEEL_SCROLL_LINES,
+	normalizeFullscreenWheelScrollLines,
+} from "./fullscreen-scroll.ts";
 
 interface SettingItem {
 	id: string;
@@ -26,7 +29,7 @@ const COPY = {
 	en: {
 		title: "Open TUI Settings",
 		tabs: { features: "General", icons: "Appearance", segments: "Footer", telemetry: "Telemetry" },
-		hint: "Tab/Shift+Tab/←/→: tabs · ↑/↓: move · Enter/Space: change · Esc/q: close",
+		hint: "Tab/Shift+Tab/←/→: tabs · ↑/↓: move · Enter/Space: change · Enter on wheel speed: type 1-10 · Esc/q: close",
 		labels: {
 			enabled: "Enabled",
 			language: "Language",
@@ -53,6 +56,7 @@ const COPY = {
 			off: "Off",
 			languages: { en: "English", zh: "简体中文" },
 			wheelLines: (count: number) => `${count} ${count === 1 ? "line" : "lines"} / notch`,
+			wheelPrompt: (count: number) => `Wheel scroll lines per notch, 1-10 (current: ${count}). Enter: apply · Esc: cancel`,
 			cursorStyles: { block: "Block", bar: "Bar", underline: "Underline" },
 			icons: { auto: "Auto", nerd: "Nerd", ascii: "ASCII" },
 		},
@@ -60,7 +64,7 @@ const COPY = {
 	zh: {
 		title: "Open TUI 设置",
 		tabs: { features: "常规", icons: "外观", segments: "Footer", telemetry: "遥测" },
-		hint: "Tab/Shift+Tab/←/→：切页 · ↑/↓：移动 · Enter/Space：更改 · Esc/q：关闭",
+		hint: "Tab/Shift+Tab/←/→：切页 · ↑/↓：移动 · Enter/Space：更改 · 滚轮速度项 Enter 输入 1-10 · Esc/q：关闭",
 		labels: {
 			enabled: "启用",
 			language: "语言",
@@ -87,6 +91,7 @@ const COPY = {
 			off: "关闭",
 			languages: { en: "English", zh: "简体中文" },
 			wheelLines: (count: number) => `每格 ${count} 行`,
+			wheelPrompt: (count: number) => `滚轮每格滚动行数（当前 ${count}，范围 1-10），输入后 Enter 应用 · Esc 取消`,
 			cursorStyles: { block: "块", bar: "竖线", underline: "下划线" },
 			icons: { auto: "自动", nerd: "Nerd", ascii: "ASCII" },
 		},
@@ -127,10 +132,17 @@ function cycleCursorStyle(config: OpenTuiConfig): OpenTuiConfig {
 	return { ...config, cursorStyle: next };
 }
 
-function cycleWheelScrollLines(config: OpenTuiConfig): OpenTuiConfig {
-	const current = config.fullscreen.wheelScrollLines;
-	const wheelScrollLines = WHEEL_SCROLL_PRESETS.find((value) => value > current) ?? WHEEL_SCROLL_PRESETS[0];
-	return { ...config, fullscreen: { ...config.fullscreen, wheelScrollLines } };
+function setWheelScrollLines(config: OpenTuiConfig, raw: string): OpenTuiConfig | undefined {
+	if (!/^\d+$/.test(raw)) return undefined;
+	const parsed = Number(raw);
+	const bounded = Number.isFinite(parsed) ? parsed : Number.MAX_SAFE_INTEGER;
+	return {
+		...config,
+		fullscreen: {
+			...config.fullscreen,
+			wheelScrollLines: normalizeFullscreenWheelScrollLines(bounded, DEFAULT_FULLSCREEN_WHEEL_SCROLL_LINES),
+		},
+	};
 }
 
 function toggleTelemetry(config: OpenTuiConfig, key: keyof OpenTuiConfig["telemetry"]): OpenTuiConfig {
@@ -208,7 +220,6 @@ function handleSettingChange(
 	if (tab === "features") {
 		if (itemId === "enabled") return toggleEnabled(config);
 		if (itemId === "settingsLanguage") return toggleLanguage(config);
-		if (itemId === "wheelScrollLines") return cycleWheelScrollLines(config);
 	}
 	if (tab === "icons") {
 		if (itemId === "mode") return cycleIconMode(config);
@@ -241,6 +252,7 @@ class SettingsUi implements SettingsUiHandle {
 	private cachedWidth: number | undefined;
 	private cachedLines: string[] | undefined;
 	private compact = false;
+	private wheelInput: Input | undefined;
 
 	constructor(
 		theme: Theme,
@@ -265,9 +277,33 @@ class SettingsUi implements SettingsUiHandle {
 
 	private applySetting(itemId: string): void {
 		this.selectedItemByTab[this.tab] = itemId;
+		if (this.tab === "features" && itemId === "wheelScrollLines") {
+			this.openWheelInput();
+			this.invalidate();
+			return;
+		}
 		this.config = handleSettingChange(this.tab, itemId, this.config);
 		this.onChange(this.config);
 		this.rebuild(itemId);
+	}
+
+	private openWheelInput(): void {
+		const input = new Input();
+		input.onSubmit = (value) => {
+			const next = setWheelScrollLines(this.config, value);
+			this.wheelInput = undefined;
+			if (next) {
+				this.config = next;
+				this.onChange(this.config);
+			}
+			this.rebuild("wheelScrollLines");
+		};
+		input.onEscape = () => {
+			this.wheelInput = undefined;
+			this.rebuild("wheelScrollLines");
+		};
+		this.wheelInput = input;
+		this.rebuild("wheelScrollLines");
 	}
 
 	private switchTab(offset: number): void {
@@ -289,11 +325,17 @@ class SettingsUi implements SettingsUiHandle {
 		this.container.addChild(new Text(tabBar, 1, 0));
 		this.container.addChild(new Text(this.theme.fg("dim", copy.hint), 1, 0));
 
-		const items = buildItems(this.tab, this.config).map((item) => ({
-			value: item.id,
-			label: this.compact ? `${item.label}: ${item.currentValue}` : item.label,
-			description: this.compact ? undefined : item.currentValue,
-		} as SelectItem));
+		const editingWheel = this.tab === "features" && this.wheelInput !== undefined;
+		const items = buildItems(this.tab, this.config).map((item) => {
+			const editing = editingWheel && item.id === "wheelScrollLines";
+			return {
+				value: item.id,
+				label: editing
+					? (this.compact ? `${item.label}:` : item.label)
+					: (this.compact ? `${item.label}: ${item.currentValue}` : item.label),
+				description: editing || this.compact ? undefined : item.currentValue,
+			} as SelectItem;
+		});
 		this.selectList = new SelectList(items, Math.min(items.length, 10), {
 			selectedPrefix: (t) => this.theme.fg("accent", t),
 			selectedText: (t) => this.theme.fg("accent", t),
@@ -316,12 +358,28 @@ class SettingsUi implements SettingsUiHandle {
 			this.onClose();
 		};
 		this.container.addChild(this.selectList);
+		if (editingWheel) {
+			this.wheelInput!.focused = true;
+			const wheelInputGroup = new Box(4, 0);
+			wheelInputGroup.addChild(new Text(
+				this.theme.fg("muted", copy.values.wheelPrompt(this.config.fullscreen.wheelScrollLines)),
+				0,
+				0,
+			));
+			wheelInputGroup.addChild(this.wheelInput!);
+			this.container.addChild(wheelInputGroup);
+		}
 
 		this.cachedWidth = undefined;
 		this.cachedLines = undefined;
 	}
 
 	handleInput(data: string): void {
+		if (this.wheelInput && this.tab === "features") {
+			this.wheelInput.handleInput(data);
+			this.invalidate();
+			return;
+		}
 		if (matchesKey(data, Key.tab) || matchesKey(data, Key.right)) {
 			this.switchTab(1);
 			this.invalidate();

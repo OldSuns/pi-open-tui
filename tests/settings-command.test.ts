@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import type { ExtensionAPI, ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
-import { visibleWidth, type Component, type KeybindingsManager, type TUI } from "@earendil-works/pi-tui";
+import { CURSOR_MARKER, visibleWidth, type Component, type KeybindingsManager, type TUI } from "@earendil-works/pi-tui";
 import { DEFAULT_CONFIG, loadConfig, type OpenTuiConfig } from "../extensions/open-tui/config.ts";
 import { installEditor } from "../extensions/open-tui/editor.ts";
 import { getPendingUiChange } from "../extensions/open-tui/index.ts";
@@ -110,7 +110,7 @@ test("closes cleanly after enabling or disabling the UI", async () => {
 	}
 });
 
-test("updates fullscreen mouse wheel speed while settings stay open", async () => {
+test("updates fullscreen mouse wheel speed by typing a number", async () => {
 	const applied: number[] = [];
 	const settings = await openSettings(undefined, (config) => {
 		applied.push(config.fullscreen.wheelScrollLines);
@@ -120,15 +120,67 @@ test("updates fullscreen mouse wheel speed while settings stay open", async () =
 	settings.component.handleInput("\x1b[B");
 	assert.match(selectedLine(settings.component), /Mouse wheel speed/);
 
+	// Space opens the same editor without cycling the value.
 	settings.component.handleInput(" ");
-	assert.equal(settings.getConfig().fullscreen.wheelScrollLines, 7);
-	assert.deepEqual(applied, [7]);
+	assert.equal(settings.getConfig().fullscreen.wheelScrollLines, 4);
+	assert.deepEqual(applied, []);
+	assert.match(settings.component.render(80).join("\n"), /Wheel scroll lines per notch/);
+	settings.component.handleInput("\x1b");
+
+	// Enter opens the number input, type 8, Enter applies.
+	settings.component.handleInput("\r");
+	const editingLines = settings.component.render(80);
+	const parentLine = editingLines.find((line) => line.includes("→ Mouse wheel speed"));
+	const promptLine = editingLines.find((line) => line.includes("Wheel scroll lines per notch"));
+	const inputLine = editingLines.find((line) => line.includes("> "));
+	assert.ok(parentLine);
+	assert.ok(promptLine);
+	assert.ok(inputLine);
+	const parentLabelStart = parentLine.indexOf("Mouse wheel speed");
+	const promptStart = promptLine.indexOf("Wheel scroll lines per notch");
+	const inputStart = inputLine.indexOf("> ");
+	assert.equal(promptStart, parentLabelStart + 2);
+	assert.equal(inputStart, promptStart);
+	assert.ok(inputLine.includes(CURSOR_MARKER));
+	assert.match(editingLines.join("\n"), /Wheel scroll lines per notch, 1-10 \(current: 4\)/);
+	for (const width of [24, 36, 48]) {
+		for (const line of settings.component.render(width)) {
+			assert.ok(visibleWidth(line) <= width, `${visibleWidth(line)} > ${width}: ${line}`);
+		}
+	}
+	settings.component.render(80);
+	settings.component.handleInput("8");
+	settings.component.handleInput("\r");
+	assert.equal(settings.getConfig().fullscreen.wheelScrollLines, 8);
+	assert.deepEqual(applied, [8]);
 	assert.equal(settings.isClosed(), false);
 	assert.match(selectedLine(settings.component), /Mouse wheel speed/);
 
+	// Out-of-range values are clamped by normalize.
+	settings.component.handleInput("\r");
+	settings.component.handleInput("99");
+	settings.component.handleInput("\r");
+	assert.equal(settings.getConfig().fullscreen.wheelScrollLines, 10);
+
+	// Empty input is treated as cancel.
 	settings.component.handleInput("\r");
 	settings.component.handleInput("\r");
-	assert.equal(settings.getConfig().fullscreen.wheelScrollLines, 1);
+	assert.equal(settings.getConfig().fullscreen.wheelScrollLines, 10);
+	assert.deepEqual(applied, [8, 10]);
+
+	// Non-numeric input is rejected without writing a new value.
+	settings.component.handleInput("\r");
+	settings.component.handleInput("8x");
+	settings.component.handleInput("\r");
+	assert.equal(settings.getConfig().fullscreen.wheelScrollLines, 10);
+	assert.deepEqual(applied, [8, 10]);
+
+	// Esc cancels without changing the config.
+	settings.component.handleInput("\r");
+	settings.component.handleInput("\x1b");
+	assert.equal(settings.getConfig().fullscreen.wheelScrollLines, 10);
+	assert.deepEqual(applied, [8, 10]);
+	assert.match(selectedLine(settings.component), /Mouse wheel speed/);
 });
 
 test("previews cursor styles from the Appearance tab", async () => {

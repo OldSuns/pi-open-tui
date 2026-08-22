@@ -93,7 +93,7 @@ Key options:
 | --- | --- | --- |
 | `settingsLanguage` | `en`, `zh` | Changes the `/open-tui` interface language |
 | `cursorStyle` | `block`, `bar`, `underline` | `bar` and `underline` require terminal cursor-shape support |
-| `fullscreen.wheelScrollLines` | `1`-`10` | Lines scrolled per mouse-wheel notch in fullscreen mode; defaults to `4`. `/open-tui` cycles through `1`, `4`, `7`, and `10` for quick switching |
+| `fullscreen.wheelScrollLines` | `1`-`10` | Lines scrolled per mouse-wheel notch in fullscreen mode; defaults to `4`. In `/open-tui`, press Enter on this item and type a number (values are clamped to `1`-`10`) |
 | `icons.mode` | `auto`, `nerd`, `ascii` | Controls footer and telemetry icons |
 | `footerSegments` | Boolean flags | Shows or hides individual footer data |
 | `telemetry` | Boolean flags | Enables telemetry and its individual measurements |
