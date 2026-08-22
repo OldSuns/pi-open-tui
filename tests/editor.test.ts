@@ -65,6 +65,9 @@ test("uses the terminal hardware cursor for non-block styles", () => {
 		assert.equal(hardwareCursor, true);
 		assert.ok(writes.includes(sequence), `${cursorStyle} cursor sequence was sent`);
 		assert.ok(lines.every((line) => !line.includes("\x1b[7m")), "software block cursor was removed");
+		if (cursorStyle === "underline") {
+			assert.ok(lines.some((line) => line.includes("\x1b[4m")), "underline styling was applied to the cursor character");
+		}
 	}
 });
 

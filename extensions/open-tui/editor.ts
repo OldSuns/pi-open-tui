@@ -25,9 +25,10 @@ const CURSOR_STYLE_SEQUENCES: Partial<Record<CursorStyle, string>> = {
 };
 const DEFAULT_CURSOR_STYLE_SEQUENCE = "\x1b[0 q";
 
-function removeSoftwareCursor(line: string, cursorMarker = ""): string {
+function removeSoftwareCursor(line: string, cursorMarker = "", cursorStyle: CursorStyle = "block"): string {
 	return line.replace(/\x1b\[7m([\s\S]*?)\x1b\[0m/g, (_match, cursor: string) => {
-		const replacement = `${cursorMarker}${cursor}`;
+		const formattedCursor = cursorStyle === "underline" ? `\x1b[4m${cursor}\x1b[0m` : cursor;
+		const replacement = `${cursorMarker}${formattedCursor}`;
 		cursorMarker = "";
 		return replacement;
 	});
@@ -113,7 +114,7 @@ export class OpenTuiEditor extends CustomEditor {
 		let cursorMarker = this.previewHardwareCursor && !this.focused ? CURSOR_MARKER : "";
 		if (this.focused) this.previewHardwareCursor = false;
 		return renderedLines.map((line) => {
-			const rendered = removeSoftwareCursor(line, cursorMarker);
+			const rendered = removeSoftwareCursor(line, cursorMarker, this.cursorStyle);
 			if (rendered !== line) cursorMarker = "";
 			return rendered;
 		});
