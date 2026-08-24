@@ -46,7 +46,9 @@ export function getUsageTotals(ctx: ExtensionContext): UsageTotals {
 			const input = finiteOrZero(u.input);
 			const cacheRead = finiteOrZero(u.cacheRead);
 			const cacheWrite = finiteOrZero(u.cacheWrite);
-			totals.input += input;
+			// input matches /session's "uncached" total: cacheWrite is billed near full
+			// price (fresh content), only cacheRead is discounted repeat content.
+			totals.input += input + cacheWrite;
 			totals.output += finiteOrZero(u.output);
 			totals.cacheRead += cacheRead;
 			totals.cacheWrite += cacheWrite;

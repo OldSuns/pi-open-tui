@@ -193,7 +193,9 @@ export class TurnTelemetryTracker {
 		let totalTokens = 0;
 		let costUsd = 0;
 		for (const message of turn.messages) {
-			inputTokens += finiteOrZero(message.usage?.input);
+			// match /session's "uncached" total: cacheWrite is fresh, near-full-price
+			// content; only cacheRead is discounted repeat content.
+			inputTokens += finiteOrZero(message.usage?.input) + finiteOrZero(message.usage?.cacheWrite);
 			outputTokens += finiteOrZero(message.usage?.output);
 			totalTokens += finiteOrZero(message.usage?.totalTokens);
 			costUsd += finiteOrZero(message.usage?.cost?.total);
