@@ -49,6 +49,7 @@ export interface TurnTelemetry {
 	totalMs: number;
 	inputTokens: number;
 	outputTokens: number;
+	cacheReadTokens: number;
 	stallMs: number;
 	stallCount: number;
 	rateUsdPerMTokens: number | null;
@@ -190,6 +191,7 @@ export class TurnTelemetryTracker {
 		const endMs = this.now();
 		let inputTokens = 0;
 		let outputTokens = 0;
+		let cacheReadTokens = 0;
 		let totalTokens = 0;
 		let costUsd = 0;
 		for (const message of turn.messages) {
@@ -197,6 +199,7 @@ export class TurnTelemetryTracker {
 			// content; only cacheRead is discounted repeat content.
 			inputTokens += finiteOrZero(message.usage?.input) + finiteOrZero(message.usage?.cacheWrite);
 			outputTokens += finiteOrZero(message.usage?.output);
+			cacheReadTokens += finiteOrZero(message.usage?.cacheRead);
 			totalTokens += finiteOrZero(message.usage?.totalTokens);
 			costUsd += finiteOrZero(message.usage?.cost?.total);
 		}
@@ -213,6 +216,7 @@ export class TurnTelemetryTracker {
 			totalMs: endMs - turn.startMs,
 			inputTokens,
 			outputTokens,
+			cacheReadTokens,
 			stallMs: turn.stallMs,
 			stallCount: turn.stallCount,
 			rateUsdPerMTokens: validCost && validTokens
@@ -234,6 +238,7 @@ export class TurnTelemetryTracker {
 
 		const outputTokens = turns.reduce((sum, turn) => sum + turn.outputTokens, 0);
 		const inputTokens = turns.reduce((sum, turn) => sum + turn.inputTokens, 0);
+		const cacheReadTokens = turns.reduce((sum, turn) => sum + turn.cacheReadTokens, 0);
 		const totalTokens = turns.reduce((sum, turn) => sum + turn.totalTokens, 0);
 		const costUsd = turns.reduce((sum, turn) => sum + turn.costUsd, 0);
 		const stallMs = turns.reduce((sum, turn) => sum + turn.stallMs, 0);
@@ -250,6 +255,7 @@ export class TurnTelemetryTracker {
 			totalMs: this.now() - startMs,
 			inputTokens,
 			outputTokens,
+			cacheReadTokens,
 			stallMs,
 			stallCount,
 			rateUsdPerMTokens: validRate ? round(costUsd / (totalTokens / 1_000_000), 2) : null,
@@ -286,6 +292,9 @@ export function formatTurnTelemetry(
 	if (config.tokens) {
 		parts.push(theme.fg("accent", `${glyphs.input} ${fmtTokens(telemetry.inputTokens)}`));
 		parts.push(theme.fg("success", `${glyphs.output} ${fmtTokens(telemetry.outputTokens)}`));
+		if (telemetry.cacheReadTokens > 0) {
+			parts.push(theme.fg("accent", `R ${fmtTokens(telemetry.cacheReadTokens)}`));
+		}
 	}
 	if (config.stalls && telemetry.stallMs > 0) {
 		parts.push(theme.fg("warning", `${glyphs.stall} stall ${telemetry.stallCount}x / ${formatTurnDuration(telemetry.stallMs)}`));

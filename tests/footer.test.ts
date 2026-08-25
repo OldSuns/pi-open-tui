@@ -228,11 +228,11 @@ test("ASCII footer renders icons as semantic labels", () => {
 		message: {
 			role: "assistant",
 			usage: {
-				input: 100,
-				output: 40,
-				cacheRead: 100,
-				cacheWrite: 0,
-				cost: { total: 0.125 },
+				input: 90,
+				output: 12,
+				cacheRead: 5000,
+				cacheWrite: 27009,
+				cost: { total: 0.01 },
 			},
 		},
 	}];
@@ -293,10 +293,11 @@ test("ASCII footer renders icons as semantic labels", () => {
 		"#",
 		"M",
 		"~ high",
-		"↑ 100",
-		"↓ 40",
-		"c 50.0%",
-		"$ $0.125",
+		"↑ 27k",
+		"↓ 12",
+		"R 5.0k",
+		"c 15.6%",
+		"$ $0.010",
 		"& goal active",
 	]) {
 		assert.ok(output.includes(expected), `missing ${expected}\n${output}`);

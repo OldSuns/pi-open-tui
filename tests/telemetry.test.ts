@@ -80,6 +80,7 @@ test("uses total output over full generation time", () => {
 		totalMs: 5_000,
 		inputTokens: 50,
 		outputTokens: 20,
+		cacheReadTokens: 0,
 		stallMs: 0,
 		stallCount: 0,
 		rateUsdPerMTokens: 4,
@@ -149,6 +150,7 @@ test("uses footer semantics and respects telemetry segment settings", () => {
 		totalMs: 900,
 		inputTokens: 50,
 		outputTokens: 20,
+		cacheReadTokens: 5_000,
 		stallMs: 800,
 		stallCount: 1,
 		rateUsdPerMTokens: 4,
@@ -160,9 +162,9 @@ test("uses footer semantics and respects telemetry segment settings", () => {
 
 	assert.match(
 		formatTurnTelemetry(telemetry, styledTheme, DEFAULT_CONFIG.telemetry, "ascii"),
-		/^> TPS 50\.0 tok\/s \| ~ TTFT 0\.2s.*! stall 1x \/ 0\.8s \| \$ \$4\.00\/M$/,
+		/^> TPS 50\.0 tok\/s \| ~ TTFT 0\.2s.*↑ 50 \| ↓ 20 \| R 5\.0k.*! stall 1x \/ 0\.8s \| \$ \$4\.00\/M$/,
 	);
-	assert.deepEqual(colors, ["accent", "text", "success", "accent", "success", "warning", "warning", "dim"]);
+	assert.deepEqual(colors, ["accent", "text", "success", "accent", "success", "accent", "warning", "warning", "dim"]);
 
 	const hidden: typeof DEFAULT_CONFIG.telemetry = {
 		enabled: false,
@@ -357,6 +359,11 @@ test("counts cache-write tokens as input, matching /session's uncached figure", 
 	const telemetry = tracker.handle({ type: "agent_settled" })!;
 
 	assert.equal(telemetry.inputTokens, 27099);
+	assert.equal(telemetry.cacheReadTokens, 5000);
+	assert.match(
+		formatTurnTelemetry(telemetry, theme, DEFAULT_CONFIG.telemetry, "ascii"),
+		/\| ↑ 27k \| ↓ 12 \| R 5\.0k \|/,
+	);
 });
 
 test("aggregates all output and generation time across an agent run", () => {
