@@ -67,6 +67,13 @@ export function fmtTokens(n: number): string {
 	return `${Math.round(n / 1_000_000)}M`;
 }
 
+export function formatInputBreakdown(uncached: number, cacheRead: number): string {
+	const total = fmtTokens(uncached + cacheRead);
+	return cacheRead > 0
+		? `${total} (U ${fmtTokens(uncached)} + R ${fmtTokens(cacheRead)})`
+		: total;
+}
+
 export function formatDuration(ms: number): string {
 	const totalSeconds = Math.max(0, Math.floor(ms / 1000));
 	if (totalSeconds < 60) return `${totalSeconds}s`;

@@ -162,9 +162,9 @@ test("uses footer semantics and respects telemetry segment settings", () => {
 
 	assert.match(
 		formatTurnTelemetry(telemetry, styledTheme, DEFAULT_CONFIG.telemetry, "ascii"),
-		/^> TPS 50\.0 tok\/s \| ~ TTFT 0\.2s.*↑ 50 \| ↓ 20 \| R 5\.0k.*! stall 1x \/ 0\.8s \| \$ \$4\.00\/M$/,
+		/^> TPS 50\.0 tok\/s \| ~ TTFT 0\.2s.*↑ 5\.0k \(U 50 \+ R 5\.0k\) \| ↓ 20.*! stall 1x \/ 0\.8s \| \$ \$4\.00\/M$/,
 	);
-	assert.deepEqual(colors, ["accent", "text", "success", "accent", "success", "accent", "warning", "warning", "dim"]);
+	assert.deepEqual(colors, ["accent", "text", "success", "accent", "success", "warning", "warning", "dim"]);
 
 	const hidden: typeof DEFAULT_CONFIG.telemetry = {
 		enabled: false,
@@ -362,7 +362,7 @@ test("counts cache-write tokens as input, matching /session's uncached figure", 
 	assert.equal(telemetry.cacheReadTokens, 5000);
 	assert.match(
 		formatTurnTelemetry(telemetry, theme, DEFAULT_CONFIG.telemetry, "ascii"),
-		/\| ↑ 27k \| ↓ 12 \| R 5\.0k \|/,
+		/\| ↑ 32k \(U 27k \+ R 5\.0k\) \| ↓ 12 \|/,
 	);
 });
 

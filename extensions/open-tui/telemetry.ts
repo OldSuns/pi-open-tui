@@ -11,7 +11,7 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import type { IconMode, TelemetryConfig } from "./config.ts";
 import { resolveGlyphs } from "./icons.ts";
-import { finiteOrZero, fmtTokens, formatDuration } from "./utils.ts";
+import { finiteOrZero, fmtTokens, formatDuration, formatInputBreakdown } from "./utils.ts";
 
 const STALL_THRESHOLD_MS = 1000;
 
@@ -290,11 +290,8 @@ export function formatTurnTelemetry(
 		parts.push(theme.fg("success", `${glyphs.done} ${formatTurnDuration(telemetry.totalMs)}`));
 	}
 	if (config.tokens) {
-		parts.push(theme.fg("accent", `${glyphs.input} ${fmtTokens(telemetry.inputTokens)}`));
+		parts.push(theme.fg("accent", `${glyphs.input} ${formatInputBreakdown(telemetry.inputTokens, telemetry.cacheReadTokens)}`));
 		parts.push(theme.fg("success", `${glyphs.output} ${fmtTokens(telemetry.outputTokens)}`));
-		if (telemetry.cacheReadTokens > 0) {
-			parts.push(theme.fg("accent", `R ${fmtTokens(telemetry.cacheReadTokens)}`));
-		}
 	}
 	if (config.stalls && telemetry.stallMs > 0) {
 		parts.push(theme.fg("warning", `${glyphs.stall} stall ${telemetry.stallCount}x / ${formatTurnDuration(telemetry.stallMs)}`));
