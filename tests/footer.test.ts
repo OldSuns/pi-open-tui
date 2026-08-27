@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 import type {
 	ExtensionContext,
@@ -9,7 +12,8 @@ import type { Component, TUI } from "@earendil-works/pi-tui";
 import { DEFAULT_CONFIG } from "../extensions/open-tui/config.ts";
 import { installFooter } from "../extensions/open-tui/footer.ts";
 import { emptyGitStatus } from "../extensions/open-tui/git.ts";
-import { resolveGlyphs } from "../extensions/open-tui/icons.ts";
+import { resolveGlyphs, runtimeSymbol } from "../extensions/open-tui/icons.ts";
+import { clearRuntimeCache, readRuntimeInfo } from "../extensions/open-tui/runtime.ts";
 import { getUsageTotals, invalidateUsageCache, type FooterState } from "../extensions/open-tui/state.ts";
 import { fitSegmentsByPriority, truncateBranch, truncatePath } from "../extensions/open-tui/utils.ts";
 
@@ -172,6 +176,36 @@ test("both icon modes provide every footer semantic", () => {
 	for (const mode of ["nerd", "ascii"] as const) {
 		const glyphs = resolveGlyphs(mode);
 		for (const key of keys) assert.notEqual(glyphs[key], "", `${mode}.${key}`);
+	}
+});
+
+test("uses the official Nerd Font runtime symbols", () => {
+	assert.equal(runtimeSymbol("nodejs", "nerd"), "\uE718");
+	assert.equal(runtimeSymbol("bun", "nerd"), "\uE76F");
+	assert.equal(runtimeSymbol("bun", "ascii"), "bun");
+});
+
+test("prefers Bun lockfiles while preserving the Node fallback", async () => {
+	const cwd = mkdtempSync(join(tmpdir(), "open-tui-runtime-"));
+	try {
+		writeFileSync(join(cwd, "package.json"), "{}");
+		assert.equal((await readRuntimeInfo(cwd))?.name, "nodejs");
+
+		writeFileSync(join(cwd, "package-lock.json"), "{}");
+		assert.equal((await readRuntimeInfo(cwd))?.name, "nodejs");
+
+		writeFileSync(join(cwd, "bun.lock"), "");
+		assert.equal((await readRuntimeInfo(cwd))?.name, "bun");
+
+		rmSync(join(cwd, "bun.lock"));
+		writeFileSync(join(cwd, "bun.lockb"), "");
+		assert.equal((await readRuntimeInfo(cwd))?.name, "bun");
+
+		rmSync(join(cwd, "bun.lockb"));
+		assert.equal((await readRuntimeInfo(cwd))?.name, "nodejs");
+	} finally {
+		clearRuntimeCache();
+		rmSync(cwd, { recursive: true, force: true });
 	}
 });
 

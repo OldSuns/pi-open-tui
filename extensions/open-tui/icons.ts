@@ -143,7 +143,7 @@ const RUNTIME_SYMBOLS: Record<string, string> = {
 	swift: "\uE755",
 	kotlin: "\uE634",
 	deno: "\uE7FB",
-	bun: "\uE6FB",
+	bun: "\uE76F",
 	php: "\uE73D",
 	haskell: "\uE777",
 	julia: "\uE624",
