@@ -1,5 +1,5 @@
+import type { Usage } from "@earendil-works/pi-ai";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import type { AssistantMessage } from "@earendil-works/pi-ai";
 import type { GitStatus } from "./git.ts";
 import { emptyGitStatus } from "./git.ts";
 import type { RuntimeInfo } from "./runtime.ts";
@@ -39,24 +39,32 @@ export function getUsageTotals(ctx: ExtensionContext): UsageTotals {
 		latestCacheHitRate: undefined,
 	};
 	for (const entry of ctx.sessionManager.getEntries()) {
-		if (entry.type === "message" && entry.message?.role === "assistant") {
-			const m = entry.message as AssistantMessage;
-			const u = m.usage;
-			if (!u) continue;
-			const input = finiteOrZero(u.input);
-			const cacheRead = finiteOrZero(u.cacheRead);
-			const cacheWrite = finiteOrZero(u.cacheWrite);
-			// input matches /session's "uncached" total: cacheWrite is billed near full
-			// price (fresh content), only cacheRead is discounted repeat content.
-			totals.input += input + cacheWrite;
-			totals.output += finiteOrZero(u.output);
-			totals.cacheRead += cacheRead;
-			totals.cacheWrite += cacheWrite;
-			totals.cost += finiteOrZero(u.cost?.total);
+		let u: Usage | undefined;
+		let updateCacheHitRate = false;
+		if (entry.type === "message" && entry.message.role === "assistant") {
+			u = entry.message.usage;
+			updateCacheHitRate = true;
+		} else if (entry.type === "message" && entry.message.role === "toolResult") {
+			u = entry.message.usage;
+		} else if (entry.type === "branch_summary" || entry.type === "compaction") {
+			u = entry.usage;
+		}
+		if (!u) continue;
+		const input = finiteOrZero(u.input);
+		const cacheRead = finiteOrZero(u.cacheRead);
+		const cacheWrite = finiteOrZero(u.cacheWrite);
+		// input matches /session's "uncached" total: cacheWrite is billed near full
+		// price (fresh content), only cacheRead is discounted repeat content.
+		totals.input += input + cacheWrite;
+		totals.output += finiteOrZero(u.output);
+		totals.cacheRead += cacheRead;
+		totals.cacheWrite += cacheWrite;
+		totals.cost += finiteOrZero(u.cost?.total);
+		if (updateCacheHitRate) {
 			const promptTokens = input + cacheRead + cacheWrite;
-			if (promptTokens > 0) {
-				totals.latestCacheHitRate = (cacheRead / promptTokens) * 100;
-			}
+			totals.latestCacheHitRate = promptTokens > 0
+				? (cacheRead / promptTokens) * 100
+				: undefined;
 		}
 	}
 	usageCache = { key, totals };
