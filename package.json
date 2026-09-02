@@ -35,9 +35,9 @@
     "image": "https://raw.githubusercontent.com/OldSuns/pi-open-tui/main/assets/preview_dashboard_1.png"
   },
   "peerDependencies": {
-    "@earendil-works/pi-coding-agent": ">=0.80",
-    "@earendil-works/pi-ai": ">=0.80",
-    "@earendil-works/pi-tui": ">=0.80"
+    "@earendil-works/pi-coding-agent": ">=0.81",
+    "@earendil-works/pi-ai": ">=0.81",
+    "@earendil-works/pi-tui": ">=0.81"
   },
   "peerDependenciesMeta": {
     "@earendil-works/pi-coding-agent": {

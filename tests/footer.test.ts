@@ -253,6 +253,49 @@ test("usage totals count cache-write tokens as input, matching /session's uncach
 	invalidateUsageCache();
 });
 
+test("usage totals include tool result and summary usage", () => {
+	const entries = [
+		{
+			id: "assistant-usage",
+			timestamp: 1,
+			type: "message",
+			message: {
+				role: "assistant",
+				usage: { input: 90, output: 12, cacheRead: 5000, cacheWrite: 27009, cost: { total: 0.01 } },
+			},
+		},
+		{
+			id: "tool-usage",
+			timestamp: 2,
+			type: "message",
+			message: {
+				role: "toolResult",
+				usage: { input: 40, output: 8, cacheRead: 100, cacheWrite: 20, cost: { total: 0.02 } },
+			},
+		},
+		{
+			id: "compaction-usage",
+			timestamp: 3,
+			type: "compaction",
+			usage: { input: 7, output: 3, cacheRead: 200, cacheWrite: 5, cost: { total: 0.03 } },
+		},
+		{
+			id: "branch-summary-usage",
+			timestamp: 4,
+			type: "branch_summary",
+			usage: { input: 11, output: 4, cacheRead: 300, cacheWrite: 9, cost: { total: 0.04 } },
+		},
+	];
+	const ctx = { sessionManager: { getEntries: () => entries } } as unknown as ExtensionContext;
+
+	invalidateUsageCache();
+	assert.deepEqual(getUsageTotals(ctx), {
+		input: 27_191, output: 27, cacheRead: 5_600, cacheWrite: 27_043, cost: 0.1,
+		latestCacheHitRate: (5000 / 32_099) * 100,
+	});
+	invalidateUsageCache();
+});
+
 test("ASCII footer renders icons as semantic labels", () => {
 	let footerFactory: NonNullable<Parameters<ExtensionContext["ui"]["setFooter"]>[0]> | undefined;
 	const entries = [{
