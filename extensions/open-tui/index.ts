@@ -15,28 +15,11 @@ import {
 	type FooterState,
 } from "./state.ts";
 
-function isInteractiveLaunch(): boolean {
-	if (!process.stdout.isTTY) return false;
-	const args = process.argv.slice(2);
-	const nonInteractiveFlags = ["-p", "--print", "--help", "-h", "--version", "-v", "--list-models", "--export"];
-	for (const arg of args) {
-		if (nonInteractiveFlags.includes(arg)) return false;
-		if (arg.startsWith("--mode")) return false;
-	}
-	return true;
-}
-
 type PendingUiChange = "install" | "uninstall";
 
 export function getPendingUiChange(enabled: boolean, active: boolean): PendingUiChange | undefined {
 	if (enabled === active) return undefined;
 	return enabled ? "install" : "uninstall";
-}
-
-function clearVisibleScreen(): void {
-	if (process.stdout.isTTY) {
-		process.stdout.write("\x1b[2J\x1b[H");
-	}
 }
 
 function isTuiContext(ctx: ExtensionContext): boolean {
@@ -173,10 +156,6 @@ export default function (pi: ExtensionAPI) {
 
 		ensureConfigExists();
 		config = loadConfig((msg, level) => ctx.ui.notify(msg, level));
-
-		if (isInteractiveLaunch() && config.enabled) {
-			clearVisibleScreen();
-		}
 
 		applyUi(ctx);
 
