@@ -339,17 +339,41 @@ test("keeps localized settings and values within narrow widths", async () => {
 	}
 });
 
-test("falls back to English for an invalid settings language", () => {
+test("normalizes invalid settings values", () => {
 	const agentDir = mkdtempSync(join(tmpdir(), "pi-open-tui-"));
 	const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
 	try {
 		process.env.PI_CODING_AGENT_DIR = agentDir;
-		writeFileSync(join(agentDir, "open-tui.json"), JSON.stringify({ settingsLanguage: "de", cursorStyle: "invalid" }), "utf8");
-		assert.equal(loadConfig().settingsLanguage, "en");
-		assert.equal(loadConfig().cursorStyle, "block");
+		writeFileSync(join(agentDir, "open-tui.json"), JSON.stringify({
+			settingsLanguage: "de",
+			cursorStyle: "invalid",
+			thinkingPeek: { lines: 9 },
+		}), "utf8");
+		const loaded = loadConfig();
+		assert.equal(loaded.settingsLanguage, "en");
+		assert.equal(loaded.cursorStyle, "block");
+		assert.equal(loaded.thinkingPeek.lines, 1);
 	} finally {
 		if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
 		else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
 		rmSync(agentDir, { recursive: true, force: true });
 	}
+});
+
+test("cycles the thinking peek line count from General settings", async () => {
+	const config = structuredClone(DEFAULT_CONFIG);
+	const settings = await openSettings(config);
+	// Enabled → Language → Wheel speed → Thinking peek
+	settings.component.handleInput("\x1b[B");
+	settings.component.handleInput("\x1b[B");
+	settings.component.handleInput("\x1b[B");
+	assert.match(selectedLine(settings.component), /Thinking peek/);
+	assert.match(selectedLine(settings.component), /1 line/);
+	settings.component.handleInput("\r");
+	assert.equal(settings.getConfig().thinkingPeek.lines, 2);
+	settings.component.handleInput("\r");
+	assert.equal(settings.getConfig().thinkingPeek.lines, 0);
+	settings.component.handleInput("\r");
+	assert.equal(settings.getConfig().thinkingPeek.lines, 1);
+	settings.component.handleInput("q");
 });

@@ -13,6 +13,7 @@ A polished terminal interface for the [Pi](https://pi.dev) coding agent. It brin
 - **Framed editor** with block, bar, and underline cursor styles
 - **Project awareness** for 50+ runtimes and detailed Git states, including ahead/behind, staged, modified, untracked, stashed, and detached HEAD
 - **Turn telemetry** for TPS, time to first token (TTFT), duration, stalls, tokens, and list-price rate
+- **Thinking peek**: an inline ticker replaces Pi's hidden `Thinking...` label with the tail of the model's reasoning while it works
 - **Interactive settings** through `/open-tui`, available in English and Simplified Chinese
 - **Version-guarded Pi compatibility shim**: fullscreen wheel speed falls back to Pi's default if its runtime support changes
 
@@ -83,6 +84,9 @@ Run `/open-tui` to open the settings dialog. It provides **General**, **Appearan
     "tokens": true,
     "stalls": true,
     "cost": true
+  },
+  "thinkingPeek": {
+    "lines": 1
   }
 }
 ```
@@ -97,6 +101,7 @@ Key options:
 | `icons.mode` | `auto`, `nerd`, `ascii` | Controls footer and telemetry icons |
 | `footerSegments` | Boolean flags | Shows or hides individual footer data |
 | `telemetry` | Boolean flags | Enables telemetry and its individual measurements |
+| `thinkingPeek.lines` | `0`, `1`, `2` | Off, one-line, or two-line hidden thinking preview |
 
 `sessionName` appears only when the session has a name. `gitCommit` shows the short hash and tag in detached HEAD state. Disabling `extensionStatuses` hides the entire extension status line, including MCP status.
 
@@ -113,6 +118,22 @@ After each complete agent run, pi-open-tui shows one transient result. Tool-call
 TPS is calculated from all provider-reported assistant output tokens divided by the total generation time across the run. Timing starts at `turn_start` and ends at the assistant `message_end`, so it includes TTFT, hidden reasoning, buffering, and stalls; tool execution between turns is excluded. Runs without output tokens or measurable generation time show `TPS —`.
 
 The `$ / M` value is the model's list-price rate from `usage.cost.total`, not the cumulative session cost shown in the footer. Every telemetry field can be toggled from the **Telemetry** tab.
+
+## Thinking peek
+
+When Pi's **Hide thinking** setting is enabled, pi-open-tui shows a compact ticker in the native hidden thinking block's `Thinking...` position. The `/open-tui` setting offers three modes: **Off**, **1 line**, and **2 lines**.
+
+- while the model is reasoning, the current thinking tail streams by with a spinner (`~ think ⠋ …`);
+- when the answer starts, it settles on a check mark (`~ think ✓`);
+- in 2-line mode, the previous and latest thinking lines share the same text indentation; if the latest line overflows, both rows are used for its continuation instead of retaining the previous line;
+- after the task settles, the native `Thinking...` label is restored.
+
+```text
+~ think ⠋ previous thought
+          latest thought
+```
+
+The ticker appears only once the model actually streams reasoning, so non-reasoning models never show it. Pi's own Hide thinking toggle controls visibility; changing it takes effect immediately. Each row is truncated by *visible* width, so CJK-wide thinking text cannot overflow. Configure it from **General → Thinking peek** in `/open-tui`, or via `thinkingPeek.lines` in `open-tui.json`.
 
 ## Local development
 

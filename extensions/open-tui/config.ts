@@ -9,6 +9,7 @@ import type { IconMode } from "./icons.ts";
 
 export type SettingsLanguage = "en" | "zh";
 export type CursorStyle = "block" | "bar" | "underline";
+export type ThinkingPeekLines = 0 | 1 | 2;
 
 export type { IconMode } from "./icons.ts";
 
@@ -35,6 +36,10 @@ export interface TelemetryConfig {
 	cost: boolean;
 }
 
+export interface ThinkingPeekConfig {
+	lines: ThinkingPeekLines;
+}
+
 export interface FullscreenConfig {
 	wheelScrollLines: number;
 }
@@ -49,6 +54,7 @@ export interface OpenTuiConfig {
 	};
 	footerSegments: FooterSegments;
 	telemetry: TelemetryConfig;
+	thinkingPeek: ThinkingPeekConfig;
 }
 
 export const DEFAULT_CONFIG: OpenTuiConfig = {
@@ -82,11 +88,18 @@ export const DEFAULT_CONFIG: OpenTuiConfig = {
 		stalls: true,
 		cost: true,
 	},
+	thinkingPeek: {
+		lines: 1,
+	},
 };
 
 export function getConfigPath(): string {
 	const agentDir = getAgentDir();
 	return join(agentDir, "open-tui.json");
+}
+
+function normalizeThinkingPeekLines(value: unknown): ThinkingPeekLines {
+	return value === 0 || value === 1 || value === 2 ? value : DEFAULT_CONFIG.thinkingPeek.lines;
 }
 
 function deepMerge<T>(base: T, override: unknown): T {
@@ -144,6 +157,11 @@ export function loadConfig(notify?: (msg: string, level: "warning" | "info") => 
 			config.fullscreen.wheelScrollLines,
 			DEFAULT_CONFIG.fullscreen.wheelScrollLines,
 		);
+		if (typeof config.thinkingPeek !== "object" || config.thinkingPeek === null || Array.isArray(config.thinkingPeek)) {
+			config.thinkingPeek = structuredClone(DEFAULT_CONFIG.thinkingPeek);
+		} else {
+			config.thinkingPeek.lines = normalizeThinkingPeekLines(config.thinkingPeek.lines);
+		}
 		return config;
 	} catch (err) {
 		notify?.(`open-tui config parse error: ${err instanceof Error ? err.message : String(err)}`, "warning");

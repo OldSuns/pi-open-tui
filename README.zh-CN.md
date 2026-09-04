@@ -13,6 +13,7 @@
 - **带边框的编辑器**：支持块状、竖线和下划线三种光标样式
 - **项目环境感知**：识别 50 多种运行环境，并展示 ahead/behind、已暂存、已修改、未跟踪、stash 和 detached HEAD 等 Git 状态
 - **单轮遥测**：展示 TPS、首 Token 延迟（TTFT）、耗时、停顿、Token 数量和模型标价速率
+- **思考预览**：模型工作时，在 Pi 隐藏思考块的 `Thinking...` 位置显示实时字幕，展示推理内容的末尾片段
 - **交互式设置**：通过 `/open-tui` 配置，并支持英文和简体中文界面
 - **带版本保护的 Pi 兼容层**：全屏滚轮速度所依赖的运行时支持发生变化时，会回退为 Pi 默认行为
 
@@ -83,6 +84,9 @@ pi -e npm:pi-open-tui
     "tokens": true,
     "stalls": true,
     "cost": true
+  },
+  "thinkingPeek": {
+    "lines": 1
   }
 }
 ```
@@ -97,6 +101,7 @@ pi -e npm:pi-open-tui
 | `icons.mode` | `auto`、`nerd`、`ascii` | 控制底栏和遥测通知使用的图标 |
 | `footerSegments` | 布尔开关 | 分别控制底栏中的各项数据 |
 | `telemetry` | 布尔开关 | 控制遥测总开关和各项指标 |
+| `thinkingPeek.lines` | `0`、`1`、`2` | 关闭、单行或双行思考预览 |
 
 `sessionName` 仅在会话有名称时显示；`gitCommit` 会在 detached HEAD 状态下显示短哈希和标签；关闭 `extensionStatuses` 会隐藏整行扩展状态，其中也包括 MCP 状态。
 
@@ -113,6 +118,22 @@ pi -e npm:pi-open-tui
 TPS 的计算方式是：将本次运行中服务商报告的全部 Assistant 输出 Token，除以各个生成轮次的总耗时。计时范围从 `turn_start` 到 Assistant 的 `message_end`，包含 TTFT、隐藏推理、缓冲和停顿，但不包含轮次之间的工具执行时间。没有输出 Token 或无法测得生成时间时，会显示 `TPS —`。
 
 `$ / M` 表示根据 `usage.cost.total` 得到的模型标价速率，不是底栏中的会话累计费用。所有遥测字段都可以在**遥测**页单独开关。
+
+## 思考预览
+
+开启 Pi 的 **Hide thinking** 后，任务运行期间 pi-open-tui 会在原生隐藏思考块的 `Thinking...` 位置显示紧凑的实时字幕。`/open-tui` 中提供**关闭、单行、双行**三种模式：
+
+- 模型推理时，思考内容的末尾片段会随 spinner 滚动（`~ think ⠋ …`）；
+- 开始输出正文时定格为对勾（`~ think ✓`）；
+- 双行模式中，上一条和最新一条思考内容使用相同的文字缩进；如果最新一行超出宽度，则两行都用于显示它的连续内容，不再保留上一条；
+- 任务结束后恢复原生 `Thinking...` 标签。
+
+```text
+~ think ⠋ 上一条思考
+          最新一条思考
+```
+
+该字幕仅在模型真正输出推理内容后出现，非推理模型不会显示。可见性由 Pi 自身的 Hide thinking 开关控制，切换后立即生效。每一行都按*显示宽度*截断（全角字符计 2 列），因此包含中文的思考文本也不会溢出终端。可在 `/open-tui` 的**常规 → 思考预览**中切换，或直接修改 `open-tui.json` 中的 `thinkingPeek.lines`。
 
 ## 本地开发
 
