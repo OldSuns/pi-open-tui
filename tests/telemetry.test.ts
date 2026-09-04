@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 import type {
@@ -440,4 +443,73 @@ test("open-tui notifies once after a complete agent run", () => {
 	emit("agent_settled", { type: "agent_settled" });
 	assert.equal(notifications.length, 1);
 	assert.match(notifications[0]!, /TPS .*TTFT/);
+});
+
+test("open-tui keeps a prior peek label while a custom task is starting", async () => {
+	const handlers = new Map<string, Array<(event: any, ctx: ExtensionContext) => void | Promise<void>>>();
+	const labels: Array<string | undefined> = [];
+	const pi = {
+		on(event: string, handler: (event: any, ctx: ExtensionContext) => void | Promise<void>) {
+			handlers.set(event, [...(handlers.get(event) ?? []), handler]);
+		},
+		registerCommand() {},
+		getThinkingLevel: () => "high",
+	} as unknown as ExtensionAPI;
+	const ctx = {
+		hasUI: true,
+		mode: "tui",
+		cwd: process.cwd(),
+		ui: {
+			theme,
+			notify() {},
+			setHeader() {},
+			setFooter() {},
+			setEditorComponent() {},
+			setHiddenThinkingLabel(label?: string) {
+				labels.push(label);
+			},
+		},
+	} as unknown as ExtensionContext;
+	const emit = async (event: string, payload: unknown) => {
+		await Promise.all((handlers.get(event) ?? []).map((handler) => handler(payload, ctx)));
+	};
+	const assistant = {
+		role: "assistant",
+		content: [{ type: "thinking", thinking: "previous task" }],
+	};
+	const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+	const agentDir = await mkdtemp(join(tmpdir(), "open-tui-peek-"));
+	process.env.PI_CODING_AGENT_DIR = agentDir;
+
+	try {
+		openTui(pi);
+		await emit("session_start", { type: "session_start" });
+		await emit("agent_start", { type: "agent_start" });
+		await emit("turn_start", { type: "turn_start" });
+		await emit("message_start", { type: "message_start", message: assistant });
+		await emit("message_update", {
+			type: "message_update",
+			message: assistant,
+			assistantMessageEvent: { type: "thinking_delta", delta: "previous task" },
+		});
+		const previousLabel = labels.at(-1);
+
+		await emit("agent_settled", { type: "agent_settled" });
+		// A custom/continuation task can spend time preparing before its assistant
+		// message_start. Its start must still invalidate the previous settle timer.
+		await emit("agent_start", { type: "agent_start" });
+		const labelsAfterNewTaskStart = labels.length;
+		await new Promise((resolve) => setTimeout(resolve, 350));
+
+		assert.ok(previousLabel);
+		assert.ok(
+			labels.slice(labelsAfterNewTaskStart).every((label) => label !== undefined),
+			"a stale settle timer must not clear the new task's label",
+		);
+	} finally {
+		await emit("session_shutdown", { type: "session_shutdown" });
+		if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+		else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+		await rm(agentDir, { recursive: true, force: true });
+	}
 });
