@@ -130,12 +130,15 @@ test("updates fullscreen mouse wheel speed by typing a number", async () => {
 	// Enter opens the number input, type 8, Enter applies.
 	settings.component.handleInput("\r");
 	const editingLines = settings.component.render(80);
-	const parentLine = editingLines.find((line) => line.includes("→ Mouse wheel speed"));
-	const promptLine = editingLines.find((line) => line.includes("Wheel scroll lines per notch"));
+	const parentIndex = editingLines.findIndex((line) => line.includes("→ Mouse wheel speed"));
+	const promptIndex = editingLines.findIndex((line) => line.includes("Wheel scroll lines per notch"));
+	const parentLine = editingLines[parentIndex];
+	const promptLine = editingLines[promptIndex];
 	const inputLine = editingLines.find((line) => line.includes("> "));
 	assert.ok(parentLine);
 	assert.ok(promptLine);
 	assert.ok(inputLine);
+	assert.equal(promptIndex, parentIndex + 1);
 	const parentLabelStart = parentLine.indexOf("Mouse wheel speed");
 	const promptStart = promptLine.indexOf("Wheel scroll lines per notch");
 	const inputStart = inputLine.indexOf("> ");

@@ -5,6 +5,7 @@ import {
 	Key,
 	matchesKey,
 	SelectList,
+	type Component,
 	type SelectItem,
 	type TUI,
 	Text,
@@ -260,6 +261,23 @@ interface SettingsUiHandle {
 	handleInput: (data: string) => void;
 }
 
+function insertComponentAfter(list: Component, child: Component, index: () => number): Component {
+	// SelectList renders one line per item; splice the editor into that output.
+	return {
+		render(width: number): string[] {
+			const lines = list.render(width);
+			const insertAt = index();
+			if (insertAt < 0 || insertAt >= lines.length) return lines;
+			const childLines = child.render(width);
+			return [...lines.slice(0, insertAt + 1), ...childLines, ...lines.slice(insertAt + 1)];
+		},
+		invalidate(): void {
+			list.invalidate();
+			child.invalidate();
+		},
+	};
+}
+
 class SettingsUi implements SettingsUiHandle {
 	private tab: Tab = "features";
 	private config: OpenTuiConfig;
@@ -377,7 +395,6 @@ class SettingsUi implements SettingsUiHandle {
 		this.selectList.onCancel = () => {
 			this.onClose();
 		};
-		this.container.addChild(this.selectList);
 		if (editingWheel) {
 			this.wheelInput!.focused = true;
 			const wheelInputGroup = new Box(4, 0);
@@ -387,7 +404,10 @@ class SettingsUi implements SettingsUiHandle {
 				0,
 			));
 			wheelInputGroup.addChild(this.wheelInput!);
-			this.container.addChild(wheelInputGroup);
+			const selectedIndex = () => items.findIndex((item) => item.value === this.selectList.getSelectedItem()?.value);
+			this.container.addChild(insertComponentAfter(this.selectList, wheelInputGroup, selectedIndex));
+		} else {
+			this.container.addChild(this.selectList);
 		}
 
 		this.cachedWidth = undefined;
