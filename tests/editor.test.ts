@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { KeybindingsManager } from "@earendil-works/pi-coding-agent";
-import { TuiMainScreen, type EditorTheme, type Terminal, type TUI } from "@earendil-works/pi-tui";
+import { TuiMainScreen, type EditorTheme, type Terminal, type TUI, visibleWidth } from "@earendil-works/pi-tui";
 import { installEditor, OpenTuiEditor } from "../extensions/open-tui/editor.ts";
 import { stripAnsi } from "../extensions/open-tui/utils.ts";
 
@@ -48,6 +48,30 @@ test("embeds the working indicator in the editor top border", () => {
 	});
 
 	assert.match(stripAnsi(editor.render(40)[0] ?? ""), /^╭── ◐ working ─+╮$/);
+});
+
+test("keeps a narrow scrolled working border intact", () => {
+	const editor = new OpenTuiEditor(
+		tui,
+		editorTheme,
+		{ matches: () => false } as unknown as KeybindingsManager,
+	);
+	editor.setText(Array.from({ length: 10 }, (_, index) => `line ${index}`).join("\n"));
+	let spinnerRenders = 0;
+	editor.setWorkingStatusIndicator({
+		renderInBorder: () => "◐ working status that ignores width",
+		renderSpinnerInBorder: () => {
+			spinnerRenders++;
+			return "◐";
+		},
+	});
+
+	const topBorder = stripAnsi(editor.render(30)[0] ?? "");
+
+	assert.equal(spinnerRenders, 1);
+	assert.equal(visibleWidth(topBorder), 30);
+	assert.match(topBorder, /↑ 3 more/);
+	assert.ok(topBorder.endsWith("╮"));
 });
 
 

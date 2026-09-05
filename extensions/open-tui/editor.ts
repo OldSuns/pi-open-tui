@@ -83,23 +83,40 @@ function roundedBorder(
 	kind: "top" | "bottom",
 	paint: (s: string) => string,
 	sourceLine?: string,
-	status?: string,
+	indicator?: WorkingStatusIndicator,
 ): string {
 	if (width < 2) return paint(truncateToWidth(kind === "top" ? "╭╮" : "╰╯", width, ""));
 	const corners = kind === "top" ? (["╭", "╮"] as const) : (["╰", "╯"] as const);
 
-	if (kind === "top" && status) {
+	if (kind === "top" && indicator) {
 		const plain = sourceLine ? stripAnsi(sourceLine) : "";
 		const scrollMatch = plain.match(/([↑↓]\s+\d+\s+more)/);
-		const left = paint("── ");
-		if (scrollMatch) {
-			const label = ` ${scrollMatch[1]} `;
-			const available = Math.max(0, width - 2 - visibleWidth(left) - visibleWidth(status) - visibleWidth(label));
-			const before = Math.floor(available / 2);
-			return `${corners[0]}${left}${status}${paint(` ${"─".repeat(before)}${label}${"─".repeat(available - before)}`)}${corners[1]}`;
+		const contentWidth = width - 2;
+		let status = indicator.renderInBorder(Math.max(1, contentWidth - 5));
+		let statusWidth = visibleWidth(status);
+		if (statusWidth > 0) {
+			const overflowLabel = scrollMatch ? ` ${scrollMatch[1]} ` : undefined;
+			const overflowLabelWidth = overflowLabel ? visibleWidth(overflowLabel) : 0;
+			const overflowStart = Math.floor((contentWidth - overflowLabelWidth) / 2);
+			const canFitOverflow = () => overflowLabel !== undefined
+				&& overflowLabelWidth + 2 <= contentWidth
+				&& overflowStart - (3 + statusWidth + 1) >= 1;
+			if (overflowLabel && !canFitOverflow()) {
+				status = indicator.renderSpinnerInBorder(contentWidth);
+				statusWidth = visibleWidth(status);
+			}
+			if (canFitOverflow()) {
+				const leftBlockWidth = 3 + statusWidth + 1;
+				return `${corners[0]}${paint("── ")}${status}${paint(` ${"─".repeat(overflowStart - leftBlockWidth)}${overflowLabel}${"─".repeat(contentWidth - overflowStart - overflowLabelWidth)}`)}${corners[1]}`;
+			}
+			if (contentWidth >= statusWidth + 5) {
+				return `${corners[0]}${paint("── ")}${status}${paint(` ${"─".repeat(contentWidth - statusWidth - 4)}`)}${corners[1]}`;
+			}
+			status = indicator.renderSpinnerInBorder(contentWidth);
+			statusWidth = visibleWidth(status);
+			const prefixWidth = Math.min(3, Math.max(0, contentWidth - statusWidth));
+			return `${corners[0]}${paint("─".repeat(prefixWidth))}${status}${paint("─".repeat(Math.max(0, contentWidth - prefixWidth - statusWidth)))}${corners[1]}`;
 		}
-		const fill = Math.max(0, width - 2 - visibleWidth(left) - visibleWidth(status) - 1);
-		return `${corners[0]}${left}${status}${paint(` ${"─".repeat(fill)}`)}${corners[1]}`;
 	}
 
 	if (sourceLine) {
@@ -149,38 +166,6 @@ export class OpenTuiEditor extends CustomEditor {
 		this.tui.requestRender();
 	}
 
-	protected renderTopBorder(width: number, hiddenLineCount: number): string {
-		const indicator = this.embeddedWorkingStatusIndicator;
-		if (!indicator || width <= 0) {
-			return this.getBorder(hiddenLineCount > 0 ? `↑ ${hiddenLineCount} more` : "─".repeat(width));
-		}
-
-		let status = indicator.renderInBorder(Math.max(1, width - 5));
-		let statusWidth = visibleWidth(status);
-		if (statusWidth === 0) return this.getBorder("─".repeat(width));
-
-		const overflowLabel = hiddenLineCount > 0 ? ` ↑ ${hiddenLineCount} more ` : undefined;
-		const overflowLabelWidth = overflowLabel ? visibleWidth(overflowLabel) : 0;
-		const overflowStart = Math.floor((width - overflowLabelWidth) / 2);
-		const canFitOverflow = () => overflowLabel !== undefined
-			&& overflowLabelWidth + 2 <= width
-			&& overflowStart - (3 + statusWidth + 1) >= 1;
-		if (overflowLabel && !canFitOverflow()) {
-			status = indicator.renderSpinnerInBorder(width);
-			statusWidth = visibleWidth(status);
-		}
-		if (canFitOverflow()) {
-			const leftBlockWidth = 3 + statusWidth + 1;
-			return this.getBorder("── ") + status + this.getBorder(` ${"─".repeat(overflowStart - leftBlockWidth)}${overflowLabel}${"─".repeat(width - overflowStart - overflowLabelWidth)}`);
-		}
-		if (width >= statusWidth + 5) {
-			return this.getBorder("── ") + status + this.getBorder(` ${"─".repeat(width - statusWidth - 4)}`);
-		}
-		status = indicator.renderSpinnerInBorder(width);
-		statusWidth = visibleWidth(status);
-		const prefixWidth = Math.min(3, Math.max(0, width - statusWidth));
-		return this.getBorder("─".repeat(prefixWidth)) + status + this.getBorder("─".repeat(Math.max(0, width - prefixWidth - statusWidth)));
-	}
 	setCursorStyle(cursorStyle: CursorStyle, blockHardwareCursor = false): void {
 		const styleChanged = cursorStyle !== this.cursorStyle;
 		this.previewHardwareCursor = cursorStyle !== "block";
@@ -221,9 +206,8 @@ export class OpenTuiEditor extends CustomEditor {
 		const baseLines = this.renderBase(innerWidth);
 		const bottomIdx = findBottomBorderIndex(baseLines);
 
-		const status = this.embeddedWorkingStatusIndicator?.renderInBorder(Math.max(1, innerWidth - 5)) ?? "";
 		const result: string[] = [];
-		result.push(roundedBorder(width, "top", borderPaint, baseLines[0], status));
+		result.push(roundedBorder(width, "top", borderPaint, baseLines[0], this.embeddedWorkingStatusIndicator));
 
 		for (let i = 1; i < bottomIdx; i++) {
 			const line = baseLines[i] ?? "";
