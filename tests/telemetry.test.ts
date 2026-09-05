@@ -4,12 +4,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import type { AssistantMessage } from "@earendil-works/pi-ai";
-import type {
-	ExtensionAPI,
-	ExtensionContext,
-	MessageUpdateEvent,
-	Theme,
+import {
+	AssistantMessageComponent,
+	type ExtensionAPI,
+	type ExtensionContext,
+	type MessageUpdateEvent,
+	type Theme,
 } from "@earendil-works/pi-coding-agent";
+import { ScrollView, Text } from "@earendil-works/pi-tui";
 import { DEFAULT_CONFIG } from "../extensions/open-tui/config.ts";
 import openTui from "../extensions/open-tui/index.ts";
 import { formatTurnTelemetry, TurnTelemetryTracker } from "../extensions/open-tui/telemetry.ts";
@@ -445,9 +447,29 @@ test("open-tui notifies once after a complete agent run", () => {
 	assert.match(notifications[0]!, /TPS .*TTFT/);
 });
 
-test("open-tui keeps a prior peek label while a custom task is starting", async () => {
+test("open-tui keeps a bounded peek scoped to the current assistant", async () => {
+	const effectiveWidth = 85;
 	const handlers = new Map<string, Array<(event: any, ctx: ExtensionContext) => void | Promise<void>>>();
-	const labels: Array<string | undefined> = [];
+	const globalLabelUpdates: Array<string | undefined> = [];
+	const thought = "x".repeat(200);
+	const assistant = {
+		role: "assistant",
+		content: [{ type: "thinking", thinking: thought }],
+	};
+	const thinkingComponents = [
+		new AssistantMessageComponent(undefined, true),
+		new AssistantMessageComponent(undefined, true),
+	];
+	const getThinkingLabel = (component: AssistantMessageComponent) =>
+		(component as unknown as { hiddenThinkingLabel: string }).hiddenThinkingLabel;
+	const tui = {
+		mode: "fullscreen",
+		terminal: { columns: effectiveWidth, write() {} },
+		children: [{ children: thinkingComponents }],
+		getShowHardwareCursor: () => false,
+		setShowHardwareCursor() {},
+		requestRender() {},
+	};
 	const pi = {
 		on(event: string, handler: (event: any, ctx: ExtensionContext) => void | Promise<void>) {
 			handlers.set(event, [...(handlers.get(event) ?? []), handler]);
@@ -464,24 +486,27 @@ test("open-tui keeps a prior peek label while a custom task is starting", async 
 			notify() {},
 			setHeader() {},
 			setFooter() {},
-			setEditorComponent() {},
+			setEditorComponent(factory?: unknown) {
+				if (typeof factory === "function") {
+					factory(tui, { borderColor: (text: string) => text }, { matches: () => false });
+				}
+			},
 			setHiddenThinkingLabel(label?: string) {
-				labels.push(label);
+				globalLabelUpdates.push(label);
+				for (const component of thinkingComponents) component.setHiddenThinkingLabel(label ?? "Thinking...");
 			},
 		},
 	} as unknown as ExtensionContext;
 	const emit = async (event: string, payload: unknown) => {
 		await Promise.all((handlers.get(event) ?? []).map((handler) => handler(payload, ctx)));
 	};
-	const assistant = {
-		role: "assistant",
-		content: [{ type: "thinking", thinking: "previous task" }],
-	};
 	const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+	const previousColumns = Object.getOwnPropertyDescriptor(process.stdout, "columns");
 	const agentDir = await mkdtemp(join(tmpdir(), "open-tui-peek-"));
 	process.env.PI_CODING_AGENT_DIR = agentDir;
 
 	try {
+		Object.defineProperty(process.stdout, "columns", { configurable: true, value: 120 });
 		openTui(pi);
 		await emit("session_start", { type: "session_start" });
 		await emit("agent_start", { type: "agent_start" });
@@ -490,23 +515,40 @@ test("open-tui keeps a prior peek label while a custom task is starting", async 
 		await emit("message_update", {
 			type: "message_update",
 			message: assistant,
-			assistantMessageEvent: { type: "thinking_delta", delta: "previous task" },
+			assistantMessageEvent: { type: "thinking_delta", delta: assistant.content[0]!.thinking },
 		});
-		const previousLabel = labels.at(-1);
+		const currentLabel = getThinkingLabel(thinkingComponents[1]!);
+		assert.ok(currentLabel);
+		assert.equal(getThinkingLabel(thinkingComponents[0]!), "Thinking...");
+		assert.equal(
+			new ScrollView(new Text(currentLabel, 1, 0), { scrollbar: "always" }).render(effectiveWidth).length,
+			1,
+			"the peek row must fit the narrowed fullscreen transcript",
+		);
+		assistant.content[0]!.thinking += "y";
+		await emit("message_update", {
+			type: "message_update",
+			message: assistant,
+			assistantMessageEvent: { type: "thinking_delta", delta: "y" },
+		});
+		const streamedLabel = getThinkingLabel(thinkingComponents[1]!);
+		assert.notEqual(streamedLabel, currentLabel, "each thinking delta must update the label immediately");
 
 		await emit("agent_settled", { type: "agent_settled" });
 		// A custom/continuation task can spend time preparing before its assistant
 		// message_start. Its start must still invalidate the previous settle timer.
 		await emit("agent_start", { type: "agent_start" });
-		const labelsAfterNewTaskStart = labels.length;
+		const updatesAfterNewTaskStart = globalLabelUpdates.length;
 		await new Promise((resolve) => setTimeout(resolve, 350));
 
-		assert.ok(previousLabel);
 		assert.ok(
-			labels.slice(labelsAfterNewTaskStart).every((label) => label !== undefined),
+			globalLabelUpdates.slice(updatesAfterNewTaskStart).every((label) => label !== undefined),
 			"a stale settle timer must not clear the new task's label",
 		);
+		assert.equal(getThinkingLabel(thinkingComponents[1]!), streamedLabel, "the label must not animate without a delta");
 	} finally {
+		if (previousColumns) Object.defineProperty(process.stdout, "columns", previousColumns);
+		else Reflect.deleteProperty(process.stdout, "columns");
 		await emit("session_shutdown", { type: "session_shutdown" });
 		if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
 		else process.env.PI_CODING_AGENT_DIR = previousAgentDir;

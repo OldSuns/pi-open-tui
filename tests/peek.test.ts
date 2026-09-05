@@ -74,6 +74,8 @@ test("clipTail truncates wide CJK text by visible width, not code points", () =>
 test("clipTail returns text that already fits untouched", () => {
 	assert.equal(clipTail("short", 10), "short");
 	assert.equal(clipTail("思思", 4), "思思");
+	assert.equal(clipTail("\u200babc", 3), "\u200babc");
+	assert.equal(clipTail("\u200b思", 2), "\u200b思");
 });
 
 test("clipTail handles degenerate budgets", () => {
@@ -83,11 +85,12 @@ test("clipTail handles degenerate budgets", () => {
 	assert.equal(clipTail("abcdef", 1), "…");
 });
 
-test("clipTail never splits a surrogate pair", () => {
-	const tail = clipTail("😀".repeat(50), 5);
-	assert.ok(tail.startsWith("…"));
-	assert.ok(!tail.includes("�"));
-	assert.ok(visibleWidth(tail) <= 5);
+test("clipTail preserves complete graphemes at the tail boundary", () => {
+	for (const grapheme of ["😀", "👩‍💻", "e\u0301"]) {
+		const tail = clipTail(grapheme.repeat(50), 5);
+		assert.equal(tail, "…" + grapheme.repeat(Math.floor(4 / visibleWidth(grapheme))));
+		assert.ok(visibleWidth(tail) <= 5);
+	}
 });
 
 test("buildPeekLabel renders each phase", () => {
@@ -129,6 +132,20 @@ test("buildPeekLabel wraps an overflowing latest thought instead of keeping the 
 	assert.match(first, /~ think ⠋ abcdefghijklmnopqrst/);
 	assert.match(second, /uvwxyz$/);
 	assert.equal(first.indexOf("abcdefghijklmnopqrst"), second.indexOf("uvwxyz"));
+});
+
+test("buildPeekLabel follows new deltas after a long thought fills both rows", () => {
+	for (const thought of ["word ".repeat(200), "思考".repeat(500), "x".repeat(1000)]) {
+		const before = buildPeekLabel({ phase: "thinking", tail: thought }, 0, glyphs, 30, 2);
+		for (const delta of ["NEW", "NEW_DELTA"]) {
+			const after = buildPeekLabel({ phase: "thinking", tail: thought + delta }, 0, glyphs, 30, 2);
+			assert.notEqual(after, before);
+			assert.ok(after.endsWith(delta), "the latest delta must be visible with a fixed spinner frame");
+			const rows = after.split("\n");
+			assert.equal(rows.length, 2);
+			assert.ok(rows.every((row) => visibleWidth(row) <= 30));
+		}
+	}
 });
 
 test("buildPeekLabel never exceeds the label width, even on narrow terminals", () => {

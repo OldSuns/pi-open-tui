@@ -25,6 +25,39 @@ const CURSOR_STYLE_SEQUENCES: Partial<Record<CursorStyle, string>> = {
 };
 const DEFAULT_CURSOR_STYLE_SEQUENCE = "\x1b[0 q";
 
+interface HiddenThinkingLabelComponent {
+	children: unknown[];
+	setHiddenThinkingLabel(label: string): void;
+	setHideThinkingBlock(hide: boolean): void;
+	updateContent(message: unknown, isStreaming?: boolean): void;
+}
+
+function isHiddenThinkingLabelComponent(value: object): value is HiddenThinkingLabelComponent {
+	const component = value as unknown as Record<string, unknown>;
+	return Array.isArray(component.children)
+		&& typeof component.setHiddenThinkingLabel === "function"
+		&& typeof component.setHideThinkingBlock === "function"
+		&& typeof component.updateContent === "function";
+}
+
+/** Ponytail until Pi exposes a per-message hidden-thinking label API. */
+function findLatestHiddenThinkingLabel(tui: TUI): HiddenThinkingLabelComponent {
+	const pending: unknown[] = [tui];
+	const visited = new Set<object>();
+	let latest: HiddenThinkingLabelComponent | undefined;
+	while (pending.length > 0) {
+		const value = pending.pop();
+		if (!value || typeof value !== "object" || visited.has(value)) continue;
+		visited.add(value);
+		if (isHiddenThinkingLabelComponent(value)) latest = value;
+		const children = (value as { children?: unknown }).children;
+		if (!Array.isArray(children)) continue;
+		for (let i = children.length - 1; i >= 0; i--) pending.push(children[i]);
+	}
+	if (!latest) throw new Error("Unable to find the active hidden-thinking component");
+	return latest;
+}
+
 function removeSoftwareCursor(line: string, cursorMarker = ""): string {
 	return line.replace(/\x1b\[7m([\s\S]*?)\x1b\[0m/g, (_match, cursor: string) => {
 		const replacement = `${cursorMarker}${cursor}`;
@@ -162,15 +195,37 @@ export function installEditor(
 	let previousHardwareCursor: boolean | undefined;
 	let currentCursorStyle = cursorStyle;
 	let currentWheelScrollLines = wheelScrollLines;
+	let hiddenThinkingTarget: HiddenThinkingLabelComponent | undefined;
+	const getActiveTui = (): TUI => {
+		if (!activeTui) throw new Error("Open TUI editor is not mounted");
+		return activeTui;
+	};
 
 	ctx.ui.setEditorComponent((tui, editorTheme, keybindings) => {
 		activeTui = tui;
+		hiddenThinkingTarget = undefined;
 		applyFullscreenWheelScrollLines(tui, currentWheelScrollLines);
 		previousHardwareCursor = tui.getShowHardwareCursor();
 		activeEditor = new OpenTuiEditor(tui, editorTheme, keybindings, currentCursorStyle);
 		return activeEditor;
 	});
 	return {
+		getViewportWidth(): number {
+			const columns = getActiveTui().terminal.columns;
+			if (typeof columns !== "number" || !Number.isFinite(columns)) {
+				throw new Error("Open TUI editor terminal has an invalid width");
+			}
+			return Math.max(1, Math.floor(columns));
+		},
+		setLatestHiddenThinkingLabel(label: string): void {
+			const tui = getActiveTui();
+			hiddenThinkingTarget ??= findLatestHiddenThinkingLabel(tui);
+			hiddenThinkingTarget.setHiddenThinkingLabel(label);
+			tui.requestRender();
+		},
+		resetHiddenThinkingLabelTarget(): void {
+			hiddenThinkingTarget = undefined;
+		},
 		setCursorStyle(nextCursorStyle: CursorStyle): void {
 			currentCursorStyle = nextCursorStyle;
 			activeEditor?.setCursorStyle(nextCursorStyle, previousHardwareCursor);
@@ -180,6 +235,7 @@ export function installEditor(
 			if (activeTui) applyFullscreenWheelScrollLines(activeTui, currentWheelScrollLines);
 		},
 		cleanup(): void {
+			hiddenThinkingTarget = undefined;
 			ctx.ui.setEditorComponent(undefined);
 			if (activeTui) {
 				if (currentCursorStyle !== "block") activeTui.terminal.write(DEFAULT_CURSOR_STYLE_SEQUENCE);

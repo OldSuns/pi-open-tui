@@ -4,6 +4,7 @@ import { sanitizeStatus } from "./utils.ts";
 
 const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 const MAX_PEEK_LINES = 2;
+const graphemeSegmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });
 
 export type PeekPhase = "idle" | "thinking" | "done";
 
@@ -76,35 +77,37 @@ export function collectPeekParts(content: unknown): PeekMessageParts {
 export function peekTail(fullThinking: string, lineCount = 1): string {
 	if (!fullThinking) return "";
 	const count = normalizePeekLineCount(lineCount);
-	const lines = fullThinking
-		.split("\n")
-		.map((line) => line.replace(/\s+/g, " ").trim())
-		.filter(Boolean);
-	return lines.slice(-count).join("\n");
+	const lines: string[] = [];
+	let end = fullThinking.length;
+	while (end > 0 && lines.length < count) {
+		const start = fullThinking.lastIndexOf("\n", end - 1) + 1;
+		const line = fullThinking.slice(start, end).replace(/\s+/g, " ").trim();
+		if (line) lines.push(line);
+		end = start - 1;
+	}
+	return lines.reverse().join("\n");
 }
 
 /**
  * Clip a tail string to `budget` visible columns, keeping the END (it is a
- * tail view) and prefixing "…" when clipped. Walks code points so wide CJK
- * chars count as 2 columns and surrogate pairs are never split.
+ * tail view) and prefixing "…" when clipped. Walk backwards over complete
+ * graphemes so measurement is limited to the visible suffix.
  */
 export function clipTail(text: string, budget: number): string {
 	if (!text || budget <= 0) return "";
-	if (visibleWidth(text) <= budget) return text;
-	if (budget === 1) return "…";
 	const limit = budget - 1; // reserve one column for the ellipsis
 	let w = 0;
-	const codePoints = Array.from(text);
-	let i = codePoints.length;
-	while (i > 0) {
-		const start = i - 1;
-		const codePoint = codePoints[start] ?? "";
-		const cw = visibleWidth(codePoint);
-		if (w + cw > limit) break;
-		w += cw;
-		i = start;
+	let end = text.length;
+	let clippedStart = end;
+	const segments = graphemeSegmenter.segment(text);
+	while (end > 0) {
+		const part = segments.containing(end - 1)!;
+		w += visibleWidth(part.segment);
+		if (w > budget) return "…" + text.slice(clippedStart);
+		end = part.index;
+		if (w <= limit) clippedStart = end;
 	}
-	return "…" + codePoints.slice(i).join("");
+	return text;
 }
 
 /**
@@ -141,12 +144,12 @@ export function buildPeekLabel(
 			const latest = safeLines.at(-1) ?? "";
 			const lineWithMarker = (tail: string): string => fit(tail ? `${marker} ${tail}` : marker);
 			if (count >= 2) {
-				const latestWrapped = wrapTextWithAnsi(latest, Math.max(1, contentWidth));
+				const window = clipTail(latest, contentWidth * count);
+				const latestWrapped = wrapTextWithAnsi(window, Math.max(1, contentWidth));
 				if (latestWrapped.length > 1) {
-					// Spend both rows on an overflowing latest thought; stale context must
-					// not displace its continuation.
-					const first = latestWrapped[0] ?? "";
-					const second = latestWrapped[1] ?? "";
+					// Word wrapping may add short rows; always retain the newest content.
+					const first = latestWrapped.at(-2) ?? "";
+					const second = latestWrapped.at(-1) ?? "";
 					return `${lineWithMarker(first)}\n${fit(`${thoughtIndent}${second}`)}`;
 				}
 			}

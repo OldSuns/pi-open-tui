@@ -24,6 +24,9 @@ import {
 } from "./peek.ts";
 
 type PendingUiChange = "install" | "uninstall";
+const HIDDEN_THINKING_HORIZONTAL_PADDING = 2;
+// Pi's fullscreen transcript can reserve one more column for its scrollbar.
+const HIDDEN_THINKING_SCROLLBAR_RESERVE = 1;
 
 export function getPendingUiChange(enabled: boolean, active: boolean): PendingUiChange | undefined {
 	if (enabled === active) return undefined;
@@ -57,7 +60,6 @@ export default function (pi: ExtensionAPI) {
 	// thinking-peek state (rendered by Pi inside its hidden-thinking block)
 	const peek: PeekState = createPeekState();
 	let peekFrame = 0;
-	let peekTimer: ReturnType<typeof setInterval> | undefined;
 	let peekSettleTimer: ReturnType<typeof setTimeout> | undefined;
 	let peekTaskEpoch = 0; // bumped at every agent task boundary
 	let peekLabelActive = false;
@@ -76,22 +78,21 @@ export default function (pi: ExtensionAPI) {
 	/** Pi decides whether this label is visible; our toggle only controls updates. */
 	const isPeekEnabled = () => sessionLifecycle.isCurrent() && config.enabled && config.thinkingPeek.lines > 0 && active;
 
-	/** Keep each native hidden-thinking label row within Pi's padded width. */
+	/** Keep each native hidden-thinking label row within Pi's narrowest transcript width. */
 	const hiddenThinkingLabelWidth = (): number => {
-		const columns = process.stdout.columns;
-		// ponytail: use stdout width; Pi does not expose the transcript width here.
-		return typeof columns === "number" && Number.isFinite(columns)
-			? Math.max(1, columns - 2)
-			: 78;
+		if (!editor) throw new Error("Open TUI editor is not installed");
+		return Math.max(
+			1,
+			editor.getViewportWidth() - HIDDEN_THINKING_HORIZONTAL_PADDING - HIDDEN_THINKING_SCROLLBAR_RESERVE,
+		);
 	};
 
 	const setPeekLabel = (ctx?: ExtensionContext): void => {
 		if (!isPeekEnabled() || peek.phase === "idle") return;
 		const target = ctx ?? lastCtx;
 		if (!target || !isTuiContext(target)) return;
-		// ponytail: Pi exposes one global hidden-thinking label; per-message updates
-		// need an upstream renderer hook.
-		target.ui.setHiddenThinkingLabel(
+		if (!editor) throw new Error("Open TUI editor is not installed");
+		editor.setLatestHiddenThinkingLabel(
 			buildPeekLabel(
 				peek,
 				peekFrame,
@@ -107,37 +108,16 @@ export default function (pi: ExtensionAPI) {
 		if (!peekLabelActive) return;
 		const target = ctx ?? lastCtx;
 		if (!target || !isTuiContext(target)) return;
+		// The global reset is safe here: every completed message returns to Pi's native label.
 		target.ui.setHiddenThinkingLabel();
 		peekLabelActive = false;
-	};
-
-	/** Drive the peek spinner at ~8fps while the model is reasoning. */
-	const startPeekTimer = () => {
-		if (peekTimer) return;
-		const tick = () => {
-			if (!sessionLifecycle.isCurrent() || !isPeekEnabled() || peek.phase !== "thinking") return;
-			peekFrame++;
-			// ponytail: sample at ~8fps because Pi rebuilds every assistant component
-			// when its global hidden-thinking label changes.
-			setPeekLabel();
-		};
-		peekTimer = setInterval(tick, 120);
-		peekTimer.unref?.();
-	};
-
-	/** Freeze the peek spinner (used when reasoning ends for this sub-message). */
-	const stopPeekTimer = () => {
-		if (peekTimer) {
-			clearInterval(peekTimer);
-			peekTimer = undefined;
-		}
 	};
 
 	/** Reset peek state to idle and cancel any scheduled cleanup. */
 	const resetPeek = () => {
 		peek.phase = "idle";
 		peek.tail = "";
-		stopPeekTimer();
+		editor?.resetHiddenThinkingLabelTarget();
 		if (peekSettleTimer) {
 			clearTimeout(peekSettleTimer);
 			peekSettleTimer = undefined;
@@ -315,19 +295,18 @@ export default function (pi: ExtensionAPI) {
 		if (!isPeekEnabled()) return;
 		const message = event.message;
 		if (!message || message.role !== "assistant") return;
+		if (peek.phase === "done") return;
 		const parts = collectPeekParts(message.content);
-		const previousPhase = peek.phase;
 		const next = reducePeek(peek, parts);
 		const changed = next.phase !== peek.phase || next.tail !== peek.tail;
 		peek.phase = next.phase;
 		peek.tail = next.tail;
 		if (!changed) return;
 		if (peek.phase === "thinking") {
-			startPeekTimer();
-			if (!peekLabelActive) setPeekLabel(ctx);
-		} else {
-			stopPeekTimer();
-			if (peek.phase === "done" && previousPhase !== "done") setPeekLabel(ctx);
+			peekFrame++;
+			setPeekLabel(ctx);
+		} else if (peek.phase === "done") {
+			setPeekLabel(ctx);
 		}
 	});
 
@@ -370,7 +349,6 @@ export default function (pi: ExtensionAPI) {
 		if (event.message?.role === "assistant" && peek.phase === "thinking") {
 			// Sub-message finished (answer text or a tool call): freeze the peek line.
 			peek.phase = "done";
-			stopPeekTimer();
 			setPeekLabel(ctx);
 		}
 		invalidateUsageCache();

@@ -125,7 +125,7 @@ When Pi's **Hide thinking** setting is enabled, pi-open-tui shows a compact tick
 
 - while the model is reasoning, the current thinking tail streams by with a spinner (`~ think ⠋ …`);
 - when the answer starts, it settles on a check mark (`~ think ✓`);
-- in 2-line mode, the previous and latest thinking lines share the same text indentation; if the latest line overflows, both rows are used for its continuation instead of retaining the previous line;
+- in 2-line mode, the previous and latest thinking lines share the same text indentation; if the latest line overflows, both rows follow its newest tail as tokens arrive instead of retaining the previous line;
 - after the task settles, the native `Thinking...` label is restored.
 
 ```text
