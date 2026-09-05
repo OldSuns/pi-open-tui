@@ -36,6 +36,21 @@ test("compensates Pi editor padding for the custom left rail", () => {
 	assert.equal(contentLine.indexOf("x"), 2);
 });
 
+test("embeds the working indicator in the editor top border", () => {
+	const editor = new OpenTuiEditor(
+		tui,
+		editorTheme,
+		{ matches: () => false } as unknown as KeybindingsManager,
+	);
+	editor.setWorkingStatusIndicator({
+		renderInBorder: () => "◐ working",
+		renderSpinnerInBorder: () => "◐",
+	});
+
+	assert.match(stripAnsi(editor.render(40)[0] ?? ""), /^╭── ◐ working ─+╮$/);
+});
+
+
 test("uses the terminal hardware cursor for non-block styles", () => {
 	for (const [cursorStyle, sequence] of [
 		["bar", "\x1b[6 q"],

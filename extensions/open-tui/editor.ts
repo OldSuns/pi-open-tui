@@ -25,6 +25,11 @@ const CURSOR_STYLE_SEQUENCES: Partial<Record<CursorStyle, string>> = {
 };
 const DEFAULT_CURSOR_STYLE_SEQUENCE = "\x1b[0 q";
 
+interface WorkingStatusIndicator {
+	renderInBorder(width: number): string;
+	renderSpinnerInBorder(width: number): string;
+}
+
 interface HiddenThinkingLabelComponent {
 	children: unknown[];
 	setHiddenThinkingLabel(label: string): void;
@@ -78,9 +83,24 @@ function roundedBorder(
 	kind: "top" | "bottom",
 	paint: (s: string) => string,
 	sourceLine?: string,
+	status?: string,
 ): string {
 	if (width < 2) return paint(truncateToWidth(kind === "top" ? "╭╮" : "╰╯", width, ""));
 	const corners = kind === "top" ? (["╭", "╮"] as const) : (["╰", "╯"] as const);
+
+	if (kind === "top" && status) {
+		const plain = sourceLine ? stripAnsi(sourceLine) : "";
+		const scrollMatch = plain.match(/([↑↓]\s+\d+\s+more)/);
+		const left = paint("── ");
+		if (scrollMatch) {
+			const label = ` ${scrollMatch[1]} `;
+			const available = Math.max(0, width - 2 - visibleWidth(left) - visibleWidth(status) - visibleWidth(label));
+			const before = Math.floor(available / 2);
+			return `${corners[0]}${left}${status}${paint(` ${"─".repeat(before)}${label}${"─".repeat(available - before)}`)}${corners[1]}`;
+		}
+		const fill = Math.max(0, width - 2 - visibleWidth(left) - visibleWidth(status) - 1);
+		return `${corners[0]}${left}${status}${paint(` ${"─".repeat(fill)}`)}${corners[1]}`;
+	}
 
 	if (sourceLine) {
 		const plain = stripAnsi(sourceLine);
@@ -96,8 +116,10 @@ function roundedBorder(
 }
 
 export class OpenTuiEditor extends CustomEditor {
+	readonly embedWorkingStatus = true;
 	private readonly getRail: () => string;
 	private readonly getBorder: (s: string) => string;
+	private embeddedWorkingStatusIndicator: WorkingStatusIndicator | undefined;
 	private cursorStyle: CursorStyle;
 	private previewHardwareCursor = false;
 
@@ -122,6 +144,43 @@ export class OpenTuiEditor extends CustomEditor {
 		super.setPaddingX(0);
 	}
 
+	setWorkingStatusIndicator(indicator: WorkingStatusIndicator | undefined): void {
+		this.embeddedWorkingStatusIndicator = indicator;
+		this.tui.requestRender();
+	}
+
+	protected renderTopBorder(width: number, hiddenLineCount: number): string {
+		const indicator = this.embeddedWorkingStatusIndicator;
+		if (!indicator || width <= 0) {
+			return this.getBorder(hiddenLineCount > 0 ? `↑ ${hiddenLineCount} more` : "─".repeat(width));
+		}
+
+		let status = indicator.renderInBorder(Math.max(1, width - 5));
+		let statusWidth = visibleWidth(status);
+		if (statusWidth === 0) return this.getBorder("─".repeat(width));
+
+		const overflowLabel = hiddenLineCount > 0 ? ` ↑ ${hiddenLineCount} more ` : undefined;
+		const overflowLabelWidth = overflowLabel ? visibleWidth(overflowLabel) : 0;
+		const overflowStart = Math.floor((width - overflowLabelWidth) / 2);
+		const canFitOverflow = () => overflowLabel !== undefined
+			&& overflowLabelWidth + 2 <= width
+			&& overflowStart - (3 + statusWidth + 1) >= 1;
+		if (overflowLabel && !canFitOverflow()) {
+			status = indicator.renderSpinnerInBorder(width);
+			statusWidth = visibleWidth(status);
+		}
+		if (canFitOverflow()) {
+			const leftBlockWidth = 3 + statusWidth + 1;
+			return this.getBorder("── ") + status + this.getBorder(` ${"─".repeat(overflowStart - leftBlockWidth)}${overflowLabel}${"─".repeat(width - overflowStart - overflowLabelWidth)}`);
+		}
+		if (width >= statusWidth + 5) {
+			return this.getBorder("── ") + status + this.getBorder(` ${"─".repeat(width - statusWidth - 4)}`);
+		}
+		status = indicator.renderSpinnerInBorder(width);
+		statusWidth = visibleWidth(status);
+		const prefixWidth = Math.min(3, Math.max(0, width - statusWidth));
+		return this.getBorder("─".repeat(prefixWidth)) + status + this.getBorder("─".repeat(Math.max(0, width - prefixWidth - statusWidth)));
+	}
 	setCursorStyle(cursorStyle: CursorStyle, blockHardwareCursor = false): void {
 		const styleChanged = cursorStyle !== this.cursorStyle;
 		this.previewHardwareCursor = cursorStyle !== "block";
@@ -162,8 +221,9 @@ export class OpenTuiEditor extends CustomEditor {
 		const baseLines = this.renderBase(innerWidth);
 		const bottomIdx = findBottomBorderIndex(baseLines);
 
+		const status = this.embeddedWorkingStatusIndicator?.renderInBorder(Math.max(1, innerWidth - 5)) ?? "";
 		const result: string[] = [];
-		result.push(roundedBorder(width, "top", borderPaint, baseLines[0]));
+		result.push(roundedBorder(width, "top", borderPaint, baseLines[0], status));
 
 		for (let i = 1; i < bottomIdx; i++) {
 			const line = baseLines[i] ?? "";

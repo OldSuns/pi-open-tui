@@ -3,7 +3,7 @@ import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { GitStatus } from "./git.ts";
 import { emptyGitStatus } from "./git.ts";
 import type { RuntimeInfo } from "./runtime.ts";
-import { finiteOrZero, fmtTokens, formatProviderLabel } from "./utils.ts";
+import { finiteOrZero, formatProviderLabel } from "./utils.ts";
 
 export interface FooterState {
 	git: GitStatus;
