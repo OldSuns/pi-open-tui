@@ -107,15 +107,15 @@ function roundedBorder(
 			}
 			if (canFitOverflow()) {
 				const leftBlockWidth = 3 + statusWidth + 1;
-				return `${corners[0]}${paint("── ")}${status}${paint(` ${"─".repeat(overflowStart - leftBlockWidth)}${overflowLabel}${"─".repeat(contentWidth - overflowStart - overflowLabelWidth)}`)}${corners[1]}`;
+				return `${paint(`${corners[0]}── `)}${status}${paint(` ${"─".repeat(overflowStart - leftBlockWidth)}${overflowLabel}${"─".repeat(contentWidth - overflowStart - overflowLabelWidth)}${corners[1]}`)}`;
 			}
 			if (contentWidth >= statusWidth + 5) {
-				return `${corners[0]}${paint("── ")}${status}${paint(` ${"─".repeat(contentWidth - statusWidth - 4)}`)}${corners[1]}`;
+				return `${paint(`${corners[0]}── `)}${status}${paint(` ${"─".repeat(contentWidth - statusWidth - 4)}${corners[1]}`)}`;
 			}
 			status = indicator.renderSpinnerInBorder(contentWidth);
 			statusWidth = visibleWidth(status);
 			const prefixWidth = Math.min(3, Math.max(0, contentWidth - statusWidth));
-			return `${corners[0]}${paint("─".repeat(prefixWidth))}${status}${paint("─".repeat(Math.max(0, contentWidth - prefixWidth - statusWidth)))}${corners[1]}`;
+			return `${paint(`${corners[0]}${"─".repeat(prefixWidth)}`)}${status}${paint(`${"─".repeat(Math.max(0, contentWidth - prefixWidth - statusWidth))}${corners[1]}`)}`;
 		}
 	}
 

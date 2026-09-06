@@ -192,11 +192,11 @@ test("restores cursor shape and visibility when the editor is removed", () => {
 });
 
 test("frame recolors via borderColor (bash mode / thinking level hook)", () => {
-	let painted = "";
+	const painted: string[] = [];
 	const theme = {
 		...editorTheme,
 		borderColor: (text: string) => {
-			painted = text;
+			painted.push(text);
 			return text;
 		},
 	} as EditorTheme;
@@ -206,13 +206,18 @@ test("frame recolors via borderColor (bash mode / thinking level hook)", () => {
 		{ matches: () => false } as unknown as KeybindingsManager,
 	);
 	editor.setText("hi");
+	editor.setWorkingStatusIndicator({
+		renderInBorder: () => "◐ working",
+		renderSpinnerInBorder: () => "◐",
+	});
 
 	const lines = editor.render(40);
 	const top = stripAnsi(lines[0] ?? "");
 	const body = stripAnsi(lines[1] ?? "");
 
-	// Top border and rail both route through borderColor.
+	// Frame shape stays intact and working corners route through borderColor.
 	assert.ok(top.startsWith("╭") && top.endsWith("╮"), `top border shape: ${top!}`);
 	assert.ok(body.startsWith("│") && body.endsWith("│"), `body rails: ${body!}`);
-	assert.ok(painted.length > 0, "borderColor was invoked for the frame");
+	assert.ok(painted.some((text) => text.startsWith("╭")), "left top corner bypassed borderColor");
+	assert.ok(painted.some((text) => text.endsWith("╮")), "right top corner bypassed borderColor");
 });
