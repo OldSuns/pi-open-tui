@@ -1,6 +1,6 @@
 {
   "name": "pi-open-tui",
-  "version": "0.3.3",
+  "version": "0.3.4",
   "description": "A polished TUI for Pi coding agent: animated logo header, Starship-style footer, rounded editor with model metadata, and prompt-box user messages.",
   "type": "module",
   "repository": {
