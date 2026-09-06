@@ -239,6 +239,7 @@ export function effortColor(level: ThinkingLevel | string | undefined): ThemeCol
 }
 
 export function isEditorBorderLine(line: string): boolean {
+	if (typeof line !== "string") return false;
 	const plain = stripAnsi(line);
 	if (/^─+$/.test(plain)) return true;
 	if (/^─*\s*[↑↓]\s+\d+\s+more\s*─*$/.test(plain)) return true;
@@ -247,7 +248,8 @@ export function isEditorBorderLine(line: string): boolean {
 
 export function findBottomBorderIndex(lines: string[]): number {
 	for (let i = lines.length - 1; i >= 1; i--) {
-		if (isEditorBorderLine(lines[i]!)) return i;
+		const line = lines[i];
+		if (line !== undefined && isEditorBorderLine(line)) return i;
 	}
 	return Math.max(0, lines.length - 1);
 }
