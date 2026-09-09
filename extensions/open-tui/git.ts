@@ -1,6 +1,4 @@
 import { execFile } from "node:child_process";
-import { existsSync } from "node:fs";
-import { join } from "node:path";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
@@ -59,10 +57,6 @@ export async function readGitStatus(
 	cwd: string,
 	options: { readCommit?: boolean; readTag?: boolean; readCounts?: boolean } = {},
 ): Promise<GitStatus> {
-	if (!existsSync(join(cwd, ".git"))) {
-		return emptyGitStatus();
-	}
-
 	const stdout = await gitExec(
 		["status", "--porcelain=v1", "--branch", "--show-stash"],
 		cwd,

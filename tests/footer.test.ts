@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -11,7 +12,7 @@ import type {
 import type { Component, TUI } from "@earendil-works/pi-tui";
 import { DEFAULT_CONFIG } from "../extensions/open-tui/config.ts";
 import { installFooter } from "../extensions/open-tui/footer.ts";
-import { emptyGitStatus } from "../extensions/open-tui/git.ts";
+import { emptyGitStatus, readGitStatus } from "../extensions/open-tui/git.ts";
 import { resolveGlyphs, runtimeSymbol } from "../extensions/open-tui/icons.ts";
 import { clearRuntimeCache, readRuntimeInfo } from "../extensions/open-tui/runtime.ts";
 import { getUsageTotals, invalidateUsageCache, type FooterState } from "../extensions/open-tui/state.ts";
@@ -20,6 +21,20 @@ import { fitSegmentsByPriority, truncateBranch, truncatePath } from "../extensio
 const theme = {
 	fg: (_color: string, text: string) => text,
 } as Theme;
+
+test("reads Git status from a nested repository directory", async () => {
+	const root = mkdtempSync(join(tmpdir(), "open-tui-git-"));
+	const nested = join(root, "packages", "app");
+	try {
+		execFileSync("git", ["init", "-b", "nested-repo-test"], { cwd: root });
+		execFileSync("git", ["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "--allow-empty", "-m", "init"], { cwd: root });
+		mkdirSync(nested, { recursive: true });
+
+		assert.equal((await readGitStatus(nested)).branch, "nested-repo-test");
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
 
 test("branch truncation preserves the branch prefix", () => {
 	assert.equal(truncateBranch("fix/cwd-footer-truncation", 20), "fix/cwd-footer-tr...");
