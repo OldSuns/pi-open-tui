@@ -185,6 +185,11 @@ export class OpenTuiEditor extends CustomEditor {
 		const renderedLines = super.render(width);
 		if (this.cursorStyle === "block") return renderedLines;
 
+		// Pi re-applies settings.showHardwareCursor after session_start (/reload,
+		// /new, session switches). Non-block styles have no software cursor left to
+		// fall back on, so re-assert the hardware cursor instead of losing it.
+		if (!this.tui.getShowHardwareCursor()) configureCursor(this.tui, this.cursorStyle);
+
 		// A focused overlay suppresses the editor's cursor marker. Preserve its
 		// position only for the live settings preview, then clear it on refocus.
 		let cursorMarker = this.previewHardwareCursor && !this.focused ? CURSOR_MARKER : "";
