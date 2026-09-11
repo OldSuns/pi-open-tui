@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { hostname, tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import type {
@@ -171,6 +171,7 @@ test("narrow footer sheds the context bar before left segments", () => {
 test("both icon modes provide every footer semantic", () => {
 	const keys = [
 		"cwd",
+		"host",
 		"session",
 		"git",
 		"working",
@@ -488,4 +489,73 @@ test("session name uses matching glyph in nerd and ascii modes", () => {
 	assert.ok(asciiOut.includes(resolveGlyphs("ascii").session), `ascii glyph missing\n${asciiOut}`);
 	const nerdOut = renderFooterWithSession({ mode: "nerd", sessionName: "sess" });
 	assert.ok(nerdOut.includes(resolveGlyphs("nerd").session), `nerd glyph missing\n${nerdOut}`);
+});
+
+function renderFooterWithHost(opts: {
+	mode?: "nerd" | "ascii";
+	hostnameEnabled?: boolean;
+	width?: number;
+} = {}): string {
+	const { mode = "ascii", hostnameEnabled = true, width = 160 } = opts;
+	let footerFactory: NonNullable<Parameters<ExtensionContext["ui"]["setFooter"]>[0]> | undefined;
+	const ctx = {
+		model: { provider: "openai", contextWindow: 1_000 },
+		ui: {
+			setFooter(factory: typeof footerFactory) {
+				footerFactory = factory;
+			},
+		},
+		sessionManager: {
+			getCwd: () => "/work/project",
+			getEntries: () => [],
+			getSessionName: () => undefined,
+		},
+		getContextUsage: () => ({ tokens: 0, contextWindow: 1_000, percent: 0 }),
+	} as unknown as ExtensionContext;
+	const config = structuredClone(DEFAULT_CONFIG);
+	config.icons.mode = mode;
+	config.footerSegments.hostname = hostnameEnabled;
+	const state: FooterState = {
+		git: emptyGitStatus(),
+		runtime: null,
+		sessionStartEpoch: Date.now(),
+		workingSince: undefined,
+		lastDoneIn: undefined,
+	};
+	installFooter(
+		ctx,
+		() => state,
+		() => config,
+		() => ({ provider: "OpenAI", model: "gpt-5", effort: "off" }),
+		{ setRequestRender() {}, scheduleGitRefresh() {} },
+	);
+	assert.ok(footerFactory);
+	const footerData = {
+		onBranchChange: () => () => {},
+		getExtensionStatuses: () => new Map(),
+	} as unknown as ReadonlyFooterDataProvider;
+	const component = footerFactory(
+		{ requestRender() {} } as TUI,
+		theme,
+		footerData,
+	) as Component;
+	return component.render(width).join("\n");
+}
+
+test("footer shows the short host name next to cwd when enabled", () => {
+	const expectedHost = hostname().split(".")[0];
+	const out = renderFooterWithHost();
+	assert.ok(out.includes(expectedHost), `missing short host name\n${out}`);
+});
+
+test("footer hides host name when footerSegments.hostname is false", () => {
+	const out = renderFooterWithHost({ hostnameEnabled: false });
+	assert.ok(!out.includes(hostname().split(".")[0]), `should be hidden when disabled\n${out}`);
+});
+
+test("host name uses matching glyph in nerd and ascii modes", () => {
+	const asciiOut = renderFooterWithHost({ mode: "ascii" });
+	assert.ok(asciiOut.includes(resolveGlyphs("ascii").host), `ascii glyph missing\n${asciiOut}`);
+	const nerdOut = renderFooterWithHost({ mode: "nerd" });
+	assert.ok(nerdOut.includes(resolveGlyphs("nerd").host), `nerd glyph missing\n${nerdOut}`);
 });

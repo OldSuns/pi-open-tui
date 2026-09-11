@@ -39,6 +39,7 @@ const COPY = {
 			cursorStyle: "Cursor style",
 			iconMode: "Icon mode",
 			cwd: "CWD",
+			hostname: "Hostname",
 			sessionName: "Session name",
 			gitBranch: "Git branch",
 			gitStatus: "Git status",
@@ -76,6 +77,7 @@ const COPY = {
 			cursorStyle: "光标样式",
 			iconMode: "图标模式",
 			cwd: "当前目录",
+			hostname: "主机名",
 			sessionName: "会话名",
 			gitBranch: "Git 分支",
 			gitStatus: "Git 状态",
@@ -196,6 +198,7 @@ function buildSegmentsItems(config: OpenTuiConfig, copy: SettingsCopy): SettingI
 	const flag = (value: boolean) => value ? copy.values.on : copy.values.off;
 	return [
 		{ id: "cwd", label: copy.labels.cwd, currentValue: flag(segs.cwd) },
+		{ id: "hostname", label: copy.labels.hostname, currentValue: flag(segs.hostname) },
 		{ id: "sessionName", label: copy.labels.sessionName, currentValue: flag(segs.sessionName) },
 		{ id: "gitBranch", label: copy.labels.gitBranch, currentValue: flag(segs.gitBranch) },
 		{ id: "gitStatus", label: copy.labels.gitStatus, currentValue: flag(segs.gitStatus) },
@@ -374,7 +377,7 @@ class SettingsUi implements SettingsUiHandle {
 				description: editing || this.compact ? undefined : item.currentValue,
 			} as SelectItem;
 		});
-		this.selectList = new SelectList(items, Math.min(items.length, 10), {
+		this.selectList = new SelectList(items, Math.min(items.length, 12), {
 			selectedPrefix: (t) => this.theme.fg("accent", t),
 			selectedText: (t) => this.theme.fg("accent", t),
 			description: (t) => this.theme.fg("muted", t),

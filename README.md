@@ -66,6 +66,7 @@ Run `/open-tui` to open the settings dialog. It provides **General**, **Appearan
   },
   "footerSegments": {
     "cwd": true,
+    "hostname": false,
     "sessionName": false,
     "gitBranch": true,
     "gitStatus": true,
@@ -103,7 +104,7 @@ Key options:
 | `telemetry` | Boolean flags | Enables telemetry and its individual measurements |
 | `thinkingPeek.lines` | `0`, `1`, `2` | Off, one-line, or two-line hidden thinking preview |
 
-`sessionName` appears only when the session has a name. `gitCommit` shows the short hash and tag in detached HEAD state. Disabling `extensionStatuses` hides the entire extension status line, including MCP status.
+`sessionName` appears only when the session has a name. `hostname` shows the short host name (first label of the machine's host name, e.g. `mba` from `mba.example.com`) with a server icon. `gitCommit` shows the short hash and tag in detached HEAD state. Disabling `extensionStatuses` hides the entire extension status line, including MCP status.
 
 Fullscreen wheel speed uses an isolated compatibility shim for Pi 0.84.2's runtime field because Pi does not yet expose a public setter. On Pi versions without a compatible field, the setting is ignored and Pi's default scrolling remains active.
 

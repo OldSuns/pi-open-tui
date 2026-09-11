@@ -255,6 +255,7 @@ test("keeps the changed setting selected", async () => {
 	settings.component.handleInput("\t");
 	settings.component.handleInput("\x1b[B");
 	settings.component.handleInput("\x1b[B");
+	settings.component.handleInput("\x1b[B");
 	assert.match(selectedLine(settings.component), /Git branch/);
 
 	settings.component.handleInput("\r");
@@ -267,6 +268,7 @@ test("remembers the selection for each tab", async () => {
 
 	settings.component.handleInput("\t");
 	settings.component.handleInput("\t");
+	settings.component.handleInput("\x1b[B");
 	settings.component.handleInput("\x1b[B");
 	settings.component.handleInput("\x1b[B");
 	settings.component.handleInput("\t");
@@ -318,7 +320,7 @@ test("configures the extension status line with Space", async () => {
 	const settings = await openSettings();
 	settings.component.handleInput("\x1b[C");
 	settings.component.handleInput("\x1b[C");
-	for (let i = 0; i < 9; i++) settings.component.handleInput("\x1b[B");
+	for (let i = 0; i < 10; i++) settings.component.handleInput("\x1b[B");
 	assert.match(selectedLine(settings.component), /Extension status line/);
 
 	settings.component.handleInput(" ");

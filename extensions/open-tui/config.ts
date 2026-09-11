@@ -15,6 +15,7 @@ export type { IconMode } from "./icons.ts";
 
 export interface FooterSegments {
 	cwd: boolean;
+	hostname: boolean;
 	sessionName: boolean;
 	gitBranch: boolean;
 	gitStatus: boolean;
@@ -69,6 +70,7 @@ export const DEFAULT_CONFIG: OpenTuiConfig = {
 	},
 	footerSegments: {
 		cwd: true,
+		hostname: false,
 		sessionName: false,
 		gitBranch: true,
 		gitStatus: true,
