@@ -251,11 +251,11 @@ test("keeps a hardware cursor after Pi re-applies its runtime settings", () => {
 	hostTui.setShowHardwareCursor(false);
 	cursorEvents.length = 0;
 	(hostTui as unknown as { doRender(): void }).doRender();
+	assert.equal(cursorEvents.at(-1), "show");
 
 	assert.ok(
 		editor.render(40).every((line) => !line.includes("\x1b[7m")),
 		"software cursor stays stripped",
 	);
-	assert.equal(cursorEvents.at(-1), "show");
 	hostTui.stop();
 });
