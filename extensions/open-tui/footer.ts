@@ -26,6 +26,10 @@ import {
 import type { FooterState, ModelMeta, UsageTotals } from "./state.ts";
 import { getUsageTotals } from "./state.ts";
 
+export function shortHostname(hostname: string): string {
+	return hostname.split(".")[0] ?? "";
+}
+
 function renderBar(theme: Theme, pct: number, barWidth: number, ascii: boolean): string {
 	const filled = Math.max(0, Math.min(barWidth, Math.round((pct / 100) * barWidth)));
 	const empty = barWidth - filled;
@@ -248,7 +252,7 @@ export function installFooter(
 					});
 				}
 				if (segments.hostname) {
-					const shortHost = osHostname().split(".")[0];
+					const shortHost = shortHostname(osHostname());
 					if (shortHost) {
 						leftParts.push({
 							text: `${theme.fg("dim", glyphs.host)} ${theme.fg("accent", shortHost)}`,

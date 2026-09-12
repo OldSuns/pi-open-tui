@@ -11,7 +11,7 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import type { Component, TUI } from "@earendil-works/pi-tui";
 import { DEFAULT_CONFIG } from "../extensions/open-tui/config.ts";
-import { installFooter } from "../extensions/open-tui/footer.ts";
+import { installFooter, shortHostname } from "../extensions/open-tui/footer.ts";
 import { emptyGitStatus, readGitStatus } from "../extensions/open-tui/git.ts";
 import { resolveGlyphs, runtimeSymbol } from "../extensions/open-tui/icons.ts";
 import { clearRuntimeCache, readRuntimeInfo } from "../extensions/open-tui/runtime.ts";
@@ -542,15 +542,22 @@ function renderFooterWithHost(opts: {
 	return component.render(width).join("\n");
 }
 
+test("short hostname keeps the first label across host name formats", () => {
+	assert.equal(shortHostname("mba.example.com"), "mba");
+	assert.equal(shortHostname("OldSun_Laptop"), "OldSun_Laptop");
+	assert.equal(shortHostname(""), "");
+});
+
 test("footer shows the short host name next to cwd when enabled", () => {
-	const expectedHost = hostname().split(".")[0];
+	const expectedHost = shortHostname(hostname());
 	const out = renderFooterWithHost();
-	assert.ok(out.includes(expectedHost), `missing short host name\n${out}`);
+	assert.ok(out.includes(`${resolveGlyphs("ascii").host} ${expectedHost}`), `missing short host name\n${out}`);
 });
 
 test("footer hides host name when footerSegments.hostname is false", () => {
+	const expectedHost = shortHostname(hostname());
 	const out = renderFooterWithHost({ hostnameEnabled: false });
-	assert.ok(!out.includes(hostname().split(".")[0]), `should be hidden when disabled\n${out}`);
+	assert.ok(!out.includes(`${resolveGlyphs("ascii").host} ${expectedHost}`), `should be hidden when disabled\n${out}`);
 });
 
 test("host name uses matching glyph in nerd and ascii modes", () => {
