@@ -88,6 +88,7 @@ test("uses the terminal hardware cursor for non-block styles", () => {
 				rows: 24,
 				write: (data: string) => writes.push(data),
 			},
+			getShowHardwareCursor: () => hardwareCursor === true,
 			setShowHardwareCursor: (enabled: boolean) => {
 				hardwareCursor = enabled;
 			},
@@ -220,4 +221,41 @@ test("frame recolors via borderColor (bash mode / thinking level hook)", () => {
 	assert.ok(body.startsWith("│") && body.endsWith("│"), `body rails: ${body!}`);
 	assert.ok(painted.some((text) => text.startsWith("╭")), "left top corner bypassed borderColor");
 	assert.ok(painted.some((text) => text.endsWith("╮")), "right top corner bypassed borderColor");
+});
+
+test("keeps a hardware cursor after Pi re-applies its runtime settings", () => {
+	const cursorEvents: string[] = [];
+	const terminal = {
+		columns: 80,
+		rows: 24,
+		kittyProtocolActive: false,
+		start() {},
+		stop() {},
+		write() {},
+		hideCursor: () => cursorEvents.push("hide"),
+		showCursor: () => cursorEvents.push("show"),
+	} as unknown as Terminal;
+	const hostTui = new TuiMainScreen(terminal, false);
+	const editor = new OpenTuiEditor(
+		hostTui,
+		editorTheme,
+		{ matches: () => false } as unknown as KeybindingsManager,
+		"bar",
+	);
+	hostTui.addChild(editor);
+	hostTui.setFocus(editor);
+
+	// Pi re-applies settings.showHardwareCursor after session_start on /reload,
+	// which would leave no cursor at all: the software cursor is stripped for
+	// non-block styles.
+	hostTui.setShowHardwareCursor(false);
+	cursorEvents.length = 0;
+	(hostTui as unknown as { doRender(): void }).doRender();
+	assert.equal(cursorEvents.at(-1), "show");
+
+	assert.ok(
+		editor.render(40).every((line) => !line.includes("\x1b[7m")),
+		"software cursor stays stripped",
+	);
+	hostTui.stop();
 });
