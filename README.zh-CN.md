@@ -66,6 +66,7 @@ pi -e npm:pi-open-tui
   },
   "footerSegments": {
     "cwd": true,
+    "hostname": false,
     "sessionName": false,
     "gitBranch": true,
     "gitStatus": true,
@@ -103,7 +104,7 @@ pi -e npm:pi-open-tui
 | `telemetry` | 布尔开关 | 控制遥测总开关和各项指标 |
 | `thinkingPeek.lines` | `0`、`1`、`2` | 关闭、单行或双行思考预览 |
 
-`sessionName` 仅在会话有名称时显示；`gitCommit` 会在 detached HEAD 状态下显示短哈希和标签；关闭 `extensionStatuses` 会隐藏整行扩展状态，其中也包括 MCP 状态。
+`sessionName` 仅在会话有名称时显示；`hostname` 会显示主机名的短名称（主机名的第一个标签，例如从 `mba.example.com` 显示为 `mba`），并使用服务器图标；`gitCommit` 会在 detached HEAD 状态下显示短哈希和标签；关闭 `extensionStatuses` 会隐藏整行扩展状态，其中也包括 MCP 状态。
 
 全屏滚轮速度通过隔离的兼容层写入 Pi 0.84.2 的运行时字段，因为 Pi 尚未提供公开 setter。若后续 Pi 版本不再包含兼容字段，该设置会被忽略并继续使用 Pi 的默认滚动行为。
 

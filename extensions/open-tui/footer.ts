@@ -1,4 +1,5 @@
 import type { ExtensionContext, Theme, ThemeColor } from "@earendil-works/pi-coding-agent";
+import { hostname as osHostname } from "node:os";
 import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import type { OpenTuiConfig } from "./config.ts";
 import type { IconGlyphs } from "./icons.ts";
@@ -24,6 +25,10 @@ import {
 } from "./utils.ts";
 import type { FooterState, ModelMeta, UsageTotals } from "./state.ts";
 import { getUsageTotals } from "./state.ts";
+
+export function shortHostname(hostname: string): string {
+	return hostname.split(".")[0] ?? "";
+}
 
 function renderBar(theme: Theme, pct: number, barWidth: number, ascii: boolean): string {
 	const filled = Math.max(0, Math.min(barWidth, Math.round((pct / 100) * barWidth)));
@@ -245,6 +250,15 @@ export function installFooter(
 							return `${cwdPrefix}${accent(truncatePath(basenamePath(cwd), pathWidth))}`;
 						},
 					});
+				}
+				if (segments.hostname) {
+					const shortHost = shortHostname(osHostname());
+					if (shortHost) {
+						leftParts.push({
+							text: `${theme.fg("dim", glyphs.host)} ${theme.fg("accent", shortHost)}`,
+							priority: 1,
+						});
+					}
 				}
 				if (segments.sessionName) {
 					const sessionName = ctx.sessionManager.getSessionName();
