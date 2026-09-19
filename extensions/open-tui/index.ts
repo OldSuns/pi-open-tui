@@ -125,19 +125,24 @@ export default function (pi: ExtensionAPI) {
 		}
 	};
 	/** install the UI once while keeping configuration reads live for runtime changes */
-	const applyUi = (ctx: ExtensionContext) => {
+	function applyUi(ctx: ExtensionContext): void {
 		if (!isTuiContext(ctx)) return;
 		if (!config.enabled) {
 			uninstallUi(ctx);
 			return;
 		}
 		if (!active) {
+			/** read model metadata from the current configuration without reinstalling the footer */
+			function readModelMeta() {
+				return getModelMeta(ctx, getThinkingLevel, config.footer.capitalizeProviderName);
+			}
+
 			cleanupHeader = installHeader(pi, ctx);
 			cleanupFooter = installFooter(
 				ctx,
 				() => state,
 				() => config,
-				() => getModelMeta(ctx, getThinkingLevel, config.footer.capitalizeProviderName),
+				readModelMeta,
 				{
 					setRequestRender: (fn) => {
 						requestFooterRender = fn ?? undefined;
@@ -150,7 +155,7 @@ export default function (pi: ExtensionAPI) {
 			editor = installEditor(pi, ctx, config.cursorStyle, config.fullscreen.wheelScrollLines);
 			active = true;
 		}
-	};
+	}
 
 	const uninstallUi = (ctx: ExtensionContext) => {
 		if (!isTuiContext(ctx)) return;
