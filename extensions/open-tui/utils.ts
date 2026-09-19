@@ -97,6 +97,7 @@ export function formatModelLabel(model: { provider?: string; id?: string } | nul
 	return model.provider ? `${model.provider}/${model.id}` : model.id;
 }
 
+/** format a provider label with optional first-character capitalization */
 export function formatProviderLabel(provider: string | undefined, capitalize = true): string {
 	if (!provider) return "Unknown";
 	return capitalize ? provider.charAt(0).toUpperCase() + provider.slice(1) : provider;

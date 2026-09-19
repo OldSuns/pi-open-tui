@@ -91,6 +91,7 @@ export interface ModelMeta {
 	effort: string | undefined;
 }
 
+/** build footer metadata from the active model and current thinking level */
 export function getModelMeta(
 	ctx: ExtensionContext,
 	getThinkingLevel: () => string,

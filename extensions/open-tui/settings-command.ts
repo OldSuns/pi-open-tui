@@ -124,6 +124,7 @@ function toggleSetting(config: OpenTuiConfig, key: keyof OpenTuiConfig["footerSe
 	};
 }
 
+/** toggle provider-name capitalization without mutating the current configuration */
 function toggleCapitalizeProviderName(config: OpenTuiConfig): OpenTuiConfig {
 	return {
 		...config,
@@ -205,6 +206,7 @@ function buildIconsItems(config: OpenTuiConfig, copy: SettingsCopy): SettingItem
 	];
 }
 
+/** build footer settings for segment visibility and provider label formatting */
 function buildSegmentsItems(config: OpenTuiConfig, copy: SettingsCopy): SettingItem[] {
 	const segs = config.footerSegments;
 	const flag = (value: boolean) => value ? copy.values.on : copy.values.off;
@@ -252,6 +254,7 @@ function buildItems(tab: Tab, config: OpenTuiConfig): SettingItem[] {
 	}
 }
 
+/** apply one settings item change without mutating the current configuration */
 function handleSettingChange(
 	tab: Tab,
 	itemId: string,

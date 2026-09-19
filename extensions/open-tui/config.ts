@@ -146,6 +146,7 @@ export function ensureConfigExists(): void {
 	}
 }
 
+/** load persisted configuration and normalize invalid fields independently */
 export function loadConfig(notify?: (msg: string, level: "warning" | "info") => void): OpenTuiConfig {
 	const path = getConfigPath();
 	if (!existsSync(path)) {

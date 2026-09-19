@@ -42,6 +42,7 @@ function isTuiContext(ctx: ExtensionContext): boolean {
 	}
 }
 
+/** register open-tui commands and coordinate the session UI lifecycle */
 export default function (pi: ExtensionAPI) {
 	const sessionLifecycle = new SessionLifecycle();
 	const state: FooterState = createInitialState();
@@ -123,6 +124,7 @@ export default function (pi: ExtensionAPI) {
 			peekSettleTimer = undefined;
 		}
 	};
+	/** install the UI once while keeping configuration reads live for runtime changes */
 	const applyUi = (ctx: ExtensionContext) => {
 		if (!isTuiContext(ctx)) return;
 		if (!config.enabled) {
