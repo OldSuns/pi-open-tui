@@ -92,14 +92,16 @@ export function formatDuration(ms: number): string {
 	return `${h}h ${m}m ${s}s`;
 }
 
+/** format a model identifier with its provider when available */
 export function formatModelLabel(model: { provider?: string; id?: string } | null | undefined): string {
 	if (!model?.id) return "no-model";
 	return model.provider ? `${model.provider}/${model.id}` : model.id;
 }
 
-export function formatProviderLabel(provider: string | undefined): string {
+/** format a provider label with optional first-character capitalization */
+export function formatProviderLabel(provider: string | undefined, capitalize = true): string {
 	if (!provider) return "Unknown";
-	return provider.charAt(0).toUpperCase() + provider.slice(1);
+	return capitalize ? provider.charAt(0).toUpperCase() + provider.slice(1) : provider;
 }
 
 export function alignRight(left: string, right: string, width: number, theme: Theme): string {

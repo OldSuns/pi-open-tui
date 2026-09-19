@@ -64,6 +64,9 @@ pi -e npm:pi-open-tui
   "icons": {
     "mode": "auto"
   },
+  "footer": {
+    "capitalizeProviderName": true
+  },
   "footerSegments": {
     "cwd": true,
     "hostname": false,
@@ -100,6 +103,7 @@ pi -e npm:pi-open-tui
 | `cursorStyle` | `block`、`bar`、`underline` | `bar` 和 `underline` 需要终端支持光标形状转义序列 |
 | `fullscreen.wheelScrollLines` | `1`-`10` | 全屏模式下滚轮每格滚动的行数，默认值为 `4`；`/open-tui` 中在该项上按 Enter 后直接输入数字（超出范围会自动钳制到 `1`-`10`） |
 | `icons.mode` | `auto`、`nerd`、`ascii` | 控制底栏和遥测通知使用的图标 |
+| `footer.capitalizeProviderName` | 布尔开关 | 将提供商名称的首字母改为大写；设为 `false` 时保留原始大小写 |
 | `footerSegments` | 布尔开关 | 分别控制底栏中的各项数据 |
 | `telemetry` | 布尔开关 | 控制遥测总开关和各项指标 |
 | `thinkingPeek.lines` | `0`、`1`、`2` | 关闭、单行或双行思考预览 |

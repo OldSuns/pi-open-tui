@@ -49,6 +49,7 @@ const COPY = {
 			tokens: "Tokens",
 			cost: "Cost",
 			extensionStatuses: "Extension status line",
+			capitalizeProviderName: "Capitalize provider name",
 			totalDuration: "Total duration",
 			tokenCounts: "Token counts",
 			stallDetails: "Stall details",
@@ -87,6 +88,7 @@ const COPY = {
 			tokens: "Token",
 			cost: "费用",
 			extensionStatuses: "扩展状态行",
+			capitalizeProviderName: "提供商名称首字母大写",
 			totalDuration: "总耗时",
 			tokenCounts: "Token 数量",
 			stallDetails: "停顿详情",
@@ -112,12 +114,24 @@ function formatThinkingPeekLines(lines: ThinkingPeekLines, copy: SettingsCopy): 
 	return values[lines] ?? values[0];
 }
 
+/** toggle one footer segment without mutating the current configuration */
 function toggleSetting(config: OpenTuiConfig, key: keyof OpenTuiConfig["footerSegments"]): OpenTuiConfig {
 	return {
 		...config,
 		footerSegments: {
 			...config.footerSegments,
 			[key]: !config.footerSegments[key],
+		},
+	};
+}
+
+/** toggle provider-name capitalization without mutating the current configuration */
+function toggleCapitalizeProviderName(config: OpenTuiConfig): OpenTuiConfig {
+	return {
+		...config,
+		footer: {
+			...config.footer,
+			capitalizeProviderName: !config.footer.capitalizeProviderName,
 		},
 	};
 }
@@ -193,9 +207,14 @@ function buildIconsItems(config: OpenTuiConfig, copy: SettingsCopy): SettingItem
 	];
 }
 
+/** build footer settings for segment visibility and provider label formatting */
 function buildSegmentsItems(config: OpenTuiConfig, copy: SettingsCopy): SettingItem[] {
 	const segs = config.footerSegments;
-	const flag = (value: boolean) => value ? copy.values.on : copy.values.off;
+
+	/** format a boolean setting with the selected language */
+	function flag(value: boolean): string {
+		return value ? copy.values.on : copy.values.off;
+	}
 	return [
 		{ id: "cwd", label: copy.labels.cwd, currentValue: flag(segs.cwd) },
 		{ id: "hostname", label: copy.labels.hostname, currentValue: flag(segs.hostname) },
@@ -208,6 +227,11 @@ function buildSegmentsItems(config: OpenTuiConfig, copy: SettingsCopy): SettingI
 		{ id: "tokens", label: copy.labels.tokens, currentValue: flag(segs.tokens) },
 		{ id: "cost", label: copy.labels.cost, currentValue: flag(segs.cost) },
 		{ id: "extensionStatuses", label: copy.labels.extensionStatuses, currentValue: flag(segs.extensionStatuses) },
+		{
+			id: "capitalizeProviderName",
+			label: copy.labels.capitalizeProviderName,
+			currentValue: flag(config.footer.capitalizeProviderName),
+		},
 	];
 }
 
@@ -235,6 +259,7 @@ function buildItems(tab: Tab, config: OpenTuiConfig): SettingItem[] {
 	}
 }
 
+/** apply one settings item change without mutating the current configuration */
 function handleSettingChange(
 	tab: Tab,
 	itemId: string,
@@ -250,6 +275,7 @@ function handleSettingChange(
 		if (itemId === "cursorStyle") return cycleCursorStyle(config);
 	}
 	if (tab === "segments") {
+		if (itemId === "capitalizeProviderName") return toggleCapitalizeProviderName(config);
 		return toggleSetting(config, itemId as keyof OpenTuiConfig["footerSegments"]);
 	}
 	if (tab === "telemetry") {

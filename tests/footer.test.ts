@@ -15,7 +15,7 @@ import { installFooter, shortHostname } from "../extensions/open-tui/footer.ts";
 import { emptyGitStatus, readGitStatus } from "../extensions/open-tui/git.ts";
 import { resolveGlyphs, runtimeSymbol } from "../extensions/open-tui/icons.ts";
 import { clearRuntimeCache, readRuntimeInfo } from "../extensions/open-tui/runtime.ts";
-import { getUsageTotals, invalidateUsageCache, type FooterState } from "../extensions/open-tui/state.ts";
+import { getModelMeta, getUsageTotals, invalidateUsageCache, type FooterState } from "../extensions/open-tui/state.ts";
 import { fitSegmentsByPriority, truncateBranch, truncatePath } from "../extensions/open-tui/utils.ts";
 
 const theme = {
@@ -194,6 +194,23 @@ test("both icon modes provide every footer semantic", () => {
 		for (const key of keys) assert.notEqual(glyphs[key], "", `${mode}.${key}`);
 	}
 });
+
+/** return the disabled thinking level for model metadata tests */
+function disabledThinkingLevel(): string {
+	return "off";
+}
+
+/** verify that provider labels can preserve their original casing */
+function testProviderNameCapitalization(): void {
+	const ctx = {
+		model: { provider: "openAI", id: "gpt-5", reasoning: false },
+	} as unknown as ExtensionContext;
+
+	assert.equal(getModelMeta(ctx, disabledThinkingLevel).provider, "OpenAI");
+	assert.equal(getModelMeta(ctx, disabledThinkingLevel, false).provider, "openAI");
+}
+
+test("provider name capitalization can be disabled", testProviderNameCapitalization);
 
 test("uses the official Nerd Font runtime symbols", () => {
 	assert.equal(runtimeSymbol("nodejs", "nerd"), "\uE718");

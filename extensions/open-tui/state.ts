@@ -91,11 +91,13 @@ export interface ModelMeta {
 	effort: string | undefined;
 }
 
+/** build footer metadata from the active model and current thinking level */
 export function getModelMeta(
 	ctx: ExtensionContext,
 	getThinkingLevel: () => string,
+	capitalizeProviderName = true,
 ): ModelMeta {
-	const provider = formatProviderLabel(ctx.model?.provider);
+	const provider = formatProviderLabel(ctx.model?.provider, capitalizeProviderName);
 	const model = ctx.model?.name ?? ctx.model?.id ?? "no-model";
 	const reasoning = ctx.model?.reasoning ?? false;
 	const effort = reasoning ? getThinkingLevel() : undefined;

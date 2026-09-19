@@ -45,6 +45,10 @@ export interface FullscreenConfig {
 	wheelScrollLines: number;
 }
 
+export interface FooterConfig {
+	capitalizeProviderName: boolean;
+}
+
 export interface OpenTuiConfig {
 	enabled: boolean;
 	settingsLanguage: SettingsLanguage;
@@ -53,6 +57,7 @@ export interface OpenTuiConfig {
 	icons: {
 		mode: IconMode;
 	};
+	footer: FooterConfig;
 	footerSegments: FooterSegments;
 	telemetry: TelemetryConfig;
 	thinkingPeek: ThinkingPeekConfig;
@@ -67,6 +72,9 @@ export const DEFAULT_CONFIG: OpenTuiConfig = {
 	},
 	icons: {
 		mode: "auto",
+	},
+	footer: {
+		capitalizeProviderName: true,
 	},
 	footerSegments: {
 		cwd: true,
@@ -138,6 +146,7 @@ export function ensureConfigExists(): void {
 	}
 }
 
+/** load persisted configuration and normalize invalid fields independently */
 export function loadConfig(notify?: (msg: string, level: "warning" | "info") => void): OpenTuiConfig {
 	const path = getConfigPath();
 	if (!existsSync(path)) {
@@ -159,6 +168,11 @@ export function loadConfig(notify?: (msg: string, level: "warning" | "info") => 
 			config.fullscreen.wheelScrollLines,
 			DEFAULT_CONFIG.fullscreen.wheelScrollLines,
 		);
+		if (typeof config.footer !== "object" || config.footer === null || Array.isArray(config.footer)) {
+			config.footer = structuredClone(DEFAULT_CONFIG.footer);
+		} else if (typeof config.footer.capitalizeProviderName !== "boolean") {
+			config.footer.capitalizeProviderName = DEFAULT_CONFIG.footer.capitalizeProviderName;
+		}
 		if (typeof config.thinkingPeek !== "object" || config.thinkingPeek === null || Array.isArray(config.thinkingPeek)) {
 			config.thinkingPeek = structuredClone(DEFAULT_CONFIG.thinkingPeek);
 		} else {

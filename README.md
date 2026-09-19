@@ -64,6 +64,9 @@ Run `/open-tui` to open the settings dialog. It provides **General**, **Appearan
   "icons": {
     "mode": "auto"
   },
+  "footer": {
+    "capitalizeProviderName": true
+  },
   "footerSegments": {
     "cwd": true,
     "hostname": false,
@@ -100,6 +103,7 @@ Key options:
 | `cursorStyle` | `block`, `bar`, `underline` | `bar` and `underline` require terminal cursor-shape support |
 | `fullscreen.wheelScrollLines` | `1`-`10` | Lines scrolled per mouse-wheel notch in fullscreen mode; defaults to `4`. In `/open-tui`, press Enter on this item and type a number (values are clamped to `1`-`10`) |
 | `icons.mode` | `auto`, `nerd`, `ascii` | Controls footer and telemetry icons |
+| `footer.capitalizeProviderName` | Boolean | Capitalizes the first provider-name character. Set it to `false` to preserve the provider's original casing |
 | `footerSegments` | Boolean flags | Shows or hides individual footer data |
 | `telemetry` | Boolean flags | Enables telemetry and its individual measurements |
 | `thinkingPeek.lines` | `0`, `1`, `2` | Off, one-line, or two-line hidden thinking preview |
