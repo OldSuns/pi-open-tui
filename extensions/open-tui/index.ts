@@ -135,7 +135,7 @@ export default function (pi: ExtensionAPI) {
 				ctx,
 				() => state,
 				() => config,
-				() => getModelMeta(ctx, getThinkingLevel),
+				() => getModelMeta(ctx, getThinkingLevel, config.footer.capitalizeProviderName),
 				{
 					setRequestRender: (fn) => {
 						requestFooterRender = fn ?? undefined;

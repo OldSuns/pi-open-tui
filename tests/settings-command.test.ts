@@ -340,6 +340,18 @@ test("configures the extension status line with Space", async () => {
 	assert.match(selectedLine(settings.component), /Extension status line/);
 });
 
+test("configures provider name capitalization", async () => {
+	const settings = await openSettings();
+	settings.component.handleInput("\x1b[C");
+	settings.component.handleInput("\x1b[C");
+	for (let i = 0; i < 11; i++) settings.component.handleInput("\x1b[B");
+	assert.match(selectedLine(settings.component), /Capitalize provider name/);
+
+	settings.component.handleInput(" ");
+	assert.equal(settings.getConfig().footer.capitalizeProviderName, false);
+	assert.match(selectedLine(settings.component), /Capitalize provider name/);
+});
+
 test("keeps localized settings and values within narrow widths", async () => {
 	const config = structuredClone(DEFAULT_CONFIG);
 	config.settingsLanguage = "zh";
@@ -364,12 +376,41 @@ test("normalizes invalid settings values", () => {
 		writeFileSync(join(agentDir, "open-tui.json"), JSON.stringify({
 			settingsLanguage: "de",
 			cursorStyle: "invalid",
+			footer: { capitalizeProviderName: "invalid" },
 			thinkingPeek: { lines: 9 },
 		}), "utf8");
 		const loaded = loadConfig();
 		assert.equal(loaded.settingsLanguage, "en");
 		assert.equal(loaded.cursorStyle, "block");
+		assert.equal(loaded.footer.capitalizeProviderName, true);
 		assert.equal(loaded.thinkingPeek.lines, 1);
+	} finally {
+		if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+		else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+		rmSync(agentDir, { recursive: true, force: true });
+	}
+});
+
+test("loads and normalizes the footer configuration", () => {
+	const agentDir = mkdtempSync(join(tmpdir(), "pi-open-tui-"));
+	const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+	try {
+		process.env.PI_CODING_AGENT_DIR = agentDir;
+		const configPath = join(agentDir, "open-tui.json");
+
+		writeFileSync(configPath, JSON.stringify({
+			settingsLanguage: "zh",
+			footer: null,
+		}), "utf8");
+		const normalized = loadConfig();
+		assert.equal(normalized.settingsLanguage, "zh");
+		assert.equal(normalized.footer.capitalizeProviderName, true);
+
+		writeFileSync(configPath, JSON.stringify({
+			footer: { capitalizeProviderName: false },
+		}), "utf8");
+		const loaded = loadConfig();
+		assert.equal(loaded.footer.capitalizeProviderName, false);
 	} finally {
 		if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
 		else process.env.PI_CODING_AGENT_DIR = previousAgentDir;

@@ -49,6 +49,7 @@ const COPY = {
 			tokens: "Tokens",
 			cost: "Cost",
 			extensionStatuses: "Extension status line",
+			capitalizeProviderName: "Capitalize provider name",
 			totalDuration: "Total duration",
 			tokenCounts: "Token counts",
 			stallDetails: "Stall details",
@@ -87,6 +88,7 @@ const COPY = {
 			tokens: "Token",
 			cost: "费用",
 			extensionStatuses: "扩展状态行",
+			capitalizeProviderName: "提供商名称首字母大写",
 			totalDuration: "总耗时",
 			tokenCounts: "Token 数量",
 			stallDetails: "停顿详情",
@@ -118,6 +120,16 @@ function toggleSetting(config: OpenTuiConfig, key: keyof OpenTuiConfig["footerSe
 		footerSegments: {
 			...config.footerSegments,
 			[key]: !config.footerSegments[key],
+		},
+	};
+}
+
+function toggleCapitalizeProviderName(config: OpenTuiConfig): OpenTuiConfig {
+	return {
+		...config,
+		footer: {
+			...config.footer,
+			capitalizeProviderName: !config.footer.capitalizeProviderName,
 		},
 	};
 }
@@ -208,6 +220,11 @@ function buildSegmentsItems(config: OpenTuiConfig, copy: SettingsCopy): SettingI
 		{ id: "tokens", label: copy.labels.tokens, currentValue: flag(segs.tokens) },
 		{ id: "cost", label: copy.labels.cost, currentValue: flag(segs.cost) },
 		{ id: "extensionStatuses", label: copy.labels.extensionStatuses, currentValue: flag(segs.extensionStatuses) },
+		{
+			id: "capitalizeProviderName",
+			label: copy.labels.capitalizeProviderName,
+			currentValue: flag(config.footer.capitalizeProviderName),
+		},
 	];
 }
 
@@ -250,6 +267,7 @@ function handleSettingChange(
 		if (itemId === "cursorStyle") return cycleCursorStyle(config);
 	}
 	if (tab === "segments") {
+		if (itemId === "capitalizeProviderName") return toggleCapitalizeProviderName(config);
 		return toggleSetting(config, itemId as keyof OpenTuiConfig["footerSegments"]);
 	}
 	if (tab === "telemetry") {
