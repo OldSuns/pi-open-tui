@@ -114,6 +114,7 @@ function formatThinkingPeekLines(lines: ThinkingPeekLines, copy: SettingsCopy): 
 	return values[lines] ?? values[0];
 }
 
+/** toggle one footer segment without mutating the current configuration */
 function toggleSetting(config: OpenTuiConfig, key: keyof OpenTuiConfig["footerSegments"]): OpenTuiConfig {
 	return {
 		...config,
@@ -209,7 +210,11 @@ function buildIconsItems(config: OpenTuiConfig, copy: SettingsCopy): SettingItem
 /** build footer settings for segment visibility and provider label formatting */
 function buildSegmentsItems(config: OpenTuiConfig, copy: SettingsCopy): SettingItem[] {
 	const segs = config.footerSegments;
-	const flag = (value: boolean) => value ? copy.values.on : copy.values.off;
+
+	/** format a boolean setting with the selected language */
+	function flag(value: boolean): string {
+		return value ? copy.values.on : copy.values.off;
+	}
 	return [
 		{ id: "cwd", label: copy.labels.cwd, currentValue: flag(segs.cwd) },
 		{ id: "hostname", label: copy.labels.hostname, currentValue: flag(segs.hostname) },

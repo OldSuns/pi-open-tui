@@ -43,7 +43,7 @@ function isTuiContext(ctx: ExtensionContext): boolean {
 }
 
 /** register open-tui commands and coordinate the session UI lifecycle */
-export default function (pi: ExtensionAPI) {
+export default function openTui(pi: ExtensionAPI) {
 	const sessionLifecycle = new SessionLifecycle();
 	const state: FooterState = createInitialState();
 	const turnTelemetry = new TurnTelemetryTracker();
@@ -132,24 +132,40 @@ export default function (pi: ExtensionAPI) {
 			return;
 		}
 		if (!active) {
+			/** read the current footer state */
+			function readFooterState(): FooterState {
+				return state;
+			}
+
+			/** read the current open-tui configuration */
+			function readFooterConfig(): OpenTuiConfig {
+				return config;
+			}
+
 			/** read model metadata from the current configuration without reinstalling the footer */
 			function readModelMeta() {
 				return getModelMeta(ctx, getThinkingLevel, config.footer.capitalizeProviderName);
 			}
 
+			/** store the footer render callback for event-driven refreshes */
+			function setFooterRenderRequest(fn: (() => void) | undefined): void {
+				requestFooterRender = fn ?? undefined;
+			}
+
+			/** refresh the footer's git status for the active context */
+			function refreshFooterGitStatus(): void {
+				void scheduleGitRefresh(ctx);
+			}
+
 			cleanupHeader = installHeader(pi, ctx);
 			cleanupFooter = installFooter(
 				ctx,
-				() => state,
-				() => config,
+				readFooterState,
+				readFooterConfig,
 				readModelMeta,
 				{
-					setRequestRender: (fn) => {
-						requestFooterRender = fn ?? undefined;
-					},
-					scheduleGitRefresh: () => {
-						void scheduleGitRefresh(ctx);
-					},
+					setRequestRender: setFooterRenderRequest,
+					scheduleGitRefresh: refreshFooterGitStatus,
 				},
 			);
 			editor = installEditor(pi, ctx, config.cursorStyle, config.fullscreen.wheelScrollLines);

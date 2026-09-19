@@ -92,6 +92,7 @@ export function formatDuration(ms: number): string {
 	return `${h}h ${m}m ${s}s`;
 }
 
+/** format a model identifier with its provider when available */
 export function formatModelLabel(model: { provider?: string; id?: string } | null | undefined): string {
 	if (!model?.id) return "no-model";
 	return model.provider ? `${model.provider}/${model.id}` : model.id;
