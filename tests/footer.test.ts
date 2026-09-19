@@ -195,14 +195,22 @@ test("both icon modes provide every footer semantic", () => {
 	}
 });
 
-test("provider name capitalization can be disabled", () => {
+/** return the disabled thinking level for model metadata tests */
+function disabledThinkingLevel(): string {
+	return "off";
+}
+
+/** verify that provider labels can preserve their original casing */
+function testProviderNameCapitalization(): void {
 	const ctx = {
 		model: { provider: "openAI", id: "gpt-5", reasoning: false },
 	} as unknown as ExtensionContext;
 
-	assert.equal(getModelMeta(ctx, () => "off").provider, "OpenAI");
-	assert.equal(getModelMeta(ctx, () => "off", false).provider, "openAI");
-});
+	assert.equal(getModelMeta(ctx, disabledThinkingLevel).provider, "OpenAI");
+	assert.equal(getModelMeta(ctx, disabledThinkingLevel, false).provider, "openAI");
+}
+
+test("provider name capitalization can be disabled", testProviderNameCapitalization);
 
 test("uses the official Nerd Font runtime symbols", () => {
 	assert.equal(runtimeSymbol("nodejs", "nerd"), "\uE718");

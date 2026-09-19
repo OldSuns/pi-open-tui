@@ -81,6 +81,7 @@ export function formatInputBreakdown(uncached: number, cacheRead: number): strin
 		: total;
 }
 
+/** format a nonnegative millisecond duration with compact time units */
 export function formatDuration(ms: number): string {
 	const totalSeconds = Math.max(0, Math.floor(ms / 1000));
 	if (totalSeconds < 60) return `${totalSeconds}s`;
@@ -92,11 +93,13 @@ export function formatDuration(ms: number): string {
 	return `${h}h ${m}m ${s}s`;
 }
 
+/** format a model identifier with its provider when available */
 export function formatModelLabel(model: { provider?: string; id?: string } | null | undefined): string {
 	if (!model?.id) return "no-model";
 	return model.provider ? `${model.provider}/${model.id}` : model.id;
 }
 
+/** format a provider label with optional first-character capitalization */
 export function formatProviderLabel(provider: string | undefined, capitalize = true): string {
 	if (!provider) return "Unknown";
 	return capitalize ? provider.charAt(0).toUpperCase() + provider.slice(1) : provider;

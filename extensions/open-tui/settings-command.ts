@@ -109,11 +109,13 @@ const COPY = {
 
 type SettingsCopy = (typeof COPY)[SettingsLanguage];
 
+/** map the configured thinking-preview line count to its localized label */
 function formatThinkingPeekLines(lines: ThinkingPeekLines, copy: SettingsCopy): string {
 	const values = [copy.values.thinkingPeek.off, copy.values.thinkingPeek.one, copy.values.thinkingPeek.two];
 	return values[lines] ?? values[0];
 }
 
+/** toggle one footer segment without mutating the current configuration */
 function toggleSetting(config: OpenTuiConfig, key: keyof OpenTuiConfig["footerSegments"]): OpenTuiConfig {
 	return {
 		...config,
@@ -124,6 +126,7 @@ function toggleSetting(config: OpenTuiConfig, key: keyof OpenTuiConfig["footerSe
 	};
 }
 
+/** toggle provider-name capitalization without mutating the current configuration */
 function toggleCapitalizeProviderName(config: OpenTuiConfig): OpenTuiConfig {
 	return {
 		...config,
@@ -198,6 +201,7 @@ function buildFeaturesItems(config: OpenTuiConfig, copy: SettingsCopy): SettingI
 	];
 }
 
+/** build appearance settings for icon mode and cursor style */
 function buildIconsItems(config: OpenTuiConfig, copy: SettingsCopy): SettingItem[] {
 	return [
 		{ id: "mode", label: copy.labels.iconMode, currentValue: copy.values.icons[config.icons.mode] },
@@ -205,9 +209,14 @@ function buildIconsItems(config: OpenTuiConfig, copy: SettingsCopy): SettingItem
 	];
 }
 
+/** build footer settings for segment visibility and provider label formatting */
 function buildSegmentsItems(config: OpenTuiConfig, copy: SettingsCopy): SettingItem[] {
 	const segs = config.footerSegments;
-	const flag = (value: boolean) => value ? copy.values.on : copy.values.off;
+
+	/** format a boolean setting with the selected language */
+	function flag(value: boolean): string {
+		return value ? copy.values.on : copy.values.off;
+	}
 	return [
 		{ id: "cwd", label: copy.labels.cwd, currentValue: flag(segs.cwd) },
 		{ id: "hostname", label: copy.labels.hostname, currentValue: flag(segs.hostname) },
@@ -242,6 +251,7 @@ function buildTelemetryItems(config: OpenTuiConfig, copy: SettingsCopy): Setting
 	];
 }
 
+/** build localized settings items for the active tab */
 function buildItems(tab: Tab, config: OpenTuiConfig): SettingItem[] {
 	const copy = COPY[config.settingsLanguage];
 	switch (tab) {
@@ -252,6 +262,7 @@ function buildItems(tab: Tab, config: OpenTuiConfig): SettingItem[] {
 	}
 }
 
+/** apply one settings item change without mutating the current configuration */
 function handleSettingChange(
 	tab: Tab,
 	itemId: string,

@@ -340,7 +340,8 @@ test("configures the extension status line with Space", async () => {
 	assert.match(selectedLine(settings.component), /Extension status line/);
 });
 
-test("configures provider name capitalization", async () => {
+/** verify that the footer settings UI toggles provider-name capitalization */
+async function testProviderNameCapitalizationSetting(): Promise<void> {
 	const settings = await openSettings();
 	settings.component.handleInput("\x1b[C");
 	settings.component.handleInput("\x1b[C");
@@ -350,7 +351,9 @@ test("configures provider name capitalization", async () => {
 	settings.component.handleInput(" ");
 	assert.equal(settings.getConfig().footer.capitalizeProviderName, false);
 	assert.match(selectedLine(settings.component), /Capitalize provider name/);
-});
+}
+
+test("configures provider name capitalization", testProviderNameCapitalizationSetting);
 
 test("keeps localized settings and values within narrow widths", async () => {
 	const config = structuredClone(DEFAULT_CONFIG);
@@ -368,7 +371,8 @@ test("keeps localized settings and values within narrow widths", async () => {
 	}
 });
 
-test("normalizes invalid settings values", () => {
+/** verify that invalid persisted setting values fall back independently */
+function testInvalidSettingNormalization(): void {
 	const agentDir = mkdtempSync(join(tmpdir(), "pi-open-tui-"));
 	const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
 	try {
@@ -389,9 +393,12 @@ test("normalizes invalid settings values", () => {
 		else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
 		rmSync(agentDir, { recursive: true, force: true });
 	}
-});
+}
 
-test("loads and normalizes the footer configuration", () => {
+test("normalizes invalid settings values", testInvalidSettingNormalization);
+
+/** verify that valid and malformed footer settings load without affecting sibling settings */
+function testFooterConfigLoading(): void {
 	const agentDir = mkdtempSync(join(tmpdir(), "pi-open-tui-"));
 	const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
 	try {
@@ -416,7 +423,9 @@ test("loads and normalizes the footer configuration", () => {
 		else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
 		rmSync(agentDir, { recursive: true, force: true });
 	}
-});
+}
+
+test("loads and normalizes the footer configuration", testFooterConfigLoading);
 
 test("cycles the thinking peek line count from General settings", async () => {
 	const config = structuredClone(DEFAULT_CONFIG);

@@ -28,11 +28,13 @@ const HIDDEN_THINKING_HORIZONTAL_PADDING = 2;
 // Pi's fullscreen transcript can reserve one more column for its scrollbar.
 const HIDDEN_THINKING_SCROLLBAR_RESERVE = 1;
 
+/** determine whether a settings change must install or remove the UI */
 export function getPendingUiChange(enabled: boolean, active: boolean): PendingUiChange | undefined {
 	if (enabled === active) return undefined;
 	return enabled ? "install" : "uninstall";
 }
 
+/** detect contexts that can install UI components, including legacy contexts without a mode */
 function isTuiContext(ctx: ExtensionContext): boolean {
 	try {
 		const mode = (ctx as ExtensionContext & { mode?: string }).mode;
@@ -42,7 +44,8 @@ function isTuiContext(ctx: ExtensionContext): boolean {
 	}
 }
 
-export default function (pi: ExtensionAPI) {
+/** register open-tui commands and coordinate the session UI lifecycle */
+export default function openTui(pi: ExtensionAPI) {
 	const sessionLifecycle = new SessionLifecycle();
 	const state: FooterState = createInitialState();
 	const turnTelemetry = new TurnTelemetryTracker();
@@ -123,32 +126,54 @@ export default function (pi: ExtensionAPI) {
 			peekSettleTimer = undefined;
 		}
 	};
-	const applyUi = (ctx: ExtensionContext) => {
+	/** install the UI once while keeping configuration reads live for runtime changes */
+	function applyUi(ctx: ExtensionContext): void {
 		if (!isTuiContext(ctx)) return;
 		if (!config.enabled) {
 			uninstallUi(ctx);
 			return;
 		}
 		if (!active) {
+			/** read the current footer state */
+			function readFooterState(): FooterState {
+				return state;
+			}
+
+			/** read the current open-tui configuration */
+			function readFooterConfig(): OpenTuiConfig {
+				return config;
+			}
+
+			/** read model metadata from the current configuration without reinstalling the footer */
+			function readModelMeta() {
+				return getModelMeta(ctx, getThinkingLevel, config.footer.capitalizeProviderName);
+			}
+
+			/** store the footer render callback for event-driven refreshes */
+			function setFooterRenderRequest(fn: (() => void) | undefined): void {
+				requestFooterRender = fn ?? undefined;
+			}
+
+			/** refresh the footer's git status for the active context */
+			function refreshFooterGitStatus(): void {
+				void scheduleGitRefresh(ctx);
+			}
+
 			cleanupHeader = installHeader(pi, ctx);
 			cleanupFooter = installFooter(
 				ctx,
-				() => state,
-				() => config,
-				() => getModelMeta(ctx, getThinkingLevel, config.footer.capitalizeProviderName),
+				readFooterState,
+				readFooterConfig,
+				readModelMeta,
 				{
-					setRequestRender: (fn) => {
-						requestFooterRender = fn ?? undefined;
-					},
-					scheduleGitRefresh: () => {
-						void scheduleGitRefresh(ctx);
-					},
+					setRequestRender: setFooterRenderRequest,
+					scheduleGitRefresh: refreshFooterGitStatus,
 				},
 			);
 			editor = installEditor(pi, ctx, config.cursorStyle, config.fullscreen.wheelScrollLines);
 			active = true;
 		}
-	};
+	}
 
 	const uninstallUi = (ctx: ExtensionContext) => {
 		if (!isTuiContext(ctx)) return;
