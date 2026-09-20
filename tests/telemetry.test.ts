@@ -556,6 +556,10 @@ test("open-tui keeps a bounded peek scoped to the current assistant", async () =
 	}
 });
 
+/**
+ * getLiveTps() estimates TPS from streamed chars while a message is in
+ * flight (428 chars over 2s → 53.5 tok/s at CHARS_PER_TOKEN=4).
+ */
 test("getLiveTps: estimates TPS from streamed chars while a message is in flight", () => {
 	let now = 0;
 	const tracker = new TurnTelemetryTracker(() => now);
@@ -573,6 +577,9 @@ test("getLiveTps: estimates TPS from streamed chars while a message is in flight
 	assert.ok(Math.abs(live! - 53.5) < 0.2, `expected ~53.5, got ${live}`);
 });
 
+/**
+ * getLiveTps() returns null after message_end and when no turn is active.
+ */
 test("getLiveTps: null after message_end and without a turn", () => {
 	let now = 0;
 	const tracker = new TurnTelemetryTracker(() => now);
@@ -586,6 +593,10 @@ test("getLiveTps: null after message_end and without a turn", () => {
 	assert.equal(new TurnTelemetryTracker(() => now).getLiveTps(), null);
 });
 
+/**
+ * getLiveTps() counts thinking and toolcall deltas (200 chars over 1s →
+ * 50.0 tok/s).
+ */
 test("getLiveTps: counts thinking and toolcall deltas", () => {
 	let now = 0;
 	const tracker = new TurnTelemetryTracker(() => now);

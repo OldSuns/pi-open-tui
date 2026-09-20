@@ -120,6 +120,8 @@ After each complete agent run, pi-open-tui shows one transient result. Tool-call
 
 TPS is calculated from all provider-reported assistant output tokens divided by the total generation time across the run. Timing starts at `turn_start` and ends at the assistant `message_end`, so it includes TTFT, hidden reasoning, buffering, and stalls; tool execution between turns is excluded. Runs without output tokens or measurable generation time show `TPS —`.
 
+While a message is streaming, the footer's working segment also shows a live estimated TPS (for example `· 53.5 tok/s`), computed from the streamed characters so far (roughly 4 characters per token). The estimate is hidden during tool execution and between messages, and is replaced by the exact provider-reported TPS once the run completes.
+
 The `$ / M` value is the model's list-price rate from `usage.cost.total`, not the cumulative session cost shown in the footer. Every telemetry field can be toggled from the **Telemetry** tab.
 
 ## Thinking peek

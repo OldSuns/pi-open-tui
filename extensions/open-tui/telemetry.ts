@@ -152,6 +152,11 @@ export class TurnTelemetryTracker {
 		};
 	}
 
+	/**
+	 * Handle a streaming message_update event: accumulate the streamed
+	 * character count (for the live TPS estimate) and refresh the
+	 * first-token / last-update timestamps for the current message.
+	 */
 	private updateMessage(event: MessageUpdateEvent): void {
 		const turn = this.turn;
 		const current = turn?.currentMessage;
