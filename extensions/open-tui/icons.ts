@@ -94,34 +94,10 @@ const ASCII_GLYPHS: IconGlyphs = {
 	deleted: "x",
 };
 
-const NERD_FONT_TERMINALS = new Set([
-	"iTerm.app",
-	"Ghostty",
-	"WezTerm",
-	"kitty",
-	"rio",
-	"tabby",
-	"WindowsTerminal",
-	"vscode",
-]);
-
 export function detectNerdFont(): boolean {
-	const termProgram = process.env.TERM_PROGRAM;
-	if (termProgram && NERD_FONT_TERMINALS.has(termProgram)) return true;
-
-	const lcTerminal = process.env.LC_TERMINAL;
-	if (lcTerminal && NERD_FONT_TERMINALS.has(lcTerminal)) return true;
-
-	if (process.env.TERM === "xterm-kitty") return true;
-
-	// Windows Terminal sets WT_SESSION (not TERM_PROGRAM)
-	if (process.env.WT_SESSION) return true;
-
-	// VS Code integrated terminal
-	if (process.env.TERM_PROGRAM === "vscode") return true;
-
-	// Terminal runners may hide the host terminal's identity. In an interactive
-	// UTF-8 TTY, prefer Nerd icons and let the explicit "ascii" mode opt out.
+	// TTY and locale checks are the only reliable signals available here. The
+	// terminal emulator owns font selection, so auto mode is optimistic once
+	// output is an interactive UTF-8 TTY.
 	if (process.env.TERM === "dumb" || process.stdout.isTTY !== true) return false;
 	const locale = [process.env.LC_ALL, process.env.LC_CTYPE, process.env.LANG].find(Boolean);
 	return locale === undefined || /utf-?8/i.test(locale);

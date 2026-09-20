@@ -168,7 +168,7 @@ test("narrow footer sheds the context bar before left segments", () => {
 	assert.ok(!tiny.includes("25.0%"), `context should be dropped\n${tiny}`);
 });
 
-test("auto prefers Nerd icons in unknown interactive UTF-8 terminals", () => {
+test("auto gates Nerd icons by TTY and UTF-8 support", () => {
 	const envKeys = ["TERM_PROGRAM", "LC_TERMINAL", "WT_SESSION", "TERM", "LC_ALL", "LC_CTYPE", "LANG"];
 	const originalEnv = new Map(envKeys.map((key) => [key, process.env[key]]));
 	const hadOwnIsTTY = Object.hasOwn(process.stdout, "isTTY");
@@ -179,8 +179,17 @@ test("auto prefers Nerd icons in unknown interactive UTF-8 terminals", () => {
 		process.env.TERM = "xterm-256color";
 		process.env.LANG = "C.UTF-8";
 		Object.defineProperty(process.stdout, "isTTY", { configurable: true, value: true });
-		assert.equal(detectNerdFont(), true);
+		process.env.TERM_PROGRAM = "WezTerm";
+		process.env.LANG = "C";
+		Object.defineProperty(process.stdout, "isTTY", { configurable: true, value: false });
+		assert.equal(resolveIconMode("auto"), "ascii");
+
+		process.env.LANG = "C.UTF-8";
+		Object.defineProperty(process.stdout, "isTTY", { configurable: true, value: true });
 		assert.equal(resolveIconMode("auto"), "nerd");
+
+		process.env.TERM_PROGRAM = "unknown-runner";
+		assert.equal(detectNerdFont(), true);
 
 		process.env.LANG = "C";
 		assert.equal(resolveIconMode("auto"), "ascii");
