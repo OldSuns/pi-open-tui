@@ -41,11 +41,11 @@ pi -e npm:pi-open-tui
 
 Download any patched font from the official [Nerd Fonts downloads page](https://www.nerdfonts.com/font-downloads) or [latest GitHub release](https://github.com/ryanoasis/nerd-fonts/releases/latest). Install it, select that font in your terminal profile, and restart the terminal.
 
-The default `auto` mode detects the terminal environment, not the installed font file. If icons appear as boxes or incorrect symbols, open `/open-tui` and choose one of these modes under **Appearance**:
+The default `auto` mode checks the terminal environment, not the installed font file. It uses Nerd Font icons in interactive UTF-8 TTYs, including terminals running through a runner or subshell. If icons appear as boxes or incorrect symbols, open `/open-tui` and choose one of these modes under **Appearance**:
 
 - `nerd`: force Nerd Font icons after configuring a Nerd Font in the terminal
 - `ascii`: use plain-text icons with no patched font required
-- `auto`: use Nerd Font icons in recognized terminals and ASCII elsewhere
+- `auto`: use Nerd Font icons in interactive UTF-8 TTYs; use ASCII for non-interactive output, `TERM=dumb`, or an explicitly non-UTF-8 locale
 
 If the font is installed but `auto` still selects ASCII, choose `nerd` explicitly. In VS Code, Windows Terminal, and similar apps, configure the font in the terminal profile rather than only installing it in the operating system.
 
