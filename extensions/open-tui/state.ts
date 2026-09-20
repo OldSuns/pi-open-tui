@@ -76,10 +76,7 @@ export function invalidateUsageCache(): void {
 	usageCache = undefined;
 }
 
-/**
- * Build the initial footer state: empty git status, no runtime, a fresh
- * session start timestamp, and no active working timer or live TPS.
- */
+/** Build the initial footer state: empty git status, no runtime, a fresh session start timestamp, and no active working timer or live TPS. */
 export function createInitialState(): FooterState {
 	return {
 		git: emptyGitStatus(),

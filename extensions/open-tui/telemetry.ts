@@ -112,11 +112,7 @@ export class TurnTelemetryTracker {
 		}
 	}
 
-	/**
-	 * Estimated output tokens/sec for the message currently streaming, or null
-	 * when nothing is streaming. Uses a chars-per-token estimate because provider
-	 * usage is only finalized at message_end.
-	 */
+	/** Estimated output tokens/sec for the message currently streaming, or null when nothing is streaming; chars-per-token estimate because provider usage is only finalized at message_end. */
 	getLiveTps(): number | null {
 		const turn = this.turn;
 		const current = turn?.currentMessage;
@@ -152,11 +148,7 @@ export class TurnTelemetryTracker {
 		};
 	}
 
-	/**
-	 * Handle a streaming message_update event: accumulate the streamed
-	 * character count (for the live TPS estimate) and refresh the
-	 * first-token / last-update timestamps for the current message.
-	 */
+	/** Handle a streaming message_update event: accumulate the streamed character count (for the live TPS estimate) and refresh first-token/last-update timestamps. */
 	private updateMessage(event: MessageUpdateEvent): void {
 		const turn = this.turn;
 		const current = turn?.currentMessage;

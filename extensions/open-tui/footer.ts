@@ -119,11 +119,7 @@ function renderRuntimeSegment(
 	return label;
 }
 
-/**
- * Render the working/idle timer segment of the footer. While working,
- * appends the live TPS estimate (when enabled and available) after the
- * elapsed duration.
- */
+/** Render the working/idle timer segment of the footer; while working, appends the live TPS estimate (when enabled and available) after the elapsed duration. */
 function renderTimerSegment(
 	theme: Theme,
 	state: FooterState,

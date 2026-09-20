@@ -371,10 +371,7 @@ test("usage totals include tool result and summary usage", () => {
 	invalidateUsageCache();
 });
 
-/**
- * The ASCII footer renders icon glyphs as semantic text labels and the
- * working segment with a null liveTps.
- */
+/** The ASCII footer renders icon glyphs as semantic text labels and the working segment with a null liveTps. */
 test("ASCII footer renders icons as semantic labels", () => {
 	let footerFactory: NonNullable<Parameters<ExtensionContext["ui"]["setFooter"]>[0]> | undefined;
 	const entries = [{

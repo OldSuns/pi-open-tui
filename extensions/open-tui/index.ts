@@ -42,11 +42,7 @@ function isTuiContext(ctx: ExtensionContext): boolean {
 	}
 }
 
-/**
- * pi extension entry point: register the open-tui footer (git status,
- * runtime, model, session timer, and live TPS) and wire the agent
- * lifecycle / streaming events that drive its state.
- */
+/** pi extension entry point: register the open-tui footer (git status, runtime, model, session timer, live TPS) and wire the agent lifecycle/streaming events that drive its state. */
 export default function (pi: ExtensionAPI) {
 	const sessionLifecycle = new SessionLifecycle();
 	const state: FooterState = createInitialState();
