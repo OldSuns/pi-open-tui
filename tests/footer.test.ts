@@ -13,7 +13,7 @@ import type { Component, TUI } from "@earendil-works/pi-tui";
 import { DEFAULT_CONFIG } from "../extensions/open-tui/config.ts";
 import { installFooter, shortHostname } from "../extensions/open-tui/footer.ts";
 import { emptyGitStatus, readGitStatus } from "../extensions/open-tui/git.ts";
-import { resolveGlyphs, runtimeSymbol } from "../extensions/open-tui/icons.ts";
+import { detectNerdFont, resolveGlyphs, resolveIconMode, runtimeSymbol } from "../extensions/open-tui/icons.ts";
 import { clearRuntimeCache, readRuntimeInfo } from "../extensions/open-tui/runtime.ts";
 import { getModelMeta, getUsageTotals, invalidateUsageCache, type FooterState } from "../extensions/open-tui/state.ts";
 import { fitSegmentsByPriority, truncateBranch, truncatePath } from "../extensions/open-tui/utils.ts";
@@ -166,6 +166,44 @@ test("narrow footer sheds the context bar before left segments", () => {
 	// once it no longer fits even alone (everything else is already gone).
 	const tiny = component.render(6).join("\n").split("\n")[0]!;
 	assert.ok(!tiny.includes("25.0%"), `context should be dropped\n${tiny}`);
+});
+
+test("auto prefers Nerd icons in unknown interactive UTF-8 terminals", () => {
+	const envKeys = ["TERM_PROGRAM", "LC_TERMINAL", "WT_SESSION", "TERM", "LC_ALL", "LC_CTYPE", "LANG"];
+	const originalEnv = new Map(envKeys.map((key) => [key, process.env[key]]));
+	const hadOwnIsTTY = Object.hasOwn(process.stdout, "isTTY");
+	const originalIsTTY = process.stdout.isTTY;
+
+	try {
+		for (const key of envKeys) delete process.env[key];
+		process.env.TERM = "xterm-256color";
+		process.env.LANG = "C.UTF-8";
+		Object.defineProperty(process.stdout, "isTTY", { configurable: true, value: true });
+		assert.equal(detectNerdFont(), true);
+		assert.equal(resolveIconMode("auto"), "nerd");
+
+		process.env.LANG = "C";
+		assert.equal(resolveIconMode("auto"), "ascii");
+
+		process.env.LANG = "C.UTF-8";
+		process.env.TERM = "dumb";
+		assert.equal(resolveIconMode("auto"), "ascii");
+
+		process.env.TERM = "xterm-256color";
+		Object.defineProperty(process.stdout, "isTTY", { configurable: true, value: false });
+		assert.equal(resolveIconMode("auto"), "ascii");
+	} finally {
+		for (const key of envKeys) {
+			const value = originalEnv.get(key);
+			if (value === undefined) delete process.env[key];
+			else process.env[key] = value;
+		}
+		if (hadOwnIsTTY) {
+			Object.defineProperty(process.stdout, "isTTY", { configurable: true, value: originalIsTTY });
+		} else {
+			Reflect.deleteProperty(process.stdout, "isTTY");
+		}
+	}
 });
 
 test("both icon modes provide every footer semantic", () => {

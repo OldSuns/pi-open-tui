@@ -41,11 +41,11 @@ pi -e npm:pi-open-tui
 
 可从 [Nerd Fonts 官方下载页](https://www.nerdfonts.com/font-downloads)或 [GitHub 最新版本](https://github.com/ryanoasis/nerd-fonts/releases/latest)下载任意已修补字体。安装后，请在终端配置中选择该字体，并重启终端。
 
-默认的 `auto` 模式检测的是终端环境，无法确认终端当前实际使用的字体。如果图标显示为方框、乱码或错误符号，请打开 `/open-tui`，在**外观**页选择合适的模式：
+默认的 `auto` 模式检查终端环境，而不是已安装的字体文件。在已识别的终端和支持 UTF-8 的交互式 TTY 中，它会使用 Nerd Font 图标。如果图标显示为方框、乱码或错误符号，请打开 `/open-tui`，在**外观**页选择合适的模式：
 
 - `nerd`：终端已配置 Nerd Font 时，强制使用 Nerd Font 图标
 - `ascii`：使用纯文本图标，无需安装修补字体
-- `auto`：在已识别的终端中使用 Nerd Font 图标，其他环境回退到 ASCII
+- `auto`：在已识别的终端和支持 UTF-8 的交互式 TTY 中使用 Nerd Font 图标；输出不是交互式 UTF-8 终端时使用 ASCII
 
 如果已经安装字体，但 `auto` 仍选择 ASCII，请手动切换为 `nerd`。使用 VS Code、Windows Terminal 等应用时，只在操作系统中安装字体还不够，还需要在对应的终端配置中选中该字体。
 

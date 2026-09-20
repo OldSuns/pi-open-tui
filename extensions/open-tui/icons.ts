@@ -120,7 +120,11 @@ export function detectNerdFont(): boolean {
 	// VS Code integrated terminal
 	if (process.env.TERM_PROGRAM === "vscode") return true;
 
-	return false;
+	// Terminal runners may hide the host terminal's identity. In an interactive
+	// UTF-8 TTY, prefer Nerd icons and let the explicit "ascii" mode opt out.
+	if (process.env.TERM === "dumb" || process.stdout.isTTY !== true) return false;
+	const locale = [process.env.LC_ALL, process.env.LC_CTYPE, process.env.LANG].find(Boolean);
+	return locale === undefined || /utf-?8/i.test(locale);
 }
 
 export function resolveIconMode(mode: IconMode): "nerd" | "ascii" {
