@@ -75,7 +75,8 @@ pi -e npm:pi-open-tui
     "context": true,
     "tokens": true,
     "cost": true,
-    "extensionStatuses": true
+    "extensionStatuses": true,
+    "capitalizeProviderName": true
   },
   "telemetry": {
     "enabled": true,
@@ -101,6 +102,7 @@ pi -e npm:pi-open-tui
 | `fullscreen.wheelScrollLines` | `1`-`10` | 全屏模式下滚轮每格滚动的行数，默认值为 `4`；`/open-tui` 中在该项上按 Enter 后直接输入数字（超出范围会自动钳制到 `1`-`10`） |
 | `icons.mode` | `auto`、`nerd`、`ascii` | 控制底栏和遥测通知使用的图标 |
 | `footerSegments` | 布尔开关 | 分别控制底栏中的各项数据 |
+| `footerSegments.capitalizeProviderName` | 布尔开关 | 将底栏中提供商名称的首字母大写；设为 `false` 时保留原始大小写 |
 | `telemetry` | 布尔开关 | 控制遥测总开关和各项指标 |
 | `thinkingPeek.lines` | `0`、`1`、`2` | 关闭、单行或双行思考预览 |
 

@@ -75,7 +75,8 @@ Run `/open-tui` to open the settings dialog. It provides **General**, **Appearan
     "context": true,
     "tokens": true,
     "cost": true,
-    "extensionStatuses": true
+    "extensionStatuses": true,
+    "capitalizeProviderName": true
   },
   "telemetry": {
     "enabled": true,
@@ -101,6 +102,7 @@ Key options:
 | `fullscreen.wheelScrollLines` | `1`-`10` | Lines scrolled per mouse-wheel notch in fullscreen mode; defaults to `4`. In `/open-tui`, press Enter on this item and type a number (values are clamped to `1`-`10`) |
 | `icons.mode` | `auto`, `nerd`, `ascii` | Controls footer and telemetry icons |
 | `footerSegments` | Boolean flags | Shows or hides individual footer data |
+| `footerSegments.capitalizeProviderName` | Boolean | Capitalizes the first character of the provider name in the footer; set it to `false` to keep the provider's original casing |
 | `telemetry` | Boolean flags | Enables telemetry and its individual measurements |
 | `thinkingPeek.lines` | `0`, `1`, `2` | Off, one-line, or two-line hidden thinking preview |
 

@@ -15,7 +15,7 @@ import { installFooter, shortHostname } from "../extensions/open-tui/footer.ts";
 import { emptyGitStatus, readGitStatus } from "../extensions/open-tui/git.ts";
 import { resolveGlyphs, runtimeSymbol } from "../extensions/open-tui/icons.ts";
 import { clearRuntimeCache, readRuntimeInfo } from "../extensions/open-tui/runtime.ts";
-import { getUsageTotals, invalidateUsageCache, type FooterState } from "../extensions/open-tui/state.ts";
+import { getModelMeta, getUsageTotals, invalidateUsageCache, type FooterState } from "../extensions/open-tui/state.ts";
 import { fitSegmentsByPriority, truncateBranch, truncatePath } from "../extensions/open-tui/utils.ts";
 
 const theme = {
@@ -193,6 +193,16 @@ test("both icon modes provide every footer semantic", () => {
 		const glyphs = resolveGlyphs(mode);
 		for (const key of keys) assert.notEqual(glyphs[key], "", `${mode}.${key}`);
 	}
+});
+
+test("can preserve provider name casing", () => {
+	const ctx = {
+		model: { provider: "openAI", id: "gpt-5", reasoning: false },
+	} as unknown as ExtensionContext;
+	const thinkingLevel = () => "off";
+
+	assert.equal(getModelMeta(ctx, thinkingLevel, true).provider, "OpenAI");
+	assert.equal(getModelMeta(ctx, thinkingLevel, false).provider, "openAI");
 });
 
 test("uses the official Nerd Font runtime symbols", () => {
