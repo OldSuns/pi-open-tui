@@ -14,6 +14,10 @@ import { resolveGlyphs } from "./icons.ts";
 import { finiteOrZero, fmtTokens, formatDuration, formatInputBreakdown } from "./utils.ts";
 
 const STALL_THRESHOLD_MS = 1000;
+// Rough chars-per-token ratio used to estimate output tokens while a message is
+// still streaming. Provider usage is only finalized at message_end, so the live
+// footer TPS is an estimate until then.
+const CHARS_PER_TOKEN = 4;
 
 type TelemetryEvent =
 	| AgentStartEvent
@@ -31,6 +35,7 @@ interface MessageTiming {
 	lastUpdateMs: number;
 	firstOutputMs: number | null;
 	inStall: boolean;
+	outputChars: number;
 }
 
 interface TurnTiming {
@@ -107,6 +112,23 @@ export class TurnTelemetryTracker {
 		}
 	}
 
+	/**
+	 * Estimated output tokens/sec for the message currently streaming, or null
+	 * when nothing is streaming. Uses a chars-per-token estimate because provider
+	 * usage is only finalized at message_end.
+	 */
+	getLiveTps(): number | null {
+		const turn = this.turn;
+		const current = turn?.currentMessage;
+		if (!turn || !current || current.firstOutputMs === null || current.outputChars <= 0) {
+			return null;
+		}
+		const elapsedMs = this.now() - current.firstOutputMs;
+		if (elapsedMs <= 0) return null;
+		const estimatedTokens = current.outputChars / CHARS_PER_TOKEN;
+		return round(estimatedTokens / (elapsedMs / 1000), 1);
+	}
+
 	private startTurn(): void {
 		this.turn = {
 			startMs: this.now(),
@@ -126,6 +148,7 @@ export class TurnTelemetryTracker {
 			lastUpdateMs: now,
 			firstOutputMs: null,
 			inStall: false,
+			outputChars: 0,
 		};
 	}
 
@@ -141,6 +164,10 @@ export class TurnTelemetryTracker {
 		if (streamEvent.delta.length === 0) return;
 		const message = event.message;
 		if (!turn || !current || !isAssistantMessage(message)) return;
+
+		// Accumulate streamed characters so getLiveTps() can estimate output
+		// tokens before the provider finalizes usage at message_end.
+		current.outputChars += streamEvent.delta.length;
 
 		const now = this.now();
 		if (current.firstOutputMs === null) {

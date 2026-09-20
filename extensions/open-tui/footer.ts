@@ -119,9 +119,26 @@ function renderRuntimeSegment(
 	return label;
 }
 
-function renderTimerSegment(theme: Theme, state: FooterState, glyphs: IconGlyphs): string {
+function renderTimerSegment(
+	theme: Theme,
+	state: FooterState,
+	glyphs: IconGlyphs,
+	showLiveTps: boolean,
+): string {
 	if (state.workingSince !== undefined) {
-		return `${theme.fg("accent", glyphs.working)} ${theme.fg("dim", "working")} ${theme.fg("accent", formatDuration(Date.now() - state.workingSince))}`;
+		const parts = [
+			theme.fg("accent", glyphs.working),
+			theme.fg("dim", "working"),
+			theme.fg("accent", formatDuration(Date.now() - state.workingSince)),
+		];
+		// Live TPS is an estimate (chars-per-token) while the message streams;
+		// it is null during tool execution / between messages. Guard with typeof
+		// so a partially-constructed state (undefined) never crashes the footer.
+		if (showLiveTps && typeof state.liveTps === "number") {
+			parts.push(theme.fg("dim", "·"));
+			parts.push(theme.fg("accent", `${glyphs.speed} ${state.liveTps.toFixed(1)} tok/s`));
+		}
+		return parts.join(" ");
 	}
 	if (state.lastDoneIn !== undefined) {
 		return `${theme.fg("success", glyphs.done)} ${theme.fg("success", "done")} ${theme.fg("text", formatDuration(state.lastDoneIn))}`;
@@ -275,7 +292,7 @@ export function installFooter(
 					const runtimeSeg = renderRuntimeSegment(theme, state.runtime, config.icons.mode);
 					if (runtimeSeg) leftParts.push({ text: runtimeSeg, priority: 4 });
 				}
-				const timerSeg = renderTimerSegment(theme, state, glyphs);
+				const timerSeg = renderTimerSegment(theme, state, glyphs, config.telemetry.tps);
 				if (timerSeg) leftParts.push({ text: timerSeg, priority: 1 });
 
 				// The context bar competes with the left segments for the same row:

@@ -11,6 +11,7 @@ export interface FooterState {
 	sessionStartEpoch: number;
 	workingSince: number | undefined;
 	lastDoneIn: number | undefined;
+	liveTps: number | null;
 }
 
 export interface UsageTotals {
@@ -82,6 +83,7 @@ export function createInitialState(): FooterState {
 		sessionStartEpoch: Date.now(),
 		workingSince: undefined,
 		lastDoneIn: undefined,
+		liveTps: null,
 	};
 }
 

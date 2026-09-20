@@ -229,6 +229,7 @@ export default function (pi: ExtensionAPI) {
 		state.sessionStartEpoch = Date.now();
 		state.workingSince = undefined;
 		state.lastDoneIn = undefined;
+		state.liveTps = null;
 		invalidateUsageCache();
 
 		ensureConfigExists();
@@ -267,6 +268,7 @@ export default function (pi: ExtensionAPI) {
 			state.lastDoneIn = Date.now() - state.workingSince;
 			state.workingSince = undefined;
 		}
+		state.liveTps = null;
 		requestFooterRender?.();
 	});
 
@@ -292,6 +294,9 @@ export default function (pi: ExtensionAPI) {
 	pi.on("message_update", (event, ctx) => {
 		turnTelemetry.handle(event);
 		if (!sessionLifecycle.isCurrent() || isAgentIdle(ctx)) return;
+		// Refresh the live TPS estimate for the footer; the working timer
+		// re-renders the footer at 4Hz while the agent is active.
+		state.liveTps = turnTelemetry.getLiveTps();
 		if (!isPeekEnabled()) return;
 		const message = event.message;
 		if (!message || message.role !== "assistant") return;
@@ -346,6 +351,7 @@ export default function (pi: ExtensionAPI) {
 	pi.on("message_end", (event, ctx) => {
 		turnTelemetry.handle(event);
 		if (!sessionLifecycle.isCurrent()) return;
+		state.liveTps = null;
 		if (event.message?.role === "assistant" && peek.phase === "thinking") {
 			// Sub-message finished (answer text or a tool call): freeze the peek line.
 			peek.phase = "done";

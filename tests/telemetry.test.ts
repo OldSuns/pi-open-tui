@@ -555,3 +555,47 @@ test("open-tui keeps a bounded peek scoped to the current assistant", async () =
 		await rm(agentDir, { recursive: true, force: true });
 	}
 });
+
+test("getLiveTps: estimates TPS from streamed chars while a message is in flight", () => {
+	let now = 0;
+	const tracker = new TurnTelemetryTracker(() => now);
+	const message = makeMessage();
+	startTurn(tracker, message);
+	now = 1_000;
+	tracker.handle(update(message, { type: "text_delta", contentIndex: 0, delta: "x".repeat(28), partial: message }));
+	for (let i = 0; i < 20; i++) {
+		now = 1_000 + (i + 1) * 100;
+		tracker.handle(update(message, { type: "text_delta", contentIndex: 0, delta: "x".repeat(20), partial: message }));
+	}
+	// firstOutputMs=1000, now=3000 => 2000ms; chars=428 => 107 est tokens => 53.5 tok/s
+	const live = tracker.getLiveTps();
+	assert.notEqual(live, null);
+	assert.ok(Math.abs(live! - 53.5) < 0.2, `expected ~53.5, got ${live}`);
+});
+
+test("getLiveTps: null after message_end and without a turn", () => {
+	let now = 0;
+	const tracker = new TurnTelemetryTracker(() => now);
+	const message = makeMessage();
+	startTurn(tracker, message);
+	now = 100;
+	tracker.handle(update(message));
+	now = 500;
+	tracker.handle({ type: "message_end", message });
+	assert.equal(tracker.getLiveTps(), null);
+	assert.equal(new TurnTelemetryTracker(() => now).getLiveTps(), null);
+});
+
+test("getLiveTps: counts thinking and toolcall deltas", () => {
+	let now = 0;
+	const tracker = new TurnTelemetryTracker(() => now);
+	const message = makeMessage();
+	startTurn(tracker, message);
+	now = 0;
+	tracker.handle(update(message, { type: "thinking_delta", contentIndex: 0, delta: "a".repeat(100), partial: message }));
+	now = 1_000;
+	tracker.handle(update(message, { type: "toolcall_delta", contentIndex: 0, delta: "b".repeat(100), partial: message }));
+	// firstOutputMs=0, now=1000 => 1000ms; chars=200 => 50 est tokens => 50.0 tok/s
+	const live = tracker.getLiveTps();
+	assert.ok(Math.abs(live! - 50.0) < 0.2, `expected ~50, got ${live}`);
+});
