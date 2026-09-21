@@ -180,14 +180,14 @@ test("provides inline footer content without duplicating native rows", () => {
 		sessionManager: {
 			getCwd: () => "/work/project",
 			getEntries: () => [],
-			getSessionName: () => undefined,
+			getSessionName: () => "session-title",
 		},
 		getContextUsage: () => ({ tokens: 0, contextWindow: 1_000, percent: 0 }),
 	} as unknown as ExtensionContext;
 	const config = structuredClone(DEFAULT_CONFIG);
 	config.icons.mode = "ascii";
 	const state: FooterState = {
-		git: emptyGitStatus(),
+		git: { ...emptyGitStatus(), branch: "main" },
 		runtime: null,
 		sessionStartEpoch: Date.now(),
 		workingSince: undefined,
@@ -207,9 +207,11 @@ test("provides inline footer content without duplicating native rows", () => {
 	} as unknown as ReadonlyFooterDataProvider;
 	const component = footerFactory({ requestRender() {} } as TUI, theme, footerData) as Component;
 
-	const inline = handle.renderInline(40);
+	const inline = handle.renderInline(100);
 	assert.ok(inline);
-	assert.match(inline.top.left, /project/);
+	assert.match(inline.top.left, /session-title · .*main/);
+	assert.match(inline.top.right, /project · .*0\.0%/);
+	assert.ok(inline.top.right.indexOf("project") < inline.top.right.indexOf("%"));
 	assert.match(inline.bottom.left, /gpt-5/);
 	config.inlineFooter = true;
 	assert.deepEqual(component.render(40), []);

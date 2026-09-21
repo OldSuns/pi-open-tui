@@ -221,6 +221,20 @@ export interface FooterHandle {
 	cleanup(): void;
 }
 
+function fitInlineSegments(
+	parts: readonly PrioritizedSegment[],
+	width: number,
+	theme: Theme,
+): string {
+	const separator = theme.fg("dim", " · ");
+	const separatorReserve = Math.max(0, parts.length - 1) * Math.max(0, visibleWidth(separator) - 1);
+	return fitSegmentsByPriority(
+		parts,
+		Math.max(0, width - separatorReserve),
+		theme.fg("dim", "..."),
+	).join(separator);
+}
+
 function renderFooterContent(
 	ctx: ExtensionContext,
 	getState: () => FooterState,
@@ -249,6 +263,8 @@ function renderFooterContent(
 	const totals = getUsageTotals(ctx);
 
 	const leftParts: PrioritizedSegment[] = [];
+	const inlineTopLeftParts: PrioritizedSegment[] = [];
+	const inlineTopRightParts: PrioritizedSegment[] = [];
 	if (segments.cwd) {
 		const maxCwd = Math.min(30, Math.max(10, Math.floor(width * 0.4)));
 		const cwd = formatCwd(ctx.sessionManager.getCwd());
@@ -266,6 +282,7 @@ function renderFooterContent(
 				return `${cwdPrefix}${accent(truncatePath(basenamePath(cwd), pathWidth))}`;
 			},
 		});
+		inlineTopRightParts.push(leftParts.at(-1)!);
 	}
 	if (segments.hostname) {
 		const shortHost = shortHostname(osHostname());
@@ -274,25 +291,35 @@ function renderFooterContent(
 				text: `${theme.fg("dim", glyphs.host)} ${theme.fg("accent", shortHost)}`,
 				priority: 1,
 			});
+			inlineTopRightParts.push(leftParts.at(-1)!);
 		}
 	}
-	if (segments.sessionName) {
-		const sessionName = ctx.sessionManager.getSessionName();
-		if (sessionName) {
-			leftParts.push({
-				text: `${theme.fg("dim", glyphs.session)} ${theme.fg("text", truncateToWidth(sessionName, 24, theme.fg("dim", "...")))}`,
-				priority: 2,
-			});
-		}
+	const sessionName = ctx.sessionManager.getSessionName();
+	if (sessionName) {
+		const sessionPart: PrioritizedSegment = {
+			text: `${theme.fg("dim", glyphs.session)} ${theme.fg("text", truncateToWidth(sessionName, 24, theme.fg("dim", "...")))}`,
+			priority: 2,
+		};
+		if (segments.sessionName) leftParts.push(sessionPart);
+		inlineTopLeftParts.push(sessionPart);
 	}
 	const gitSeg = renderGitSegment(theme, state.git, glyphs, segments);
-	if (gitSeg) leftParts.push({ text: gitSeg, priority: 3 });
+	if (gitSeg) {
+		leftParts.push({ text: gitSeg, priority: 3 });
+		inlineTopLeftParts.push(leftParts.at(-1)!);
+	}
 	if (segments.runtime) {
 		const runtimeSeg = renderRuntimeSegment(theme, state.runtime, config.icons.mode);
-		if (runtimeSeg) leftParts.push({ text: runtimeSeg, priority: 4 });
+		if (runtimeSeg) {
+			leftParts.push({ text: runtimeSeg, priority: 4 });
+			inlineTopRightParts.push(leftParts.at(-1)!);
+		}
 	}
 	const timerSeg = renderTimerSegment(theme, state, glyphs);
-	if (timerSeg) leftParts.push({ text: timerSeg, priority: 1 });
+	if (timerSeg) {
+		leftParts.push({ text: timerSeg, priority: 1 });
+		inlineTopRightParts.push(leftParts.at(-1)!);
+	}
 
 	// The context bar competes with the left segments for the same row:
 	// full bar first, then the compact icon+pct form, then dropped.
@@ -309,12 +336,21 @@ function renderFooterContent(
 	if (contextText) {
 		// ponytail: priority 4 = sheds with runtime, before git/timer/cwd.
 		allParts.push({ text: contextText, compactText: contextCompact, priority: 4 });
+		// Context stays at the far right; cwd is the first item in this group.
+		inlineTopRightParts.push({ text: contextText, compactText: contextCompact, priority: 4 });
 	}
 
 	const fitted = fitSegmentsByPriority(allParts, width, theme.fg("dim", "..."));
 	const fittedContext = contextText ? fitted.pop() ?? "" : "";
-	const inlineTop: InlineFooterLine = { left: fitted.join(" "), right: fittedContext };
-	const line1 = alignRight(inlineTop.left, inlineTop.right, width, theme);
+	const line1 = alignRight(fitted.join(" "), fittedContext, width, theme);
+
+	const inlineLeftBudget = Math.floor(width * 0.45);
+	const inlineTopLeft = fitInlineSegments(inlineTopLeftParts, inlineLeftBudget, theme);
+	const inlineRightBudget = Math.max(0, width - visibleWidth(inlineTopLeft) - (inlineTopLeft ? 1 : 0));
+	const inlineTop: InlineFooterLine = {
+		left: inlineTopLeft,
+		right: fitInlineSegments(inlineTopRightParts, inlineRightBudget, theme),
+	};
 
 	const modelParts: string[] = [];
 	modelParts.push(theme.fg("mdLink", glyphs.model));
