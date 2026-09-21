@@ -33,6 +33,7 @@ const COPY = {
 		hint: "Tab/Shift+Tab/←/→: tabs · ↑/↓: move · Enter/Space: change · Enter on wheel speed: type 1-10 · Esc/q: close",
 		labels: {
 			enabled: "Enabled",
+			inlineFooter: "Inline footer",
 			thinkingPeek: "Thinking peek",
 			language: "Language",
 			wheelScrollLines: "Mouse wheel speed",
@@ -72,6 +73,7 @@ const COPY = {
 		hint: "Tab/Shift+Tab/←/→：切页 · ↑/↓：移动 · Enter/Space：更改 · 滚轮速度项 Enter 输入 1-10 · Esc/q：关闭",
 		labels: {
 			enabled: "启用",
+			inlineFooter: "内联底栏",
 			thinkingPeek: "思考预览",
 			language: "语言",
 			wheelScrollLines: "鼠标滚轮速度",
@@ -185,6 +187,7 @@ function buildFeaturesItems(config: OpenTuiConfig, copy: SettingsCopy): SettingI
 			currentValue: copy.values.wheelLines(config.fullscreen.wheelScrollLines),
 		},
 		{ id: "thinkingPeek", label: copy.labels.thinkingPeek, currentValue: formatThinkingPeekLines(config.thinkingPeek.lines, copy) },
+		{ id: "inlineFooter", label: copy.labels.inlineFooter, currentValue: flag(config.inlineFooter) },
 	];
 }
 
@@ -245,6 +248,7 @@ function handleSettingChange(
 ): OpenTuiConfig {
 	if (tab === "features") {
 		if (itemId === "enabled") return toggleEnabled(config);
+		if (itemId === "inlineFooter") return { ...config, inlineFooter: !config.inlineFooter };
 		if (itemId === "settingsLanguage") return toggleLanguage(config);
 		if (itemId === "thinkingPeek") return cycleThinkingPeek(config);
 	}

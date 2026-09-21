@@ -316,6 +316,15 @@ test("supports localized settings and keyboard shortcuts", async () => {
 	assert.equal(reopened.isClosed(), true);
 });
 
+test("configures inline footer from General settings", async () => {
+	const settings = await openSettings();
+	// Enabled → Language → Wheel speed → Thinking peek → Inline footer
+	for (let i = 0; i < 4; i++) settings.component.handleInput("\x1b[B");
+	assert.match(selectedLine(settings.component), /Inline footer/);
+	settings.component.handleInput(" ");
+	assert.equal(settings.getConfig().inlineFooter, true);
+});
+
 test("configures the hostname footer segment", async () => {
 	const settings = await openSettings();
 	settings.component.handleInput("\x1b[C");
@@ -364,11 +373,13 @@ test("normalizes invalid settings values", () => {
 		writeFileSync(join(agentDir, "open-tui.json"), JSON.stringify({
 			settingsLanguage: "de",
 			cursorStyle: "invalid",
+			inlineFooter: "yes",
 			thinkingPeek: { lines: 9 },
 		}), "utf8");
 		const loaded = loadConfig();
 		assert.equal(loaded.settingsLanguage, "en");
 		assert.equal(loaded.cursorStyle, "block");
+		assert.equal(loaded.inlineFooter, false);
 		assert.equal(loaded.thinkingPeek.lines, 1);
 	} finally {
 		if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;

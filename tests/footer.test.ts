@@ -168,6 +168,53 @@ test("narrow footer sheds the context bar before left segments", () => {
 	assert.ok(!tiny.includes("25.0%"), `context should be dropped\n${tiny}`);
 });
 
+test("provides inline footer content without duplicating native rows", () => {
+	let footerFactory: NonNullable<Parameters<ExtensionContext["ui"]["setFooter"]>[0]> | undefined;
+	const ctx = {
+		model: { provider: "openai", contextWindow: 1_000 },
+		ui: {
+			setFooter(factory: typeof footerFactory) {
+				footerFactory = factory;
+			},
+		},
+		sessionManager: {
+			getCwd: () => "/work/project",
+			getEntries: () => [],
+			getSessionName: () => undefined,
+		},
+		getContextUsage: () => ({ tokens: 0, contextWindow: 1_000, percent: 0 }),
+	} as unknown as ExtensionContext;
+	const config = structuredClone(DEFAULT_CONFIG);
+	config.icons.mode = "ascii";
+	const state: FooterState = {
+		git: emptyGitStatus(),
+		runtime: null,
+		sessionStartEpoch: Date.now(),
+		workingSince: undefined,
+		lastDoneIn: undefined,
+	};
+	const handle = installFooter(
+		ctx,
+		() => state,
+		() => config,
+		() => ({ provider: "OpenAI", model: "gpt-5", effort: "off" }),
+		{ setRequestRender() {}, scheduleGitRefresh() {} },
+	);
+	assert.ok(footerFactory);
+	const footerData = {
+		onBranchChange: () => () => {},
+		getExtensionStatuses: () => new Map(),
+	} as unknown as ReadonlyFooterDataProvider;
+	const component = footerFactory({ requestRender() {} } as TUI, theme, footerData) as Component;
+
+	const inline = handle.renderInline(40);
+	assert.ok(inline);
+	assert.match(inline.top.left, /project/);
+	assert.match(inline.bottom.left, /gpt-5/);
+	config.inlineFooter = true;
+	assert.deepEqual(component.render(40), []);
+});
+
 test("auto gates Nerd icons by TTY and UTF-8 support", () => {
 	const envKeys = ["TERM_PROGRAM", "LC_TERMINAL", "WT_SESSION", "TERM", "LC_ALL", "LC_CTYPE", "LANG"];
 	const originalEnv = new Map(envKeys.map((key) => [key, process.env[key]]));

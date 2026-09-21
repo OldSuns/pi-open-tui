@@ -30,6 +30,16 @@ interface WorkingStatusIndicator {
 	renderSpinnerInBorder(width: number): string;
 }
 
+export interface InlineFooterLine {
+	left: string;
+	right: string;
+}
+
+export interface InlineFooterRenderer {
+	enabled(): boolean;
+	render(width: number): { top: InlineFooterLine; bottom: InlineFooterLine } | undefined;
+}
+
 interface HiddenThinkingLabelComponent {
 	children: unknown[];
 	setHiddenThinkingLabel(label: string): void;
@@ -132,11 +142,59 @@ function roundedBorder(
 	return paint(`${corners[0]}${"─".repeat(Math.max(0, width - 2))}${corners[1]}`);
 }
 
+function trimTrailingSpaces(text: string): string {
+	const ansiSuffix = text.match(/(?:\x1b\[[0-?]*[ -/]*[@-~])+$/)?.[0] ?? "";
+	const content = ansiSuffix ? text.slice(0, -ansiSuffix.length) : text;
+	return `${content.replace(/ +$/, "")}${ansiSuffix}`;
+}
+
+function inlineBorder(
+	width: number,
+	kind: "top" | "bottom",
+	paint: (s: string) => string,
+	renderLine: (width: number) => InlineFooterLine | undefined,
+	sourceLine?: string,
+	indicator?: WorkingStatusIndicator,
+): string {
+	if (width < 2) return paint(truncateToWidth(kind === "top" ? "╭╮" : "╰╯", width, ""));
+
+	const corners = kind === "top" ? (["╭", "╮"] as const) : (["╰", "╯"] as const);
+	const contentWidth = width - 2;
+	const plain = sourceLine ? stripAnsi(sourceLine) : "";
+	const scrollMatch = plain.match(/([↑↓]\s+\d+\s+more)/);
+	const right = scrollMatch ? paint(` ${scrollMatch[1]} `) : "";
+	let left = paint("─");
+
+	if (kind === "top" && indicator) {
+		const statusBudget = Math.max(1, contentWidth - visibleWidth(right) - 7);
+		let status = indicator.renderInBorder(statusBudget);
+		if (visibleWidth(status) > statusBudget) status = indicator.renderSpinnerInBorder(statusBudget);
+		const leftBudget = Math.max(0, contentWidth - visibleWidth(right) - 1);
+		status = truncateToWidth(status, Math.max(0, leftBudget - 4), "");
+		if (visibleWidth(status) > 0) left = `${paint("── ")}${status}${paint(" ")}`;
+	}
+
+	const lineBudget = Math.max(0, contentWidth - visibleWidth(left) - visibleWidth(right) - 6);
+	const line = renderLine(lineBudget);
+	if (!line) return roundedBorder(width, kind, paint, sourceLine, indicator);
+	const leftContent = trimTrailingSpaces(line.left);
+	const rightContent = trimTrailingSpaces(line.right);
+	if (visibleWidth(leftContent) === 0 && visibleWidth(rightContent) === 0) {
+		return roundedBorder(width, kind, paint, sourceLine, indicator);
+	}
+
+	const leftCell = leftContent ? ` ${leftContent} ` : "";
+	const rightCell = rightContent ? ` ${rightContent} ` : "";
+	const fill = Math.max(1, contentWidth - visibleWidth(left) - visibleWidth(leftCell) - visibleWidth(rightCell) - visibleWidth(right) - 1);
+	return `${paint(corners[0])}${left}${leftCell}${paint("─".repeat(fill))}${rightCell}${right}${paint("─")}${paint(corners[1])}`;
+}
+
 export class OpenTuiEditor extends CustomEditor {
 	readonly embedWorkingStatus = true;
 	private readonly getRail: () => string;
 	private readonly getBorder: (s: string) => string;
 	private embeddedWorkingStatusIndicator: WorkingStatusIndicator | undefined;
+	private readonly inlineFooter: InlineFooterRenderer | undefined;
 	private cursorStyle: CursorStyle;
 	private previewHardwareCursor = false;
 
@@ -145,9 +203,11 @@ export class OpenTuiEditor extends CustomEditor {
 		editorTheme: EditorTheme,
 		keybindings: KeybindingsManager,
 		cursorStyle: CursorStyle = "block",
+		inlineFooter?: InlineFooterRenderer,
 	) {
 		super(tui, editorTheme, keybindings, { paddingX: 0 });
 		this.cursorStyle = cursorStyle;
+		this.inlineFooter = inlineFooter;
 		configureCursor(tui, cursorStyle);
 		// ponytail: route the frame through this.borderColor so Pi can recolor it
 		// via updateEditorBorderColor() — bash mode ("! " prefix → green) and
@@ -212,7 +272,12 @@ export class OpenTuiEditor extends CustomEditor {
 		const bottomIdx = findBottomBorderIndex(baseLines);
 
 		const result: string[] = [];
-		result.push(roundedBorder(width, "top", borderPaint, baseLines[0], this.embeddedWorkingStatusIndicator));
+		const inlineFooter = this.inlineFooter?.enabled() === true;
+		const renderInlineLine = (kind: "top" | "bottom", budget: number): InlineFooterLine | undefined =>
+			this.inlineFooter?.render(budget)?.[kind];
+		result.push(inlineFooter
+			? inlineBorder(width, "top", borderPaint, (budget) => renderInlineLine("top", budget), baseLines[0], this.embeddedWorkingStatusIndicator)
+			: roundedBorder(width, "top", borderPaint, baseLines[0], this.embeddedWorkingStatusIndicator));
 
 		for (let i = 1; i < bottomIdx; i++) {
 			const line = baseLines[i] ?? "";
@@ -223,7 +288,9 @@ export class OpenTuiEditor extends CustomEditor {
 			}
 		}
 
-		result.push(roundedBorder(width, "bottom", borderPaint, baseLines[bottomIdx]));
+		result.push(inlineFooter
+			? inlineBorder(width, "bottom", borderPaint, (budget) => renderInlineLine("bottom", budget), baseLines[bottomIdx])
+			: roundedBorder(width, "bottom", borderPaint, baseLines[bottomIdx]));
 
 		for (let i = bottomIdx + 1; i < baseLines.length; i++) {
 			result.push(baseLines[i]!);
@@ -238,6 +305,7 @@ export function installEditor(
 	ctx: ExtensionContext,
 	cursorStyle: CursorStyle = "block",
 	wheelScrollLines = DEFAULT_FULLSCREEN_WHEEL_SCROLL_LINES,
+	inlineFooter?: InlineFooterRenderer,
 ) {
 	let activeTui: TUI | undefined;
 	let activeEditor: OpenTuiEditor | undefined;
@@ -255,7 +323,7 @@ export function installEditor(
 		hiddenThinkingTarget = undefined;
 		applyFullscreenWheelScrollLines(tui, currentWheelScrollLines);
 		previousHardwareCursor = tui.getShowHardwareCursor();
-		activeEditor = new OpenTuiEditor(tui, editorTheme, keybindings, currentCursorStyle);
+		activeEditor = new OpenTuiEditor(tui, editorTheme, keybindings, currentCursorStyle, inlineFooter);
 		return activeEditor;
 	});
 	return {
