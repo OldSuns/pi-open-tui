@@ -216,6 +216,22 @@ export interface InlineFooterLines {
 	bottom: InlineFooterLine;
 }
 
+/**
+ * Split the bottom border content the way `alignRight` splits the plain row:
+ * the right block (statistics) survives, the left one (model) shrinks to an
+ * ellipsis and only then disappears. Keeps the assembled border inside its
+ * budget so editor-side truncation never eats the right corner.
+ */
+function fitInlineLine(left: string, right: string, width: number, theme: Theme): InlineFooterLine {
+	const rightWidth = visibleWidth(right);
+	if (rightWidth > width) {
+		return { left: "", right: truncateToWidth(right, width, theme.fg("dim", "...")) };
+	}
+	const availableForLeft = width - rightWidth - 1;
+	if (availableForLeft <= 0) return { left: "", right };
+	return { left: truncateToWidth(left, availableForLeft, theme.fg("dim", "...")), right };
+}
+
 export interface FooterHandle {
 	renderInline(width: number): InlineFooterLines | undefined;
 	cleanup(): void;
@@ -300,8 +316,10 @@ function renderFooterContent(
 			text: `${theme.fg("dim", glyphs.session)} ${theme.fg("text", truncateToWidth(sessionName, 24, theme.fg("dim", "...")))}`,
 			priority: 2,
 		};
-		if (segments.sessionName) leftParts.push(sessionPart);
-		inlineTopLeftParts.push(sessionPart);
+		if (segments.sessionName) {
+			leftParts.push(sessionPart);
+			inlineTopLeftParts.push(sessionPart);
+		}
 	}
 	const gitSeg = renderGitSegment(theme, state.git, glyphs, segments);
 	if (gitSeg) {
@@ -363,7 +381,7 @@ function renderFooterContent(
 	}
 	const modelBlock = modelParts.join(theme.fg("dim", " · "));
 	const statsBlock = renderStatsBlock(theme, totals, glyphs, segments);
-	const inlineBottom: InlineFooterLine = { left: modelBlock, right: statsBlock };
+	const inlineBottom = fitInlineLine(modelBlock, statsBlock, width, theme);
 	const line2 = alignRight(inlineBottom.left, inlineBottom.right, width, theme);
 	const mainLines: [string, string] = [line1, line2]
 		.map((line) => truncateToWidth(line, width, theme.fg("dim", "..."))) as [string, string];

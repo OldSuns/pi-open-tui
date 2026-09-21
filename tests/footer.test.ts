@@ -10,13 +10,14 @@ import type {
 	Theme,
 } from "@earendil-works/pi-coding-agent";
 import type { Component, TUI } from "@earendil-works/pi-tui";
+import { visibleWidth } from "@earendil-works/pi-tui";
 import { DEFAULT_CONFIG } from "../extensions/open-tui/config.ts";
 import { installFooter, shortHostname } from "../extensions/open-tui/footer.ts";
 import { emptyGitStatus, readGitStatus } from "../extensions/open-tui/git.ts";
 import { detectNerdFont, resolveGlyphs, resolveIconMode, runtimeSymbol } from "../extensions/open-tui/icons.ts";
 import { clearRuntimeCache, readRuntimeInfo } from "../extensions/open-tui/runtime.ts";
 import { getModelMeta, getUsageTotals, invalidateUsageCache, type FooterState } from "../extensions/open-tui/state.ts";
-import { fitSegmentsByPriority, truncateBranch, truncatePath } from "../extensions/open-tui/utils.ts";
+import { fitSegmentsByPriority, stripAnsi, truncateBranch, truncatePath } from "../extensions/open-tui/utils.ts";
 
 const theme = {
 	fg: (_color: string, text: string) => text,
@@ -207,12 +208,26 @@ test("provides inline footer content without duplicating native rows", () => {
 	} as unknown as ReadonlyFooterDataProvider;
 	const component = footerFactory({ requestRender() {} } as TUI, theme, footerData) as Component;
 
+	config.footerSegments.sessionName = true;
 	const inline = handle.renderInline(100);
 	assert.ok(inline);
 	assert.match(inline.top.left, /session-title · .*main/);
 	assert.match(inline.top.right, /project · .*0\.0%/);
 	assert.ok(inline.top.right.indexOf("project") < inline.top.right.indexOf("%"));
 	assert.match(inline.bottom.left, /gpt-5/);
+
+	// The inline top border honors the same toggle as the plain footer.
+	config.footerSegments.sessionName = false;
+	assert.ok(!handle.renderInline(100)!.top.left.includes("session-title"));
+
+	// Narrow: the model block is shed first, matching the plain row's alignRight.
+	const narrow = handle.renderInline(30);
+	assert.ok(narrow);
+	assert.ok(visibleWidth(narrow.bottom.left) + visibleWidth(narrow.bottom.right) <= 30);
+	assert.match(stripAnsi(narrow.bottom.right), /\$/);
+	assert.match(stripAnsi(narrow.bottom.left), /\.\.\.$/);
+	assert.equal(visibleWidth(handle.renderInline(visibleWidth(narrow.bottom.right) + 1)!.bottom.left), 0);
+
 	config.inlineFooter = true;
 	assert.deepEqual(component.render(40), []);
 });
