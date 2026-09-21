@@ -56,6 +56,7 @@ Run `/open-tui` to open the settings dialog. It provides **General**, **Appearan
 ```json
 {
   "enabled": true,
+  "inlineFooter": false,
   "settingsLanguage": "en",
   "cursorStyle": "block",
   "fullscreen": {
@@ -98,6 +99,7 @@ Key options:
 | Option | Values | Notes |
 | --- | --- | --- |
 | `settingsLanguage` | `en`, `zh` | Changes the `/open-tui` interface language |
+| `inlineFooter` | `true`, `false` | Moves the two main Footer rows into the editor's top and bottom borders; defaults to `false`. Extension status rows remain below the editor |
 | `cursorStyle` | `block`, `bar`, `underline` | `bar` and `underline` require terminal cursor-shape support |
 | `fullscreen.wheelScrollLines` | `1`-`10` | Lines scrolled per mouse-wheel notch in fullscreen mode; defaults to `4`. In `/open-tui`, press Enter on this item and type a number (values are clamped to `1`-`10`) |
 | `icons.mode` | `auto`, `nerd`, `ascii` | Controls footer and telemetry icons |
@@ -107,6 +109,8 @@ Key options:
 | `thinkingPeek.lines` | `0`, `1`, `2` | Off, one-line, or two-line hidden thinking preview |
 
 `sessionName` appears only when the session has a name. `hostname` shows the short host name (first label of the machine's host name, e.g. `mba` from `mba.example.com`) with a server icon. `gitCommit` shows the short hash and tag in detached HEAD state. Disabling `extensionStatuses` hides the entire extension status line, including MCP status.
+
+With `inlineFooter` enabled, the two normal Footer rows are rendered inside the editor frame to save vertical space. The top border places the Git branch on the left and CWD first in the right-hand group; the session title appears on the left too when `sessionName` is enabled. The Header and extension status rows remain separate; narrow terminals truncate lower-priority Footer data first, keeping the right-hand statistics and the border corner.
 
 Fullscreen wheel speed uses an isolated compatibility shim for Pi 0.84.2's runtime field because Pi does not yet expose a public setter. On Pi versions without a compatible field, the setting is ignored and Pi's default scrolling remains active.
 

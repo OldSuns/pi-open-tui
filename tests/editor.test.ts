@@ -50,6 +50,28 @@ test("embeds the working indicator in the editor top border", () => {
 	assert.match(stripAnsi(editor.render(40)[0] ?? ""), /^╭── ◐ working ─+╮$/);
 });
 
+test("renders inline footer lines in the editor frame", () => {
+	const editor = new OpenTuiEditor(
+		tui,
+		editorTheme,
+		{ matches: () => false } as unknown as KeybindingsManager,
+		"block",
+		{
+			enabled: () => true,
+			render: (width) => ({
+				top: { left: "cwd", right: "context" },
+				bottom: { left: "model", right: "stats" },
+			}),
+		},
+	);
+
+	const lines = editor.render(40).map(stripAnsi);
+	assert.match(lines[0] ?? "", /^╭─ cwd ─+ context ─╮$/);
+	assert.match(lines.at(-1) ?? "", /^╰─ model ─+ stats ─╯$/);
+	assert.equal(visibleWidth(lines[0] ?? ""), 40);
+	assert.equal(visibleWidth(lines.at(-1) ?? ""), 40);
+});
+
 test("keeps a narrow scrolled working border intact", () => {
 	const editor = new OpenTuiEditor(
 		tui,

@@ -48,6 +48,7 @@ export interface FullscreenConfig {
 
 export interface OpenTuiConfig {
 	enabled: boolean;
+	inlineFooter: boolean;
 	settingsLanguage: SettingsLanguage;
 	cursorStyle: CursorStyle;
 	fullscreen: FullscreenConfig;
@@ -61,6 +62,7 @@ export interface OpenTuiConfig {
 
 export const DEFAULT_CONFIG: OpenTuiConfig = {
 	enabled: true,
+	inlineFooter: false,
 	settingsLanguage: "en",
 	cursorStyle: "block",
 	fullscreen: {
@@ -151,6 +153,9 @@ export function loadConfig(notify?: (msg: string, level: "warning" | "info") => 
 		const raw = readFileSync(path, "utf8");
 		const parsed: unknown = JSON.parse(raw);
 		const config = deepMerge(DEFAULT_CONFIG, parsed);
+		if (typeof config.inlineFooter !== "boolean") {
+			config.inlineFooter = DEFAULT_CONFIG.inlineFooter;
+		}
 		if (config.settingsLanguage !== "en" && config.settingsLanguage !== "zh") {
 			config.settingsLanguage = DEFAULT_CONFIG.settingsLanguage;
 		}
