@@ -36,6 +36,64 @@ test("compensates Pi editor padding for the custom left rail", () => {
 	assert.equal(contentLine.indexOf("x"), 2);
 });
 
+test("maps framed editor clicks to the Pi editor coordinate space", () => {
+	const editor = new OpenTuiEditor(
+		tui,
+		editorTheme,
+		{ matches: () => false } as unknown as KeybindingsManager,
+	);
+	editor.setText("abcdef");
+	editor.render(40);
+
+	const click = (x: number): void => {
+		editor.handleMouse({
+			type: "click",
+			button: "left",
+			x,
+			y: 1,
+			screenX: x,
+			screenY: 1,
+			width: 40,
+			height: 8,
+			shift: false,
+			alt: false,
+			ctrl: false,
+		});
+	};
+
+	click(2);
+	assert.equal(editor.getCursor().col, 0);
+	click(3);
+	assert.equal(editor.getCursor().col, 1);
+	click(39);
+	assert.equal(editor.getCursor().col, 6);
+});
+
+test("leaves narrow unframed editor mouse coordinates unchanged", () => {
+	const editor = new OpenTuiEditor(
+		tui,
+		editorTheme,
+		{ matches: () => false } as unknown as KeybindingsManager,
+	);
+	editor.setText("abc");
+	editor.render(3);
+
+	editor.handleMouse({
+		type: "click",
+		button: "left",
+		x: 0,
+		y: 1,
+		screenX: 0,
+		screenY: 1,
+		width: 3,
+		height: 8,
+		shift: false,
+		alt: false,
+		ctrl: false,
+	});
+
+	assert.equal(editor.getCursor().col, 0);
+});
 test("embeds the working indicator in the editor top border", () => {
 	const editor = new OpenTuiEditor(
 		tui,
