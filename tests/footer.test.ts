@@ -47,6 +47,103 @@ test("cwd path truncation keeps head and tail segments", () => {
 	assert.equal(truncatePath("~/projects/pi-open-tui", 18), "~/.../pi-open-tui");
 });
 
+test("cwd path truncation measures display width, not code units", () => {
+	// Four characters, eight terminal columns. A code-unit comparison sees this as
+	// "short" and returns it unchanged for any budget >= 4, which left the footer
+	// unable to shrink the segment at all.
+	const wide = "示例项目";
+	assert.equal(wide.length, 4);
+	assert.equal(visibleWidth(wide), 8);
+
+	// Every budget must produce something that actually fits.
+	for (const budget of [5, 6, 7, 8, 10, 12]) {
+		const out = truncatePath(wide, budget);
+		assert.ok(
+			visibleWidth(out) <= budget,
+			`truncatePath(${wide}, ${budget}) = ${JSON.stringify(out)} is ${visibleWidth(out)} columns`,
+		);
+		if (budget < visibleWidth(wide)) {
+			assert.ok(
+				visibleWidth(out) < visibleWidth(wide),
+				`truncatePath(${wide}, ${budget}) did not shrink the path`,
+			);
+		}
+	}
+
+	// A wide path keeps its head and tail segments like the ASCII case does.
+	const widePath = "~/示例项目/日本語テスト";
+	// Width 23: the head plus the tail segment fits at 18 columns.
+	const truncated = truncatePath(widePath, 18);
+	assert.ok(visibleWidth(truncated) <= 18, `expected <= 18 columns, got ${visibleWidth(truncated)}`);
+	assert.ok(truncated.startsWith("~/..."), `head segment missing: ${truncated}`);
+	assert.ok(truncated.endsWith("日本語テスト"), `tail segment missing: ${truncated}`);
+	// Too tight for the tail: it must still return something that fits.
+	const tight = truncatePath(widePath, 14);
+	assert.ok(visibleWidth(tight) <= 14, `expected <= 14 columns, got ${visibleWidth(tight)}`);
+});
+
+// An unfixed fit loop does not fail fast: it spins on the main thread, so a plain
+// in-process assertion would hang the whole suite instead of reporting a failure.
+// Run each case in a child process with a timeout so the regression is loud.
+function runFitInChild(scenarios: unknown): string[][] {
+	const script = `
+		import { fitSegmentsByPriority, truncatePath } from ${JSON.stringify(join(import.meta.dirname, "..", "extensions", "open-tui", "utils.ts"))};
+		const scenarios = ${JSON.stringify(scenarios)};
+		const out = scenarios.map((s) => {
+			const segs = s.segments.map((seg) => {
+				if (seg.truncate === "path") return { ...seg, truncate: (text, maxWidth) => truncatePath(text, maxWidth) };
+				if (seg.truncate === "noop") return { ...seg, truncate: (text) => text };
+				return seg;
+			});
+			return fitSegmentsByPriority(segs, s.maxW);
+		});
+		console.log(JSON.stringify(out));
+	`;
+	try {
+		return JSON.parse(
+			execFileSync(process.execPath, ["--input-type=module", "-e", script], {
+				encoding: "utf8",
+				timeout: 15_000,
+			}).trim(),
+		) as string[][];
+	} catch (error) {
+		const { code, signal } = error as { code?: string; signal?: string };
+		const why = code === "ETIMEDOUT" || signal === "SIGTERM" ? " (timed out after 15s)" : "";
+		throw new Error(`footer layout did not terminate${why}`);
+	}
+}
+
+test("footer layout terminates and fits when a wide cwd basename cannot be shrunk by code units", () => {
+	// Regression: `truncatePath` used to compare String.length against a column
+	// budget, returned a wide basename unchanged, and left the fit loop spinning.
+	const [fitted] = runFitInChild([
+		{
+			maxW: 10,
+			segments: [
+				{ text: "示例项目", priority: 0, truncate: "path" },
+				{ text: "ctx", priority: 4 },
+			],
+		},
+	]);
+	const width =
+		fitted!.reduce((a, part) => a + visibleWidth(part), 0) + Math.max(0, fitted!.length - 1);
+	assert.ok(width <= 10, `fitted width ${width} exceeds the budget\n${fitted!.join(" ")}`);
+});
+
+test("footer layout drops a segment whose truncate callback cannot shrink it", () => {
+	// Defense in depth: a no-op truncate callback must not block the render timer.
+	const [fitted] = runFitInChild([
+		{
+			maxW: 12,
+			segments: [
+				{ text: "wide-----segment", priority: 0, truncate: "noop" },
+				{ text: "keep", priority: 4 },
+			],
+		},
+	]);
+	assert.deepEqual(fitted, ["keep"]);
+});
+
 test("footer compacts cwd before truncating lower-priority segments", () => {
 	assert.deepEqual(
 		fitSegmentsByPriority(
