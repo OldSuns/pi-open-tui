@@ -43,23 +43,28 @@ export function truncateBranch(branch: string, maxLen: number): string {
 }
 
 export function truncatePath(path: string, maxLen: number): string {
-	if (path.length <= maxLen) return path;
+	// `maxLen` is a terminal-column budget, so every comparison here must use
+	// display width. Comparing String.length let wide (CJK) paths stay wider than
+	// the budget: for a basename of 4 characters but 8 columns, `truncatePath`
+	// returned it unchanged, so fitSegmentsByPriority's `while (totalW() > maxW)`
+	// loop never made progress and livelocked the renderer at 100% CPU.
+	if (visibleWidth(path) <= maxLen) return path;
 	if (maxLen <= 3) return "...".slice(0, maxLen);
 	const sepChar = path.includes("/") ? "/" : "\\";
 	const parts = path.split(/[\\/]/);
-	if (parts.length <= 2) return path.slice(0, maxLen - 3) + "...";
+	if (parts.length <= 2) return truncateToWidth(path, maxLen, "...");
 	// Keep first segment (e.g. ~) and as many trailing segments as fit.
 	const tail: string[] = [];
 	let tailLen = 0;
 	for (let i = parts.length - 1; i >= 1; i--) {
 		const seg = parts[i]!;
-		if (tailLen + seg.length + 4 > maxLen) break;
+		if (tailLen + visibleWidth(seg) + 4 > maxLen) break;
 		tail.unshift(seg);
-		tailLen += seg.length + 1;
+		tailLen += visibleWidth(seg) + 1;
 	}
 	const head = parts[0]!;
 	const result = `${head}${sepChar}...${sepChar}${tail.join(sepChar)}`;
-	return result.length > maxLen ? result.slice(0, maxLen - 3) + "..." : result;
+	return visibleWidth(result) > maxLen ? truncateToWidth(result, maxLen, "...") : result;
 }
 
 export function finiteOrZero(value: unknown): number {
@@ -158,7 +163,25 @@ export function fitSegmentsByPriority(
 			if (totalW() <= maxW) break;
 		}
 	}
+	// A segment whose `truncate` cannot actually shrink would otherwise spin here
+	// forever and block the render timer. Require each pass to make progress, and
+	// drop the worst segment when it does not, so layout always terminates.
+	let lastTotal = Infinity;
 	while (totalW() > maxW) {
+		const nowTotal = totalW();
+		if (nowTotal >= lastTotal) {
+			let worst = -1;
+			for (let i = 0; i < items.length; i++) {
+				if (items[i].text !== "" && (worst === -1 || items[i].priority < items[worst].priority)) {
+					worst = i;
+				}
+			}
+			if (worst === -1) break;
+			items[worst].text = "";
+			items[worst].w = 0;
+			continue;
+		}
+		lastTotal = nowTotal;
 		let target = -1;
 		for (let i = 0; i < items.length; i++) {
 			if (items[i].text !== "" && (target === -1 || items[i].priority < items[target].priority)) {

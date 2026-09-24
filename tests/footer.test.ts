@@ -3,6 +3,7 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { hostname, tmpdir } from "node:os";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import test from "node:test";
 import type {
 	ExtensionContext,
@@ -45,6 +46,79 @@ test("branch truncation preserves the branch prefix", () => {
 test("cwd path truncation keeps head and tail segments", () => {
 	assert.equal(truncatePath("~/projects/pi-open-tui", 30), "~/projects/pi-open-tui");
 	assert.equal(truncatePath("~/projects/pi-open-tui", 18), "~/.../pi-open-tui");
+});
+
+test("cwd path truncation measures display width, not code units", () => {
+	const wide = "示例项目";
+	assert.equal(visibleWidth(wide), 8);
+
+	for (const budget of [5, 6, 7]) {
+		const out = truncatePath(wide, budget);
+		assert.ok(visibleWidth(out) <= budget, `width ${visibleWidth(out)} exceeds ${budget}`);
+	}
+});
+
+type FitScenario = { maxW: number; segments: Array<{ text: string; priority: number; truncate?: "path" | "noop" }> };
+
+function parseFitOutput(value: string): string[][] {
+	const parsed: unknown = JSON.parse(value);
+	if (!Array.isArray(parsed) || !parsed.every((row) => Array.isArray(row) && row.every((item) => typeof item === "string"))) {
+		throw new Error("footer child process returned invalid output");
+	}
+	return parsed as string[][];
+}
+
+// An unfixed fit loop does not fail fast: it spins on the main thread, so a plain
+// in-process assertion would hang the whole suite instead of reporting a failure.
+// Run each case in a child process with a timeout so the regression is loud.
+function runFitInChild(scenarios: readonly FitScenario[]): string[][] {
+	const script = `
+		import { fitSegmentsByPriority, truncatePath } from ${JSON.stringify(pathToFileURL(join(import.meta.dirname, "..", "extensions", "open-tui", "utils.ts")).href)};
+		const scenarios = ${JSON.stringify(scenarios)};
+		const out = scenarios.map((s) => {
+			const segs = s.segments.map((seg) => {
+				if (seg.truncate === "path") return { ...seg, truncate: (text, maxWidth) => truncatePath(text, maxWidth) };
+				if (seg.truncate === "noop") return { ...seg, truncate: (text) => text };
+				return seg;
+			});
+			return fitSegmentsByPriority(segs, s.maxW);
+		});
+		console.log(JSON.stringify(out));
+	`;
+	try {
+		const output = execFileSync(process.execPath, ["--input-type=module", "-e", script], {
+			encoding: "utf8",
+			timeout: 15_000,
+		});
+		return parseFitOutput(output.trim());
+	} catch (error) {
+		const { code, signal } = error as { code?: string; signal?: string };
+		if (code === "ETIMEDOUT" || signal === "SIGTERM") {
+			throw new Error("footer layout did not terminate (timed out after 15s)");
+		}
+		throw error;
+	}
+}
+
+test("footer layout terminates and drops unshrinkable segments", () => {
+	const [fitted, dropped] = runFitInChild([
+		{
+			maxW: 10,
+			segments: [
+				{ text: "示例项目", priority: 0, truncate: "path" },
+				{ text: "ctx", priority: 4 },
+			],
+		},
+		{
+			maxW: 12,
+			segments: [
+				{ text: "wide-----segment", priority: 0, truncate: "noop" },
+				{ text: "keep", priority: 4 },
+			],
+		},
+	]);
+	assert.ok(visibleWidth(fitted!.join(" ")) <= 10);
+	assert.deepEqual(dropped, ["keep"]);
 });
 
 test("footer compacts cwd before truncating lower-priority segments", () => {
