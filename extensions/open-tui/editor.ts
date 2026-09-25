@@ -4,7 +4,7 @@ import {
 	type ExtensionContext,
 	type KeybindingsManager,
 } from "@earendil-works/pi-coding-agent";
-import type { EditorTheme, TUI } from "@earendil-works/pi-tui";
+import type { EditorTheme, TuiMouseEvent, TuiMouseEventResult, TUI } from "@earendil-works/pi-tui";
 import { CURSOR_MARKER, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import type { CursorStyle } from "./config.ts";
 import {
@@ -24,6 +24,8 @@ const CURSOR_STYLE_SEQUENCES: Partial<Record<CursorStyle, string>> = {
 	underline: "\x1b[4 q",
 };
 const DEFAULT_CURSOR_STYLE_SEQUENCE = "\x1b[0 q";
+const EDITOR_FRAME_LEFT_INSET = 2;
+const EDITOR_FRAME_HORIZONTAL_CHROME = EDITOR_FRAME_LEFT_INSET * 2;
 
 interface WorkingStatusIndicator {
 	renderInBorder(width: number): string;
@@ -221,6 +223,16 @@ export class OpenTuiEditor extends CustomEditor {
 		super.setPaddingX(0);
 	}
 
+	override handleMouse(event: TuiMouseEvent): TuiMouseEventResult | undefined {
+		if (event.width < EDITOR_FRAME_HORIZONTAL_CHROME) return super.handleMouse(event);
+
+		return super.handleMouse({
+			...event,
+			x: event.x - EDITOR_FRAME_LEFT_INSET,
+			width: event.width - EDITOR_FRAME_HORIZONTAL_CHROME,
+		});
+	}
+
 	setWorkingStatusIndicator(indicator: WorkingStatusIndicator | undefined): void {
 		this.embeddedWorkingStatusIndicator = indicator;
 		this.tui.requestRender();
@@ -262,12 +274,12 @@ export class OpenTuiEditor extends CustomEditor {
 	}
 
 	render(width: number): string[] {
-		if (width < 4) return this.renderBase(width);
+		if (width < EDITOR_FRAME_HORIZONTAL_CHROME) return this.renderBase(width);
 
 		const rail = this.getRail();
 		const borderPaint = this.getBorder;
 		// ponytail: 1-char rail + 1-char gap on each side = 4 chars of chrome.
-		const innerWidth = Math.max(0, width - 4);
+		const innerWidth = Math.max(0, width - EDITOR_FRAME_HORIZONTAL_CHROME);
 		const baseLines = this.renderBase(innerWidth);
 		const bottomIdx = findBottomBorderIndex(baseLines);
 
