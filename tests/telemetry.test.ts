@@ -64,7 +64,24 @@ function startTurn(tracker: TurnTelemetryTracker, message: AssistantMessage, tur
 
 function endTurn(tracker: TurnTelemetryTracker, message: AssistantMessage, turnIndex = 0) {
 	tracker.handle({ type: "message_end", message });
-	return tracker.handle({ type: "turn_end", turnIndex, message, toolResults: [] });
+	return tracker.handle({
+		type: "turn_end",
+		turnIndex,
+		message,
+		toolResults: [],
+		messageEntryId: "",
+		toolResultEntryIds: [],
+		entries: [],
+		continue: false,
+		context: {
+			contextEntries: [],
+			contextMessages: [],
+			llmMessages: [],
+			pendingMessages: [],
+			canContinue: false,
+		},
+		outcome: "completed",
+	});
 }
 
 test("uses total output over full generation time", () => {
@@ -115,7 +132,24 @@ test("normalizes invalid usage without breaking turn telemetry", () => {
 		now += 100;
 		tracker.handle({ type: "message_end", message });
 	}
-	const telemetry = tracker.handle({ type: "turn_end", turnIndex: 0, message: messages[1]!, toolResults: [] })!;
+	const telemetry = tracker.handle({
+		type: "turn_end",
+		turnIndex: 0,
+		message: messages[1]!,
+		toolResults: [],
+		messageEntryId: "",
+		toolResultEntryIds: [],
+		entries: [],
+		continue: false,
+		context: {
+			contextEntries: [],
+			contextMessages: [],
+			llmMessages: [],
+			pendingMessages: [],
+			canContinue: false,
+		},
+		outcome: "completed",
+	})!;
 
 	assert.equal(telemetry.inputTokens, 50);
 	assert.equal(telemetry.outputTokens, 20);
@@ -133,7 +167,24 @@ test("measures non-streamed responses from turn start", () => {
 	now = 5_000;
 	tracker.handle({ type: "message_start", message });
 	tracker.handle({ type: "message_end", message });
-	const telemetry = tracker.handle({ type: "turn_end", turnIndex: 0, message, toolResults: [] })!;
+	const telemetry = tracker.handle({
+		type: "turn_end",
+		turnIndex: 0,
+		message,
+		toolResults: [],
+		messageEntryId: "",
+		toolResultEntryIds: [],
+		entries: [],
+		continue: false,
+		context: {
+			contextEntries: [],
+			contextMessages: [],
+			llmMessages: [],
+			pendingMessages: [],
+			canContinue: false,
+		},
+		outcome: "completed",
+	})!;
 
 	assert.equal(telemetry.tps, 4);
 	assert.equal(telemetry.ttftMs, 5_000);

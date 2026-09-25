@@ -19,7 +19,7 @@ A polished terminal interface for the [Pi](https://pi.dev) coding agent. It brin
 
 ## Requirements
 
-- Pi 0.80 or later
+- Pi 0.85 or later
 - A terminal with UTF-8 and color support
 - A [Nerd Font](https://www.nerdfonts.com/font-downloads) for the full icon set (optional; ASCII icons are built in)
 
