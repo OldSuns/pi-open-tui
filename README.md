@@ -21,7 +21,7 @@ A polished terminal interface for the [Pi](https://pi.dev) coding agent. It brin
 
 - Pi 0.85 or later
 - A terminal with UTF-8 and color support
-- A [Nerd Font](https://www.nerdfonts.com/font-downloads) for the full icon set (optional; ASCII icons are built in)
+- A [Nerd Font](https://www.nerdfonts.com/font-downloads) for the full icon set (optional; portable Unicode icons are built in)
 
 ## Install
 
@@ -44,10 +44,11 @@ Download any patched font from the official [Nerd Fonts downloads page](https://
 The default `auto` mode checks the terminal environment, not the installed font file. It uses Nerd Font icons in interactive UTF-8 TTYs, including terminals running through a runner or subshell. If icons appear as boxes or incorrect symbols, open `/open-tui` and choose one of these modes under **Appearance**:
 
 - `nerd`: force Nerd Font icons after configuring a Nerd Font in the terminal
+- `unicode`: portable Unicode icons (folder, branch, laptop, bulb, plug, hourglass, ...) that render without a patched font; emoji glyphs use the terminal's emoji fallback
 - `ascii`: use plain-text icons with no patched font required
-- `auto`: use Nerd Font icons in interactive UTF-8 TTYs; use ASCII for non-interactive output, `TERM=dumb`, or an explicitly non-UTF-8 locale
+- `auto`: use Nerd Font icons in interactive UTF-8 TTYs; use portable Unicode icons for SSH sessions (the client terminal controls the font and usually has no Nerd Font); use ASCII for non-interactive output, `TERM=dumb`, or an explicitly non-UTF-8 locale
 
-If the font is installed but `auto` still selects ASCII, choose `nerd` explicitly. In VS Code, Windows Terminal, and similar apps, configure the font in the terminal profile rather than only installing it in the operating system.
+If the font is installed but `auto` still selects ASCII, choose `nerd` explicitly. In VS Code, Windows Terminal, and similar apps, configure the font in the terminal profile rather than only installing it in the operating system. If your SSH client terminal does ship a Nerd Font and you want the full icon set over SSH, set the mode to `nerd` explicitly.
 
 ## Configuration
 
@@ -102,7 +103,7 @@ Key options:
 | `inlineFooter` | `true`, `false` | Moves the two main Footer rows into the editor's top and bottom borders; defaults to `false`. Extension status rows remain below the editor |
 | `cursorStyle` | `block`, `bar`, `underline` | `bar` and `underline` require terminal cursor-shape support |
 | `fullscreen.wheelScrollLines` | `1`-`10` | Lines scrolled per mouse-wheel notch in fullscreen mode; defaults to `4`. In `/open-tui`, press Enter on this item and type a number (values are clamped to `1`-`10`) |
-| `icons.mode` | `auto`, `nerd`, `ascii` | Controls footer and telemetry icons |
+| `icons.mode` | `auto`, `nerd`, `unicode`, `ascii` | Controls footer and telemetry icons |
 | `footerSegments` | Boolean flags | Shows or hides individual footer data |
 | `footerSegments.capitalizeProviderName` | Boolean | Capitalizes the first character of the provider name in the footer; set it to `false` to keep the provider's original casing |
 | `telemetry` | Boolean flags | Enables telemetry and its individual measurements |
