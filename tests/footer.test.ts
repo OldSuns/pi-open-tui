@@ -307,7 +307,7 @@ test("provides inline footer content without duplicating native rows", () => {
 });
 
 test("auto gates Nerd icons by TTY and UTF-8 support", () => {
-	const envKeys = ["TERM_PROGRAM", "LC_TERMINAL", "WT_SESSION", "TERM", "LC_ALL", "LC_CTYPE", "LANG"];
+	const envKeys = ["TERM_PROGRAM", "LC_TERMINAL", "WT_SESSION", "TERM", "LC_ALL", "LC_CTYPE", "LANG", "SSH_CONNECTION", "SSH_TTY"];
 	const originalEnv = new Map(envKeys.map((key) => [key, process.env[key]]));
 	const hadOwnIsTTY = Object.hasOwn(process.stdout, "isTTY");
 	const originalIsTTY = process.stdout.isTTY;
@@ -353,7 +353,7 @@ test("auto gates Nerd icons by TTY and UTF-8 support", () => {
 	}
 });
 
-test("both icon modes provide every footer semantic", () => {
+test("every icon mode provides every footer semantic", () => {
 	const keys = [
 		"cwd",
 		"host",
@@ -374,9 +374,42 @@ test("both icon modes provide every footer semantic", () => {
 		"extensions",
 	] as const;
 
-	for (const mode of ["nerd", "ascii"] as const) {
+	for (const mode of ["nerd", "unicode", "ascii"] as const) {
 		const glyphs = resolveGlyphs(mode);
 		for (const key of keys) assert.notEqual(glyphs[key], "", `${mode}.${key}`);
+	}
+});
+
+test("auto falls back to unicode icons for SSH sessions", () => {
+	const envKeys = ["SSH_CONNECTION", "SSH_TTY", "TERM", "LC_ALL", "LC_CTYPE", "LANG"];
+	const originalEnv = new Map(envKeys.map((key) => [key, process.env[key]]));
+	const hadOwnIsTTY = Object.hasOwn(process.stdout, "isTTY");
+	const originalIsTTY = process.stdout.isTTY;
+
+	try {
+		for (const key of envKeys) delete process.env[key];
+		process.env.TERM = "xterm-256color";
+		process.env.LANG = "C.UTF-8";
+		Object.defineProperty(process.stdout, "isTTY", { configurable: true, value: true });
+
+		assert.equal(resolveIconMode("auto"), "nerd");
+
+		process.env.SSH_CONNECTION = "10.0.0.2 51234 10.0.0.1 22";
+		process.env.SSH_TTY = "/dev/pts/4";
+		assert.equal(resolveIconMode("auto"), "unicode");
+
+		// Explicit modes win over the SSH heuristic.
+		assert.equal(resolveIconMode("nerd"), "nerd");
+		assert.equal(resolveIconMode("unicode"), "unicode");
+		assert.equal(resolveIconMode("ascii"), "ascii");
+	} finally {
+		for (const key of envKeys) {
+			const value = originalEnv.get(key);
+			if (value === undefined) delete process.env[key];
+			else process.env[key] = value;
+		}
+		if (hadOwnIsTTY) Object.defineProperty(process.stdout, "isTTY", { configurable: true, value: originalIsTTY });
+		else Reflect.deleteProperty(process.stdout, "isTTY");
 	}
 });
 
@@ -394,6 +427,19 @@ test("uses the official Nerd Font runtime symbols", () => {
 	assert.equal(runtimeSymbol("nodejs", "nerd"), "\uE718");
 	assert.equal(runtimeSymbol("bun", "nerd"), "\uE76F");
 	assert.equal(runtimeSymbol("bun", "ascii"), "bun");
+	assert.equal(runtimeSymbol("bun", "unicode"), "bun");
+});
+
+test("unicode glyphs avoid private-use codepoints", () => {
+	const glyphs = resolveGlyphs("unicode");
+	for (const [key, glyph] of Object.entries(glyphs)) {
+		for (const ch of glyph) {
+			const cp = ch.codePointAt(0)!;
+			const isPrivateUse = (cp >= 0xe000 && cp <= 0xf8ff) || cp >= 0xf0000;
+			assert.ok(!isPrivateUse, `${key} contains private-use U+${cp.toString(16).toUpperCase()}`);
+		}
+	}
+	assert.equal(resolveGlyphs("unicode").cwd, "\u{1F4C1}");
 });
 
 test("prefers Bun lockfiles while preserving the Node fallback", async () => {

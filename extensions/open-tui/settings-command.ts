@@ -64,7 +64,7 @@ const COPY = {
 			wheelLines: (count: number) => `${count} ${count === 1 ? "line" : "lines"} / notch`,
 			wheelPrompt: (count: number) => `Wheel scroll lines per notch, 1-10 (current: ${count}). Enter: apply · Esc: cancel`,
 			cursorStyles: { block: "Block", bar: "Bar", underline: "Underline" },
-			icons: { auto: "Auto", nerd: "Nerd", ascii: "ASCII" },
+			icons: { auto: "Auto", nerd: "Nerd", unicode: "Unicode", ascii: "ASCII" },
 		},
 	},
 	zh: {
@@ -104,7 +104,7 @@ const COPY = {
 			wheelLines: (count: number) => `每格 ${count} 行`,
 			wheelPrompt: (count: number) => `滚轮每格滚动行数（当前 ${count}，范围 1-10），输入后 Enter 应用 · Esc 取消`,
 			cursorStyles: { block: "块", bar: "竖线", underline: "下划线" },
-			icons: { auto: "自动", nerd: "Nerd", ascii: "ASCII" },
+			icons: { auto: "自动", nerd: "Nerd", unicode: "Unicode", ascii: "ASCII" },
 		},
 	},
 } as const;
@@ -127,7 +127,7 @@ function toggleSetting(config: OpenTuiConfig, key: keyof OpenTuiConfig["footerSe
 }
 
 function cycleIconMode(config: OpenTuiConfig): OpenTuiConfig {
-	const order: IconMode[] = ["auto", "nerd", "ascii"];
+	const order: IconMode[] = ["auto", "nerd", "unicode", "ascii"];
 	const currentIdx = order.indexOf(config.icons.mode);
 	const next = order[(currentIdx + 1) % order.length]!;
 	return { ...config, icons: { mode: next } };

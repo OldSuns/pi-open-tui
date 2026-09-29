@@ -1,4 +1,4 @@
-export type IconMode = "auto" | "nerd" | "ascii";
+export type IconMode = "auto" | "nerd" | "unicode" | "ascii";
 
 export interface IconGlyphs {
 	cwd: string;
@@ -94,6 +94,47 @@ const ASCII_GLYPHS: IconGlyphs = {
 	deleted: "x",
 };
 
+// Portable Unicode icon set for terminals without a Nerd Font. Keeps the
+// footer icon-like instead of dropping to letters: emoji glyphs (folder,
+// branch, laptop, bulb, floppy, plug, hourglass, bolt) render through the
+// client terminal's emoji fallback at 2 columns, which matches
+// pi-tui's visibleWidth for RGI emoji; the remaining symbols are
+// single-width and covered by DejaVu Sans Mono, JetBrains Mono, Noto Sans
+// Mono and Liberation Mono. Glyph choices are easy to adjust per slot.
+const UNICODE_GLYPHS: IconGlyphs = {
+	cwd: "📁",
+	host: "⌂",
+	session: "🔖",
+	git: "🌿",
+	working: "◷",
+	done: "✓",
+	context: "≡",
+	model: "💻",
+	thinking: "💡",
+	input: "↑",
+	output: "↓",
+	cacheHit: "💾",
+	cost: "$",
+	speed: "⚡",
+	latency: "⌛",
+	stall: "⚠",
+	extensions: "🔌",
+	ahead: "↑",
+	behind: "↓",
+	diverged: "↕",
+	conflicted: "=",
+	stashed: "$",
+	modified: "!",
+	staged: "+",
+	untracked: "?",
+	renamed: "→",
+	deleted: "✗",
+};
+
+function isSshSession(): boolean {
+	return Boolean(process.env.SSH_TTY || process.env.SSH_CONNECTION);
+}
+
 export function detectNerdFont(): boolean {
 	// TTY and locale checks are the only reliable signals available here. The
 	// terminal emulator owns font selection, so auto mode is optimistic once
@@ -103,14 +144,23 @@ export function detectNerdFont(): boolean {
 	return locale === undefined || /utf-?8/i.test(locale);
 }
 
-export function resolveIconMode(mode: IconMode): "nerd" | "ascii" {
+export function resolveIconMode(mode: IconMode): "nerd" | "unicode" | "ascii" {
 	if (mode === "nerd") return "nerd";
 	if (mode === "ascii") return "ascii";
-	return detectNerdFont() ? "nerd" : "ascii";
+	if (mode === "unicode") return "unicode";
+	if (!detectNerdFont()) return "ascii";
+	// Auto cannot know whether the terminal that renders this session ships a
+	// Nerd Font (see #38). Local terminals usually do; SSH clients usually do
+	// not, because the font lives on the client device, so portable Unicode
+	// symbols are the safer default there. Terminals that do have a Nerd Font
+	// can opt back in with an explicit icons.mode of "nerd".
+	if (isSshSession()) return "unicode";
+	return "nerd";
 }
 
 export function resolveGlyphs(mode: IconMode): IconGlyphs {
 	const resolved = resolveIconMode(mode);
+	if (resolved === "unicode") return UNICODE_GLYPHS;
 	return resolved === "nerd" ? NERD_GLYPHS : ASCII_GLYPHS;
 }
 
@@ -185,6 +235,6 @@ const RUNTIME_ASCII_SYMBOLS: Record<string, string> = {
 };
 
 export function runtimeSymbol(name: string, mode: IconMode): string {
-	if (resolveIconMode(mode) === "ascii") return RUNTIME_ASCII_SYMBOLS[name] ?? name;
+	if (resolveIconMode(mode) !== "nerd") return RUNTIME_ASCII_SYMBOLS[name] ?? name;
 	return RUNTIME_SYMBOLS[name] ?? "";
 }

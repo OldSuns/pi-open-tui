@@ -21,7 +21,7 @@
 
 - Pi 0.85 或更高版本
 - 支持 UTF-8 和彩色输出的终端
-- 使用完整图标集时需要 [Nerd Font](https://www.nerdfonts.com/font-downloads)（可选；内置 ASCII 图标）
+- 使用完整图标集时需要 [Nerd Font](https://www.nerdfonts.com/font-downloads)（可选；内置可移植 Unicode 图标）
 
 ## 安装
 
@@ -44,10 +44,11 @@ pi -e npm:pi-open-tui
 默认的 `auto` 模式检查终端环境，而不是已安装的字体文件。在支持 UTF-8 的交互式 TTY 中，它会使用 Nerd Font 图标，即使 Pi 运行在 runner 或子 shell 中。如果图标显示为方框、乱码或错误符号，请打开 `/open-tui`，在**外观**页选择合适的模式：
 
 - `nerd`：终端已配置 Nerd Font 时，强制使用 Nerd Font 图标
+- `unicode`：可移植 Unicode 图标（文件夹、分支、笔记本电脑、灯泡、插头、沙漏等），无需修补字体；emoji 字形通过终端的 emoji 回退渲染
 - `ascii`：使用纯文本图标，无需安装修补字体
-- `auto`：在支持 UTF-8 的交互式 TTY 中使用 Nerd Font 图标；非交互式输出、`TERM=dumb` 或明确配置为非 UTF-8 的 locale 使用 ASCII
+- `auto`：在支持 UTF-8 的交互式 TTY 中使用 Nerd Font 图标；SSH 会话使用可移植 Unicode 图标（字体由客户端终端决定，通常没有 Nerd Font）；非交互式输出、`TERM=dumb` 或明确配置为非 UTF-8 的 locale 使用 ASCII
 
-如果已经安装字体，但 `auto` 仍选择 ASCII，请手动切换为 `nerd`。使用 VS Code、Windows Terminal 等应用时，只在操作系统中安装字体还不够，还需要在对应的终端配置中选中该字体。
+如果已经安装字体，但 `auto` 仍选择 ASCII，请手动切换为 `nerd`。使用 VS Code、Windows Terminal 等应用时，只在操作系统中安装字体还不够，还需要在对应的终端配置中选中该字体。如果 SSH 客户端终端确实安装了 Nerd Font 并希望在 SSH 下使用完整图标，请将模式显式设为 `nerd`。
 
 ## 配置
 
@@ -102,7 +103,7 @@ pi -e npm:pi-open-tui
 | `inlineFooter` | `true`、`false` | 将两条主要 Footer 信息行移入编辑器上下边框以节省垂直空间，默认关闭；扩展状态行仍显示在编辑器外 |
 | `cursorStyle` | `block`、`bar`、`underline` | `bar` 和 `underline` 需要终端支持光标形状转义序列 |
 | `fullscreen.wheelScrollLines` | `1`-`10` | 全屏模式下滚轮每格滚动的行数，默认值为 `4`；`/open-tui` 中在该项上按 Enter 后直接输入数字（超出范围会自动钳制到 `1`-`10`） |
-| `icons.mode` | `auto`、`nerd`、`ascii` | 控制底栏和遥测通知使用的图标 |
+| `icons.mode` | `auto`、`nerd`、`unicode`、`ascii` | 控制底栏和遥测通知使用的图标 |
 | `footerSegments` | 布尔开关 | 分别控制底栏中的各项数据 |
 | `footerSegments.capitalizeProviderName` | 布尔开关 | 将底栏中提供商名称的首字母大写；设为 `false` 时保留原始大小写 |
 | `telemetry` | 布尔开关 | 控制遥测总开关和各项指标 |
