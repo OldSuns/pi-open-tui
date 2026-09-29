@@ -130,7 +130,7 @@ export default function (pi: ExtensionAPI) {
 			return;
 		}
 		if (!active) {
-			cleanupHeader = installHeader(pi, ctx);
+			if (config.headerEnabled) cleanupHeader = installHeader(pi, ctx);
 			const footer = installFooter(
 				ctx,
 				() => state,
@@ -384,11 +384,16 @@ export default function (pi: ExtensionAPI) {
 	registerSettingsCommand(pi, {
 		getConfig: () => config,
 		onConfigChanged: (newConfig) => {
+			const headerEnabledChanged = config.headerEnabled !== newConfig.headerEnabled;
 			const cursorStyleChanged = config.cursorStyle !== newConfig.cursorStyle;
 			const wheelScrollLinesChanged = config.fullscreen.wheelScrollLines !== newConfig.fullscreen.wheelScrollLines;
 			const thinkingPeekLinesChanged = config.thinkingPeek.lines !== newConfig.thinkingPeek.lines;
 			saveConfig(newConfig);
 			config = newConfig;
+			if (headerEnabledChanged && active && lastCtx) {
+				cleanupHeader?.();
+				cleanupHeader = newConfig.headerEnabled ? installHeader(pi, lastCtx) : undefined;
+			}
 			if (newConfig.thinkingPeek.lines === 0 || !newConfig.enabled) {
 				resetPeek();
 				clearPeekLabel(lastCtx);

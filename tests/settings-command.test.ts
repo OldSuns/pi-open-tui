@@ -325,6 +325,18 @@ test("configures inline footer from General settings", async () => {
 	assert.equal(settings.getConfig().inlineFooter, true);
 });
 
+test("toggles only the custom header from General settings", async () => {
+	const settings = await openSettings();
+	for (let i = 0; i < 5; i++) settings.component.handleInput("\x1b[B");
+	assert.match(selectedLine(settings.component), /Open TUI header/);
+	settings.component.handleInput(" ");
+	assert.equal(settings.getConfig().headerEnabled, false);
+	assert.equal(settings.getConfig().enabled, true);
+	assert.equal(settings.getConfig().footerSegments.context, true);
+	settings.component.handleInput(" ");
+	assert.equal(settings.getConfig().headerEnabled, true);
+});
+
 test("configures the hostname footer segment", async () => {
 	const settings = await openSettings();
 	settings.component.handleInput("\x1b[C");
@@ -373,12 +385,14 @@ test("normalizes invalid settings values", () => {
 		writeFileSync(join(agentDir, "open-tui.json"), JSON.stringify({
 			settingsLanguage: "de",
 			cursorStyle: "invalid",
+			headerEnabled: "no",
 			inlineFooter: "yes",
 			thinkingPeek: { lines: 9 },
 		}), "utf8");
 		const loaded = loadConfig();
 		assert.equal(loaded.settingsLanguage, "en");
 		assert.equal(loaded.cursorStyle, "block");
+		assert.equal(loaded.headerEnabled, true);
 		assert.equal(loaded.inlineFooter, false);
 		assert.equal(loaded.thinkingPeek.lines, 1);
 	} finally {
