@@ -16,8 +16,9 @@ import {
 	formatCwd,
 	formatDuration,
 	formatInputBreakdown,
+	hasAnsiStyles,
 	providerColor,
-	sanitizeStatus,
+	sanitizeStatusPreservingStyles,
 	stressColor,
 	truncateBranch,
 	truncatePath,
@@ -179,6 +180,18 @@ function renderStatsBlock(
 	return stats.join(` ${theme.fg("dim", "|")} `);
 }
 
+const ANSI_RESET = "\x1b[0m";
+
+/**
+ * Keep the colours an extension applied to its own status text. Plain text stays
+ * muted so unstyled statuses keep the quiet footer look. The trailing reset
+ * stops an unclosed style from tinting the separator and the next status.
+ */
+function renderStatusText(theme: Theme, status: string): string {
+	if (!hasAnsiStyles(status)) return theme.fg("muted", status);
+	return `${status}${ANSI_RESET}`;
+}
+
 function renderExtensionStatusLines(
 	theme: Theme,
 	extensionStatuses: ReadonlyMap<string, string>,
@@ -187,12 +200,12 @@ function renderExtensionStatusLines(
 ): string[] {
 	const statuses = Array.from(extensionStatuses.entries())
 		.sort(([a], [b]) => a.localeCompare(b))
-		.map(([, text]) => sanitizeStatus(text))
+		.map(([, text]) => sanitizeStatusPreservingStyles(text))
 		.filter((text) => text.length > 0);
 	if (statuses.length === 0) return [];
 
 	const separator = ` ${theme.fg("dim", "|")} `;
-	const statusText = statuses.map((status) => theme.fg("muted", status)).join(separator);
+	const statusText = statuses.map((status) => renderStatusText(theme, status)).join(separator);
 	const line = `${theme.fg("mdLink", glyphs.extensions)} ${statusText}`;
 	return wrapTextWithAnsi(line, width);
 }
