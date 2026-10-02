@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { KeybindingsManager } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext, KeybindingsManager } from "@earendil-works/pi-coding-agent";
 import { TuiMainScreen, type EditorTheme, type Terminal, type TUI, visibleWidth } from "@earendil-works/pi-tui";
 import { installEditor, OpenTuiEditor } from "../extensions/open-tui/editor.ts";
 import { stripAnsi } from "../extensions/open-tui/utils.ts";
@@ -241,6 +241,32 @@ test("preserves block hardware cursor settings", () => {
 	);
 
 	assert.equal(changes, 0);
+});
+
+test("does not override Pi's native fullscreen wheel setting", () => {
+	let wheelSettingChanges = 0;
+	const fullscreenTui = {
+		...tui,
+		mode: "fullscreen",
+		terminal: { rows: 24, write() {} },
+		getShowHardwareCursor: () => false,
+		setShowHardwareCursor() {},
+		setWheelScrollLines: () => wheelSettingChanges++,
+	} as unknown as TUI;
+	const ctx = {
+		ui: {
+			setEditorComponent: (factory: unknown) => {
+				if (typeof factory === "function") {
+					factory(fullscreenTui, editorTheme, { matches: () => false });
+				}
+			},
+		},
+	} as unknown as ExtensionContext;
+
+	const editor = installEditor({} as ExtensionAPI, ctx);
+	assert.equal(wheelSettingChanges, 0);
+	editor.cleanup();
+	assert.equal(wheelSettingChanges, 0);
 });
 
 test("restores cursor shape and visibility when the editor is removed", () => {

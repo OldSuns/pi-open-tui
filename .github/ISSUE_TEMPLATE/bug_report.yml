@@ -39,7 +39,7 @@ body:
     attributes:
       label: Pi version
       description: Run `pi --version`.
-      placeholder: "e.g. 0.84.2"
+      placeholder: "e.g. 1.0.0"
     validations:
       required: true
   - type: input

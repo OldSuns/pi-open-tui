@@ -150,7 +150,6 @@ export default function (pi: ExtensionAPI) {
 				pi,
 				ctx,
 				config.cursorStyle,
-				config.fullscreen.wheelScrollLines,
 				{
 					enabled: () => config.inlineFooter,
 					render: footer.renderInline,
@@ -385,7 +384,6 @@ export default function (pi: ExtensionAPI) {
 		getConfig: () => config,
 		onConfigChanged: (newConfig) => {
 			const cursorStyleChanged = config.cursorStyle !== newConfig.cursorStyle;
-			const wheelScrollLinesChanged = config.fullscreen.wheelScrollLines !== newConfig.fullscreen.wheelScrollLines;
 			const thinkingPeekLinesChanged = config.thinkingPeek.lines !== newConfig.thinkingPeek.lines;
 			saveConfig(newConfig);
 			config = newConfig;
@@ -397,9 +395,6 @@ export default function (pi: ExtensionAPI) {
 			}
 			if (cursorStyleChanged && active && editor) {
 				editor.setCursorStyle(newConfig.cursorStyle);
-			}
-			if (wheelScrollLinesChanged && active && editor) {
-				editor.setWheelScrollLines(newConfig.fullscreen.wheelScrollLines);
 			}
 			if (lastCtx) {
 				pendingUiChange = getPendingUiChange(newConfig.enabled, active);
