@@ -108,8 +108,6 @@ pi -e npm:pi-open-tui
 
 开启 `inlineFooter` 后，两条常规 Footer 信息行会移入编辑器边框，从而节省垂直空间。顶部边框左侧显示 Git 分支，右侧信息组以当前目录开头；开启 `sessionName` 时，会话标题也会显示在左侧。Header 和扩展状态行保持独立显示；终端较窄时优先截断低优先级 Footer 数据，保留右侧统计信息和边框角。
 
-全屏滚轮速度由 Pi 原生 `/settings` 选项 `fullscreenWheelScrollLines` 控制（`"auto"` 或 `1`-`100`）。pi-open-tui 不会覆盖此原生设置。
-
 ## 单轮遥测
 
 每次 Agent 完整运行结束后，pi-open-tui 会显示一条临时结果，并将其中的多个工具调用轮次合并统计：

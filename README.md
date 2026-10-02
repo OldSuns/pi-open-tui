@@ -108,8 +108,6 @@ Key options:
 
 With `inlineFooter` enabled, the two normal Footer rows are rendered inside the editor frame to save vertical space. The top border places the Git branch on the left and CWD first in the right-hand group; the session title appears on the left too when `sessionName` is enabled. The Header and extension status rows remain separate; narrow terminals truncate lower-priority Footer data first, keeping the right-hand statistics and the border corner.
 
-Fullscreen wheel speed is controlled by Pi's native `/settings` option `fullscreenWheelScrollLines` (`"auto"` or `1`-`100`). pi-open-tui leaves this native setting unchanged.
-
 ## Turn telemetry
 
 After each complete agent run, pi-open-tui shows one transient result. Tool-call turns are combined into that result:
