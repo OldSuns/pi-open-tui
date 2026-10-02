@@ -15,11 +15,10 @@
 - **单轮遥测**：展示 TPS、首 Token 延迟（TTFT）、耗时、停顿、Token 数量和模型标价速率
 - **思考预览**：模型工作时，在 Pi 隐藏思考块的 `Thinking...` 位置显示实时字幕，展示推理内容的末尾片段
 - **交互式设置**：通过 `/open-tui` 配置，并支持英文和简体中文界面
-- **带版本保护的 Pi 兼容层**：全屏滚轮速度所依赖的运行时支持发生变化时，会回退为 Pi 默认行为
 
 ## 环境要求
 
-- Pi 0.85 或更高版本
+- Pi 1.0 或更高版本
 - 支持 UTF-8 和彩色输出的终端
 - 使用完整图标集时需要 [Nerd Font](https://www.nerdfonts.com/font-downloads)（可选；内置可移植 Unicode 图标）
 
@@ -60,9 +59,6 @@ pi -e npm:pi-open-tui
   "inlineFooter": false,
   "settingsLanguage": "zh",
   "cursorStyle": "block",
-  "fullscreen": {
-    "wheelScrollLines": 4
-  },
   "icons": {
     "mode": "auto"
   },
@@ -102,7 +98,6 @@ pi -e npm:pi-open-tui
 | `settingsLanguage` | `en`、`zh` | 切换 `/open-tui` 设置界面的语言 |
 | `inlineFooter` | `true`、`false` | 将两条主要 Footer 信息行移入编辑器上下边框以节省垂直空间，默认关闭；扩展状态行仍显示在编辑器外 |
 | `cursorStyle` | `block`、`bar`、`underline` | `bar` 和 `underline` 需要终端支持光标形状转义序列 |
-| `fullscreen.wheelScrollLines` | `1`-`10` | 全屏模式下滚轮每格滚动的行数，默认值为 `4`；`/open-tui` 中在该项上按 Enter 后直接输入数字（超出范围会自动钳制到 `1`-`10`） |
 | `icons.mode` | `auto`、`nerd`、`unicode`、`ascii` | 控制底栏和遥测通知使用的图标 |
 | `footerSegments` | 布尔开关 | 分别控制底栏中的各项数据 |
 | `footerSegments.capitalizeProviderName` | 布尔开关 | 将底栏中提供商名称的首字母大写；设为 `false` 时保留原始大小写 |
@@ -113,7 +108,7 @@ pi -e npm:pi-open-tui
 
 开启 `inlineFooter` 后，两条常规 Footer 信息行会移入编辑器边框，从而节省垂直空间。顶部边框左侧显示 Git 分支，右侧信息组以当前目录开头；开启 `sessionName` 时，会话标题也会显示在左侧。Header 和扩展状态行保持独立显示；终端较窄时优先截断低优先级 Footer 数据，保留右侧统计信息和边框角。
 
-全屏滚轮速度通过隔离的兼容层写入 Pi 0.84.2 的运行时字段，因为 Pi 尚未提供公开 setter。若后续 Pi 版本不再包含兼容字段，该设置会被忽略并继续使用 Pi 的默认滚动行为。
+全屏滚轮速度由 Pi 原生 `/settings` 选项 `fullscreenWheelScrollLines` 控制（`"auto"` 或 `1`-`100`）。pi-open-tui 不会覆盖此原生设置。
 
 ## 单轮遥测
 

@@ -7,10 +7,6 @@ import {
 import type { EditorTheme, TuiMouseEvent, TuiMouseEventResult, TUI } from "@earendil-works/pi-tui";
 import { CURSOR_MARKER, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import type { CursorStyle } from "./config.ts";
-import {
-	applyFullscreenWheelScrollLines,
-	DEFAULT_FULLSCREEN_WHEEL_SCROLL_LINES,
-} from "./fullscreen-scroll.ts";
 import { findBottomBorderIndex, isEditorBorderLine, stripAnsi } from "./utils.ts";
 
 function fillLine(content: string, width: number): string {
@@ -316,14 +312,12 @@ export function installEditor(
 	_pi: ExtensionAPI,
 	ctx: ExtensionContext,
 	cursorStyle: CursorStyle = "block",
-	wheelScrollLines = DEFAULT_FULLSCREEN_WHEEL_SCROLL_LINES,
 	inlineFooter?: InlineFooterRenderer,
 ) {
 	let activeTui: TUI | undefined;
 	let activeEditor: OpenTuiEditor | undefined;
 	let previousHardwareCursor: boolean | undefined;
 	let currentCursorStyle = cursorStyle;
-	let currentWheelScrollLines = wheelScrollLines;
 	let hiddenThinkingTarget: HiddenThinkingLabelComponent | undefined;
 	const getActiveTui = (): TUI => {
 		if (!activeTui) throw new Error("Open TUI editor is not mounted");
@@ -333,7 +327,6 @@ export function installEditor(
 	ctx.ui.setEditorComponent((tui, editorTheme, keybindings) => {
 		activeTui = tui;
 		hiddenThinkingTarget = undefined;
-		applyFullscreenWheelScrollLines(tui, currentWheelScrollLines);
 		previousHardwareCursor = tui.getShowHardwareCursor();
 		activeEditor = new OpenTuiEditor(tui, editorTheme, keybindings, currentCursorStyle, inlineFooter);
 		return activeEditor;
@@ -358,10 +351,6 @@ export function installEditor(
 		setCursorStyle(nextCursorStyle: CursorStyle): void {
 			currentCursorStyle = nextCursorStyle;
 			activeEditor?.setCursorStyle(nextCursorStyle, previousHardwareCursor);
-		},
-		setWheelScrollLines(nextWheelScrollLines: number): void {
-			currentWheelScrollLines = nextWheelScrollLines;
-			if (activeTui) applyFullscreenWheelScrollLines(activeTui, currentWheelScrollLines);
 		},
 		cleanup(): void {
 			hiddenThinkingTarget = undefined;

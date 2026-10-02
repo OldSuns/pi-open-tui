@@ -1,10 +1,6 @@
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
-import {
-	DEFAULT_FULLSCREEN_WHEEL_SCROLL_LINES,
-	normalizeFullscreenWheelScrollLines,
-} from "./fullscreen-scroll.ts";
 import type { IconMode } from "./icons.ts";
 
 export type SettingsLanguage = "en" | "zh";
@@ -42,16 +38,11 @@ export interface ThinkingPeekConfig {
 	lines: ThinkingPeekLines;
 }
 
-export interface FullscreenConfig {
-	wheelScrollLines: number;
-}
-
 export interface OpenTuiConfig {
 	enabled: boolean;
 	inlineFooter: boolean;
 	settingsLanguage: SettingsLanguage;
 	cursorStyle: CursorStyle;
-	fullscreen: FullscreenConfig;
 	icons: {
 		mode: IconMode;
 	};
@@ -65,9 +56,6 @@ export const DEFAULT_CONFIG: OpenTuiConfig = {
 	inlineFooter: false,
 	settingsLanguage: "en",
 	cursorStyle: "block",
-	fullscreen: {
-		wheelScrollLines: DEFAULT_FULLSCREEN_WHEEL_SCROLL_LINES,
-	},
 	icons: {
 		mode: "auto",
 	},
@@ -162,10 +150,6 @@ export function loadConfig(notify?: (msg: string, level: "warning" | "info") => 
 		if (config.cursorStyle !== "block" && config.cursorStyle !== "bar" && config.cursorStyle !== "underline") {
 			config.cursorStyle = DEFAULT_CONFIG.cursorStyle;
 		}
-		config.fullscreen.wheelScrollLines = normalizeFullscreenWheelScrollLines(
-			config.fullscreen.wheelScrollLines,
-			DEFAULT_CONFIG.fullscreen.wheelScrollLines,
-		);
 		if (typeof config.thinkingPeek !== "object" || config.thinkingPeek === null || Array.isArray(config.thinkingPeek)) {
 			config.thinkingPeek = structuredClone(DEFAULT_CONFIG.thinkingPeek);
 		} else {
