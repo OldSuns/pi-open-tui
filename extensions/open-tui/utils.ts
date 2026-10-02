@@ -296,6 +296,28 @@ export function sanitizeStatus(text: string): string {
 		.trim();
 }
 
+// One status token is an SGR sequence, another escape sequence, or one control
+// character. SGR carries colours. Everything else moves the cursor or rewrites
+// the terminal, so it must never reach the footer row.
+const STATUS_TOKEN = /(?:\x1b\[|\x9b)[0-?]*[ -/]*m|(?:\x1b\[|\x9b)[0-?]*[ -/]*[@-~]|(?:\x1bP|\x90|\x1bX|\x98|\x1b\^|\x9e|\x1b_|\x9f)[\s\S]*?(?:\x1b\\|\x9c|$)|(?:\x1b\]|\x9d)[\s\S]*?(?:\x07|\x1b\\|\x9c|$)|\x1b[@-Z\\_]|[\u0000-\u001f\u007f-\u009f]/g;
+const SGR_TOKEN = /^(?:\x1b\[|\x9b)[0-9;:]*m$/;
+const SGR_SEQUENCE = /(?:\x1b\[|\x9b)[0-9;:]*m/;
+
+/**
+ * Sanitize a status text the same way {@link sanitizeStatus} does, but keep the
+ * SGR sequences the extension set. Extensions colour their own status text with
+ * `ctx.ui.theme.fg()`. Stripping those codes renders every status grey.
+ */
+export function sanitizeStatusPreservingStyles(text: string): string {
+	const cleaned = text.replace(STATUS_TOKEN, (token) => (SGR_TOKEN.test(token) ? token : " "));
+	return cleaned.replace(/ {2,}/g, " ").trim();
+}
+
+/** True when the text carries SGR colour or style sequences. */
+export function hasAnsiStyles(text: string): boolean {
+	return SGR_SEQUENCE.test(text);
+}
+
 export function formatThinkingLabel(level: string): string {
 	if (level === "off") return "thinking off";
 	return `${level} effort`;

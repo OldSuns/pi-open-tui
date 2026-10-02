@@ -109,7 +109,7 @@ pi -e npm:pi-open-tui
 | `telemetry` | 布尔开关 | 控制遥测总开关和各项指标 |
 | `thinkingPeek.lines` | `0`、`1`、`2` | 关闭、单行或双行思考预览 |
 
-`sessionName` 仅在会话有名称时显示；`hostname` 会显示主机名的短名称（主机名的第一个标签，例如从 `mba.example.com` 显示为 `mba`），并使用服务器图标；`gitCommit` 会在 detached HEAD 状态下显示短哈希和标签；关闭 `extensionStatuses` 会隐藏整行扩展状态，其中也包括 MCP 状态。
+`sessionName` 仅在会话有名称时显示；`hostname` 会显示主机名的短名称（主机名的第一个标签，例如从 `mba.example.com` 显示为 `mba`），并使用服务器图标；`gitCommit` 会在 detached HEAD 状态下显示短哈希和标签；关闭 `extensionStatuses` 会隐藏整行扩展状态，其中也包括 MCP 状态。每条状态会保留其扩展通过 `ctx.ui.theme.fg()` 设置的颜色；未设置颜色的状态使用 muted 主题色显示。
 
 开启 `inlineFooter` 后，两条常规 Footer 信息行会移入编辑器边框，从而节省垂直空间。顶部边框左侧显示 Git 分支，右侧信息组以当前目录开头；开启 `sessionName` 时，会话标题也会显示在左侧。Header 和扩展状态行保持独立显示；终端较窄时优先截断低优先级 Footer 数据，保留右侧统计信息和边框角。
 

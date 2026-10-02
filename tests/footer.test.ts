@@ -18,7 +18,13 @@ import { emptyGitStatus, readGitStatus } from "../extensions/open-tui/git.ts";
 import { detectNerdFont, resolveGlyphs, resolveIconMode, runtimeSymbol } from "../extensions/open-tui/icons.ts";
 import { clearRuntimeCache, readRuntimeInfo } from "../extensions/open-tui/runtime.ts";
 import { getModelMeta, getUsageTotals, invalidateUsageCache, type FooterState } from "../extensions/open-tui/state.ts";
-import { fitSegmentsByPriority, stripAnsi, truncateBranch, truncatePath } from "../extensions/open-tui/utils.ts";
+import {
+	fitSegmentsByPriority,
+	sanitizeStatusPreservingStyles,
+	stripAnsi,
+	truncateBranch,
+	truncatePath,
+} from "../extensions/open-tui/utils.ts";
 
 const theme = {
 	fg: (_color: string, text: string) => text,
@@ -806,4 +812,140 @@ test("host name uses matching glyph in nerd and ascii modes", () => {
 	assert.ok(asciiOut.includes(resolveGlyphs("ascii").host), `ascii glyph missing\n${asciiOut}`);
 	const nerdOut = renderFooterWithHost({ mode: "nerd" });
 	assert.ok(nerdOut.includes(resolveGlyphs("nerd").host), `nerd glyph missing\n${nerdOut}`);
+});
+
+// Real SGR codes keep the width maths honest: visibleWidth() must ignore them.
+const styledTheme = {
+	fg: (color: string, text: string) => {
+		const codes: Record<string, string> = { mdLink: "36", dim: "90", muted: "37" };
+		return `\x1b[${codes[color] ?? "39"}m${text}\x1b[39m`;
+	},
+} as Theme;
+
+function renderStatusLines(statuses: Map<string, string>, width = 160): string[] {
+	let footerFactory: NonNullable<Parameters<ExtensionContext["ui"]["setFooter"]>[0]> | undefined;
+	const ctx = {
+		model: { provider: "openai", contextWindow: 1_000 },
+		ui: {
+			setFooter(factory: typeof footerFactory) {
+				footerFactory = factory;
+			},
+		},
+		sessionManager: {
+			getCwd: () => "/work/project",
+			getEntries: () => [],
+			getSessionName: () => undefined,
+		},
+		getContextUsage: () => ({ tokens: 0, contextWindow: 1_000, percent: 0 }),
+	} as unknown as ExtensionContext;
+	const config = structuredClone(DEFAULT_CONFIG);
+	config.icons.mode = "ascii";
+	const state: FooterState = {
+		git: emptyGitStatus(),
+		runtime: null,
+		sessionStartEpoch: Date.now(),
+		workingSince: undefined,
+		lastDoneIn: undefined,
+	};
+	installFooter(
+		ctx,
+		() => state,
+		() => config,
+		() => ({ provider: "OpenAI", model: "gpt-5", effort: "off" }),
+		{ setRequestRender() {}, scheduleGitRefresh() {} },
+	);
+	assert.ok(footerFactory);
+	const footerData = {
+		onBranchChange: () => () => {},
+		getExtensionStatuses: () => statuses,
+	} as unknown as ReadonlyFooterDataProvider;
+	const component = footerFactory(
+		{ requestRender() {} } as TUI,
+		styledTheme,
+		footerData,
+	) as Component;
+	// The two main footer rows come first, status rows follow them.
+	return component.render(width).slice(2);
+}
+
+test("status sanitising keeps supported SGR colors and rejects other controls", () => {
+	assert.equal(sanitizeStatusPreservingStyles("\x1b[32mok\x1b[39m"), "\x1b[32mok\x1b[39m");
+	assert.equal(sanitizeStatusPreservingStyles("\x1b[38;5;123mcolor\x1b[0m"), "\x1b[38;5;123mcolor\x1b[0m");
+	assert.equal(sanitizeStatusPreservingStyles("\x1b[>4;2mprivate"), "private");
+	assert.equal(sanitizeStatusPreservingStyles("\x1b]0;title\x9b31m\x07visible"), "visible");
+});
+
+test("status sanitising flattens whitespace and drops cursor sequences", () => {
+	assert.equal(sanitizeStatusPreservingStyles("a\tb\nc"), "a b c");
+	assert.equal(sanitizeStatusPreservingStyles("a   b"), "a b");
+	assert.equal(sanitizeStatusPreservingStyles("\x1b[?25lhidden"), "hidden");
+	assert.equal(sanitizeStatusPreservingStyles("\x1b]0;title\x07visible"), "visible");
+});
+
+test("status sanitising removes complete string control sequences", () => {
+	const controls = [
+		"\x1bPpayload\x1b\\",
+		"\x90payload\x9c",
+		"\x1bXpayload\x1b\\",
+		"\x98payload\x9c",
+		"\x1b^payload\x1b\\",
+		"\x9epayload\x9c",
+		"\x1b_payload\x1b\\",
+		"\x9fpayload\x9c",
+		"\x1b]0;title\x07",
+		"\x1b]0;title\x1b\\",
+		"\x9d0;title\x07",
+		"\x9d0;title\x9c",
+	];
+	for (const control of controls) {
+		assert.equal(sanitizeStatusPreservingStyles(`before${control}after`), "before after");
+	}
+	assert.equal(sanitizeStatusPreservingStyles("before\x1bPunterminated"), "before");
+});
+
+test("status line keeps the colours set by extensions", () => {
+	const lines = renderStatusLines(new Map([
+		["memory", "\x1b[35mMemory\x1b[39m"],
+		["plain", "goal active"],
+	]));
+	const out = lines.join("\n");
+
+	// The extension's own magenta survives, plain text falls back to muted.
+	assert.ok(out.includes("\x1b[35mMemory\x1b[39m"), `extension colour dropped\n${out}`);
+	assert.ok(out.includes("\x1b[37mgoal active\x1b[39m"), `muted fallback missing\n${out}`);
+	assert.ok(!out.includes("\x1b[37mMemory"), `status must not be repainted muted\n${out}`);
+});
+
+test("status line closes an unclosed style before the separator", () => {
+	const lines = renderStatusLines(new Map([
+		["bold", "\x1b[1mworking"],
+		["next", "idle"],
+	]));
+	const out = lines.join("\n");
+
+	assert.ok(
+		out.includes("\x1b[1mworking\x1b[0m \x1b[90m|"),
+		`separator inherits the unclosed style\n${out}`,
+	);
+});
+
+test("status line drops sequences that could rewrite the terminal", () => {
+	const lines = renderStatusLines(new Map([
+		["mcp", "\x1b[?25lconn\x1b]0;evil\x07ected \x1b[32mdone\x1b[39m"],
+	]));
+	const out = lines.join("\n");
+
+	assert.equal(stripAnsi(out).includes("conn ected done"), true, `text damaged\n${out}`);
+	assert.ok(!out.includes("\x1b[?25l"), `cursor sequence leaked\n${out}`);
+	assert.ok(!out.includes("\x1b]0;"), `OSC sequence leaked\n${out}`);
+});
+
+test("status line wraps coloured text inside the given width", () => {
+	const long = `\x1b[31m${"x".repeat(120)}\x1b[39m`;
+	const lines = renderStatusLines(new Map([["long", long]]), 40);
+
+	assert.ok(lines.length > 1, "long status should wrap");
+	for (const line of lines) {
+		assert.ok(visibleWidth(line) <= 40, `width ${visibleWidth(line)} exceeds 40`);
+	}
 });
