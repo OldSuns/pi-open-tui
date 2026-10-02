@@ -299,7 +299,7 @@ export function sanitizeStatus(text: string): string {
 // One status token is an SGR sequence, another escape sequence, or one control
 // character. SGR carries colours. Everything else moves the cursor or rewrites
 // the terminal, so it must never reach the footer row.
-const STATUS_TOKEN = /(?:\x1b\[|\x9b)[0-?]*[ -/]*m|(?:\x1b\[|\x9b)[0-?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[@-Z\\_]|[\u0000-\u001f\u007f-\u009f]/g;
+const STATUS_TOKEN = /(?:\x1b\[|\x9b)[0-?]*[ -/]*m|(?:\x1b\[|\x9b)[0-?]*[ -/]*[@-~]|(?:\x1bP|\x90|\x1bX|\x98|\x1b\^|\x9e|\x1b_|\x9f)[\s\S]*?(?:\x1b\\|\x9c|$)|(?:\x1b\]|\x9d)[\s\S]*?(?:\x07|\x1b\\|\x9c|$)|\x1b[@-Z\\_]|[\u0000-\u001f\u007f-\u009f]/g;
 const SGR_TOKEN = /^(?:\x1b\[|\x9b)[0-9;:]*m$/;
 const SGR_SEQUENCE = /(?:\x1b\[|\x9b)[0-9;:]*m/;
 

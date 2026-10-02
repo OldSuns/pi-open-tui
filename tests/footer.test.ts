@@ -882,6 +882,27 @@ test("status sanitising flattens whitespace and drops cursor sequences", () => {
 	assert.equal(sanitizeStatusPreservingStyles("\x1b]0;title\x07visible"), "visible");
 });
 
+test("status sanitising removes complete string control sequences", () => {
+	const controls = [
+		"\x1bPpayload\x1b\\",
+		"\x90payload\x9c",
+		"\x1bXpayload\x1b\\",
+		"\x98payload\x9c",
+		"\x1b^payload\x1b\\",
+		"\x9epayload\x9c",
+		"\x1b_payload\x1b\\",
+		"\x9fpayload\x9c",
+		"\x1b]0;title\x07",
+		"\x1b]0;title\x1b\\",
+		"\x9d0;title\x07",
+		"\x9d0;title\x9c",
+	];
+	for (const control of controls) {
+		assert.equal(sanitizeStatusPreservingStyles(`before${control}after`), "before after");
+	}
+	assert.equal(sanitizeStatusPreservingStyles("before\x1bPunterminated"), "before");
+});
+
 test("status line keeps the colours set by extensions", () => {
 	const lines = renderStatusLines(new Map([
 		["memory", "\x1b[35mMemory\x1b[39m"],
