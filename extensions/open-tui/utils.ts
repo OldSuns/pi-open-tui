@@ -300,7 +300,8 @@ export function sanitizeStatus(text: string): string {
 // character. SGR carries colours. Everything else moves the cursor or rewrites
 // the terminal, so it must never reach the footer row.
 const STATUS_TOKEN = /(?:\x1b\[|\x9b)[0-?]*[ -/]*m|(?:\x1b\[|\x9b)[0-?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[@-Z\\_]|[\u0000-\u001f\u007f-\u009f]/g;
-const SGR_SEQUENCE = /(?:\x1b\[|\x9b)[0-?]*[ -/]*m/;
+const SGR_TOKEN = /^(?:\x1b\[|\x9b)[0-9;:]*m$/;
+const SGR_SEQUENCE = /(?:\x1b\[|\x9b)[0-9;:]*m/;
 
 /**
  * Sanitize a status text the same way {@link sanitizeStatus} does, but keep the
@@ -308,7 +309,7 @@ const SGR_SEQUENCE = /(?:\x1b\[|\x9b)[0-?]*[ -/]*m/;
  * `ctx.ui.theme.fg()`. Stripping those codes renders every status grey.
  */
 export function sanitizeStatusPreservingStyles(text: string): string {
-	const cleaned = text.replace(STATUS_TOKEN, (token) => (SGR_SEQUENCE.test(token) ? token : " "));
+	const cleaned = text.replace(STATUS_TOKEN, (token) => (SGR_TOKEN.test(token) ? token : " "));
 	return cleaned.replace(/ {2,}/g, " ").trim();
 }
 

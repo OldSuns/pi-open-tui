@@ -868,8 +868,11 @@ function renderStatusLines(statuses: Map<string, string>, width = 160): string[]
 	return component.render(width).slice(2);
 }
 
-test("status sanitising keeps SGR sequences", () => {
+test("status sanitising keeps supported SGR colors and rejects other controls", () => {
 	assert.equal(sanitizeStatusPreservingStyles("\x1b[32mok\x1b[39m"), "\x1b[32mok\x1b[39m");
+	assert.equal(sanitizeStatusPreservingStyles("\x1b[38;5;123mcolor\x1b[0m"), "\x1b[38;5;123mcolor\x1b[0m");
+	assert.equal(sanitizeStatusPreservingStyles("\x1b[>4;2mprivate"), "private");
+	assert.equal(sanitizeStatusPreservingStyles("\x1b]0;title\x9b31m\x07visible"), "visible");
 });
 
 test("status sanitising flattens whitespace and drops cursor sequences", () => {
