@@ -76,6 +76,7 @@ Run `/open-tui` to open the settings dialog. It provides **General**, **Appearan
     "extensionStatuses": true,
     "capitalizeProviderName": true
   },
+  "providerColors": {},
   "telemetry": {
     "enabled": true,
     "tps": true,
@@ -101,12 +102,32 @@ Key options:
 | `icons.mode` | `auto`, `nerd`, `unicode`, `ascii` | Controls footer and telemetry icons |
 | `footerSegments` | Boolean flags | Shows or hides individual footer data |
 | `footerSegments.capitalizeProviderName` | Boolean | Capitalizes the first character of the provider name in the footer; set it to `false` to keep the provider's original casing |
+| `providerColors` | Provider ID to color-token map | Overrides provider-name colors in the footer, configured in JSON only |
 | `telemetry` | Boolean flags | Enables telemetry and its individual measurements |
 | `thinkingPeek.lines` | `0`, `1`, `2` | Off, one-line, or two-line hidden thinking preview |
 
 `sessionName` appears only when the session has a name. `hostname` shows the short host name (first label of the machine's host name, e.g. `mba` from `mba.example.com`) with a server icon. `gitCommit` shows the short hash and tag in detached HEAD state. Disabling `extensionStatuses` hides the entire extension status line, including MCP status. Each status keeps the colours its extension applied with `ctx.ui.theme.fg()`. A status without colours renders in the muted theme colour.
 
 With `inlineFooter` enabled, the two normal Footer rows are rendered inside the editor frame to save vertical space. The top border places the Git branch on the left and CWD first in the right-hand group; the session title appears on the left too when `sessionName` is enabled. The Header and extension status rows remain separate; narrow terminals truncate lower-priority Footer data first, keeping the right-hand statistics and the border corner.
+
+### Provider colors
+
+`providerColors` maps provider IDs to theme color tokens. IDs are case-insensitive and match the model provider, such as `openrouter`, rather than the model ID or display name. Overrides affect the provider name in both normal and inline footers. They do not change the header or extension status colors.
+
+Example configuration fragment:
+
+```json
+{
+  "providerColors": {
+    "openrouter": "success",
+    "zai": "success"
+  }
+}
+```
+
+Supported tokens are `accent`, `success`, `warning`, `error`, `text`, `muted`, `dim`, `mdLink`, `thinkingOff`, `thinkingMinimal`, `thinkingLow`, `thinkingMedium`, `thinkingHigh`, `thinkingXhigh`, and `thinkingMax`. Their actual colors depend on the active Pi theme. For example, `success` is green in the Dracula theme.
+
+The default is `{}`, which preserves the built-in provider colors. Invalid entries are ignored. Providers without an override keep their built-in color, or `muted` if they have no built-in mapping. Changes take effect after `/reload` or a Pi restart. The `/open-tui` settings dialog preserves these overrides but does not edit them.
 
 ## Turn telemetry
 

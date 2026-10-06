@@ -1,11 +1,20 @@
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
-import { getAgentDir } from "@earendil-works/pi-coding-agent";
+import { getAgentDir, type ThemeColor } from "@earendil-works/pi-coding-agent";
 import type { IconMode } from "./icons.ts";
 
 export type SettingsLanguage = "en" | "zh";
 export type CursorStyle = "block" | "bar" | "underline";
 export type ThinkingPeekLines = 0 | 1 | 2;
+
+const PROVIDER_COLOR_TOKENS = [
+	"accent", "success", "warning", "error", "text", "muted", "dim", "mdLink",
+	"thinkingOff", "thinkingMinimal", "thinkingLow", "thinkingMedium",
+	"thinkingHigh", "thinkingXhigh", "thinkingMax",
+] as const satisfies readonly ThemeColor[];
+
+export type ProviderColor = typeof PROVIDER_COLOR_TOKENS[number];
+export type ProviderColors = Partial<Record<string, ProviderColor>>;
 
 export type { IconMode } from "./icons.ts";
 
@@ -47,6 +56,7 @@ export interface OpenTuiConfig {
 		mode: IconMode;
 	};
 	footerSegments: FooterSegments;
+	providerColors: ProviderColors;
 	telemetry: TelemetryConfig;
 	thinkingPeek: ThinkingPeekConfig;
 }
@@ -73,6 +83,7 @@ export const DEFAULT_CONFIG: OpenTuiConfig = {
 		extensionStatuses: true,
 		capitalizeProviderName: true,
 	},
+	providerColors: {},
 	telemetry: {
 		enabled: true,
 		tps: true,
@@ -94,6 +105,17 @@ export function getConfigPath(): string {
 
 function normalizeThinkingPeekLines(value: unknown): ThinkingPeekLines {
 	return value === 0 || value === 1 || value === 2 ? value : DEFAULT_CONFIG.thinkingPeek.lines;
+}
+
+function isProviderColor(value: unknown): value is ProviderColor {
+	return typeof value === "string" && PROVIDER_COLOR_TOKENS.some((token) => token === value);
+}
+
+function normalizeProviderColors(value: unknown): ProviderColors {
+	if (typeof value !== "object" || value === null || Array.isArray(value)) return {};
+	return Object.fromEntries(Object.entries(value).flatMap(([provider, color]) =>
+		provider && isProviderColor(color) ? [[provider.toLowerCase(), color]] : [],
+	));
 }
 
 function deepMerge<T>(base: T, override: unknown): T {
@@ -141,6 +163,7 @@ export function loadConfig(notify?: (msg: string, level: "warning" | "info") => 
 		const raw = readFileSync(path, "utf8");
 		const parsed: unknown = JSON.parse(raw);
 		const config = deepMerge(DEFAULT_CONFIG, parsed);
+		config.providerColors = normalizeProviderColors(config.providerColors);
 		if (typeof config.inlineFooter !== "boolean") {
 			config.inlineFooter = DEFAULT_CONFIG.inlineFooter;
 		}

@@ -7,6 +7,8 @@ import {
 	visibleWidth,
 } from "@earendil-works/pi-tui";
 
+import type { ProviderColors } from "./config.ts";
+
 export { truncateToWidth, visibleWidth };
 
 // pi-tui handles the common ANSI/OSC/APC forms. Keep a generic CSI pass for
@@ -220,8 +222,11 @@ export function cacheHitColor(value: number): ThemeColor {
 	return "success";
 }
 
-export function providerColor(provider: string): ThemeColor {
-	switch (provider.toLowerCase()) {
+export function providerColor(provider: string, overrides: Readonly<ProviderColors> = {}): ThemeColor {
+	const id = provider.toLowerCase();
+	const override = Object.hasOwn(overrides, id) ? overrides[id] : undefined;
+	if (override !== undefined) return override;
+	switch (id) {
 		case "anthropic":
 			return "accent";
 		case "openai":

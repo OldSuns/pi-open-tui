@@ -5,7 +5,7 @@ import { join } from "node:path";
 import test from "node:test";
 import type { ExtensionAPI, ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
 import { visibleWidth, type Component, type KeybindingsManager, type TUI } from "@earendil-works/pi-tui";
-import { DEFAULT_CONFIG, loadConfig, type OpenTuiConfig } from "../extensions/open-tui/config.ts";
+import { DEFAULT_CONFIG, loadConfig, saveConfig, type OpenTuiConfig } from "../extensions/open-tui/config.ts";
 import { installEditor } from "../extensions/open-tui/editor.ts";
 import { getPendingUiChange } from "../extensions/open-tui/index.ts";
 import { registerSettingsCommand } from "../extensions/open-tui/settings-command.ts";
@@ -313,6 +313,76 @@ test("normalizes invalid settings values", () => {
 		assert.equal(loaded.inlineFooter, false);
 		assert.equal(loaded.thinkingPeek.lines, 1);
 		assert.equal("fullscreen" in loaded, true);
+	} finally {
+		if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+		else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+		rmSync(agentDir, { recursive: true, force: true });
+	}
+});
+
+test("provider colors default to no overrides and reject non-object values", () => {
+	const agentDir = mkdtempSync(join(tmpdir(), "pi-open-tui-colors-"));
+	const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+	try {
+		process.env.PI_CODING_AGENT_DIR = agentDir;
+		assert.deepEqual(loadConfig().providerColors, {});
+		for (const value of [undefined, null, [], ["success"], "success", 42, true]) {
+			writeFileSync(join(agentDir, "open-tui.json"), JSON.stringify({ providerColors: value }));
+			assert.deepEqual(loadConfig().providerColors, {});
+		}
+		assert.deepEqual(DEFAULT_CONFIG.providerColors, {});
+	} finally {
+		if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+		else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+		rmSync(agentDir, { recursive: true, force: true });
+	}
+});
+
+test("provider colors normalize IDs and discard invalid entries", () => {
+	const agentDir = mkdtempSync(join(tmpdir(), "pi-open-tui-colors-"));
+	const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+	try {
+		process.env.PI_CODING_AGENT_DIR = agentDir;
+		writeFileSync(join(agentDir, "open-tui.json"), JSON.stringify({
+			providerColors: {
+				OpenRouter: "success",
+				zai: "thinkingHigh",
+				openai: "muted",
+				custom: "thinkingMax",
+				"": "success",
+				anthropic: "green",
+				google: "SUCCESS",
+				deepseek: null,
+				groq: 42,
+				xai: { color: "success" },
+				other: ["success"],
+				bad: "\x1b[32m",
+			},
+		}));
+		assert.deepEqual(loadConfig().providerColors, {
+			openrouter: "success", zai: "thinkingHigh", openai: "muted", custom: "thinkingMax",
+		});
+	} finally {
+		if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+		else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+		rmSync(agentDir, { recursive: true, force: true });
+	}
+});
+
+test("settings changes preserve provider colors when saved and reloaded", async () => {
+	const agentDir = mkdtempSync(join(tmpdir(), "pi-open-tui-colors-"));
+	const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+	try {
+		process.env.PI_CODING_AGENT_DIR = agentDir;
+		const config = structuredClone(DEFAULT_CONFIG);
+		config.providerColors = { openrouter: "success", zai: "success" };
+		const settings = await openSettings(config, saveConfig);
+		settings.component.handleInput("\r");
+		settings.component.handleInput("q");
+		await settings.waitForClose();
+		const loaded = loadConfig();
+		assert.equal(loaded.enabled, false);
+		assert.deepEqual(loaded.providerColors, config.providerColors);
 	} finally {
 		if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
 		else process.env.PI_CODING_AGENT_DIR = previousAgentDir;

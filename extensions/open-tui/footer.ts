@@ -386,7 +386,7 @@ function renderFooterContent(
 	const modelParts: string[] = [];
 	modelParts.push(theme.fg("mdLink", glyphs.model));
 	if (meta.provider && meta.provider !== "Unknown") {
-		modelParts.push(theme.fg(providerColor(ctx.model?.provider ?? "none"), meta.provider));
+		modelParts.push(theme.fg(providerColor(ctx.model?.provider ?? "none", config.providerColors), meta.provider));
 	}
 	modelParts.push(theme.fg("text", meta.model));
 	if (meta.effort && meta.effort !== "off") {

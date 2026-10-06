@@ -76,6 +76,7 @@ pi -e npm:pi-open-tui
     "extensionStatuses": true,
     "capitalizeProviderName": true
   },
+  "providerColors": {},
   "telemetry": {
     "enabled": true,
     "tps": true,
@@ -101,12 +102,32 @@ pi -e npm:pi-open-tui
 | `icons.mode` | `auto`、`nerd`、`unicode`、`ascii` | 控制底栏和遥测通知使用的图标 |
 | `footerSegments` | 布尔开关 | 分别控制底栏中的各项数据 |
 | `footerSegments.capitalizeProviderName` | 布尔开关 | 将底栏中提供商名称的首字母大写；设为 `false` 时保留原始大小写 |
+| `providerColors` | 提供商 ID 到颜色标记的映射 | 覆盖底栏中的提供商名称颜色，仅通过 JSON 配置 |
 | `telemetry` | 布尔开关 | 控制遥测总开关和各项指标 |
 | `thinkingPeek.lines` | `0`、`1`、`2` | 关闭、单行或双行思考预览 |
 
 `sessionName` 仅在会话有名称时显示；`hostname` 会显示主机名的短名称（主机名的第一个标签，例如从 `mba.example.com` 显示为 `mba`），并使用服务器图标；`gitCommit` 会在 detached HEAD 状态下显示短哈希和标签；关闭 `extensionStatuses` 会隐藏整行扩展状态，其中也包括 MCP 状态。每条状态会保留其扩展通过 `ctx.ui.theme.fg()` 设置的颜色；未设置颜色的状态使用 muted 主题色显示。
 
 开启 `inlineFooter` 后，两条常规 Footer 信息行会移入编辑器边框，从而节省垂直空间。顶部边框左侧显示 Git 分支，右侧信息组以当前目录开头；开启 `sessionName` 时，会话标题也会显示在左侧。Header 和扩展状态行保持独立显示；终端较窄时优先截断低优先级 Footer 数据，保留右侧统计信息和边框角。
+
+### 提供商颜色
+
+`providerColors` 将提供商 ID 映射到主题颜色标记。ID 不区分大小写，使用模型的提供商 ID（例如 `openrouter`），而不是模型 ID 或显示名称。覆盖项适用于常规底栏和内嵌底栏中的提供商名称，不影响顶栏或扩展状态的颜色。
+
+配置片段示例：
+
+```json
+{
+  "providerColors": {
+    "openrouter": "success",
+    "zai": "success"
+  }
+}
+```
+
+支持的标记包括 `accent`、`success`、`warning`、`error`、`text`、`muted`、`dim`、`mdLink`、`thinkingOff`、`thinkingMinimal`、`thinkingLow`、`thinkingMedium`、`thinkingHigh`、`thinkingXhigh` 和 `thinkingMax`。实际颜色取决于当前 Pi 主题。例如，Dracula 主题中的 `success` 为绿色。
+
+默认值为 `{}`，保留内置提供商颜色。无效项会被忽略。没有覆盖项的提供商使用其内置颜色，没有内置映射时使用 `muted`。更改在 `/reload` 或重启 Pi 后生效。`/open-tui` 设置窗口会保留这些覆盖项，但不提供编辑功能。
 
 ## 单轮遥测
 

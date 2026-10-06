@@ -20,6 +20,7 @@ import { clearRuntimeCache, readRuntimeInfo } from "../extensions/open-tui/runti
 import { getModelMeta, getUsageTotals, invalidateUsageCache, type FooterState } from "../extensions/open-tui/state.ts";
 import {
 	fitSegmentsByPriority,
+	providerColor,
 	sanitizeStatusPreservingStyles,
 	stripAnsi,
 	truncateBranch,
@@ -41,6 +42,76 @@ test("reads Git status from a nested repository directory", async () => {
 		assert.equal((await readGitStatus(nested)).branch, "nested-repo-test");
 	} finally {
 		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+test("provider colors preserve default mappings without an override", () => {
+	const defaults = {
+		anthropic: "accent", openai: "success", "openai-codex": "success",
+		google: "warning", "google-vertex": "warning", "amazon-bedrock": "thinkingHigh",
+		"github-copilot": "mdLink", deepseek: "thinkingLow", xai: "error", groq: "error",
+		openrouter: "muted", zai: "muted", custom: "muted", constructor: "muted",
+	};
+	for (const [provider, expected] of Object.entries(defaults)) {
+		assert.equal(providerColor(provider), expected);
+		assert.equal(providerColor(provider.toUpperCase(), { unrelated: "success" }), expected);
+	}
+	assert.equal(providerColor("openrouter", Object.create({ openrouter: "success" })), "muted");
+});
+
+test("provider color overrides take precedence for built-in and custom providers", () => {
+	assert.equal(providerColor("OpenRouter", { openrouter: "success" }), "success");
+	assert.equal(providerColor("zai", { zai: "success" }), "success");
+	assert.equal(providerColor("openai", { openai: "muted" }), "muted");
+	assert.equal(providerColor("custom", { custom: "thinkingHigh" }), "thinkingHigh");
+	assert.equal(providerColor("constructor", { constructor: "success" as const }), "success");
+});
+
+test("footer applies provider overrides in normal and inline layouts", () => {
+	let footerFactory: NonNullable<Parameters<ExtensionContext["ui"]["setFooter"]>[0]> | undefined;
+	const ctx = {
+		model: { provider: "openrouter", contextWindow: 1_000 },
+		ui: { setFooter(factory: typeof footerFactory) { footerFactory = factory; } },
+		sessionManager: {
+			getCwd: () => "/work/project", getEntries: () => [], getSessionName: () => undefined,
+		},
+		getContextUsage: () => ({ tokens: 0, contextWindow: 1_000, percent: 0 }),
+	} as unknown as ExtensionContext;
+	const config = structuredClone(DEFAULT_CONFIG);
+	config.icons.mode = "ascii";
+	config.providerColors = { openrouter: "success" };
+	const state: FooterState = {
+		git: emptyGitStatus(), runtime: null, sessionStartEpoch: Date.now(),
+		workingSince: undefined, lastDoneIn: undefined,
+	};
+	const handle = installFooter(
+		ctx, () => state, () => config,
+		() => ({ provider: "Openrouter", model: "test-model", effort: "off" }),
+		{ setRequestRender() {}, scheduleGitRefresh() {} },
+	);
+	assert.ok(footerFactory);
+	const colorCalls: Array<[string, string]> = [];
+	const recordingTheme = {
+		fg: (color: string, text: string) => { colorCalls.push([color, text]); return text; },
+	} as Theme;
+	const component = footerFactory(
+		{ requestRender() {} } as TUI, recordingTheme,
+		{ onBranchChange: () => () => {}, getExtensionStatuses: () => new Map() } as unknown as ReadonlyFooterDataProvider,
+	);
+	try {
+		assert.match(component.render(160).join("\n"), /Openrouter/);
+		assert.ok(colorCalls.some(([color, text]) => color === "success" && text === "Openrouter"));
+		colorCalls.length = 0;
+		config.inlineFooter = true;
+		assert.match(handle.renderInline(160)!.bottom.left, /Openrouter/);
+		assert.ok(colorCalls.some(([color, text]) => color === "success" && text === "Openrouter"));
+		colorCalls.length = 0;
+		delete config.providerColors.openrouter;
+		handle.renderInline(160);
+		assert.ok(colorCalls.some(([color, text]) => color === "muted" && text === "Openrouter"));
+	} finally {
+		component.dispose?.();
+		handle.cleanup();
 	}
 });
 
