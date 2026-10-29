@@ -44,6 +44,107 @@ test("reads Git status from a nested repository directory", async () => {
 	}
 });
 
+test("reads both ahead and behind counts for a diverged Git branch", async () => {
+	const root = mkdtempSync(join(tmpdir(), "open-tui-git-"));
+	try {
+		execFileSync("git", ["init", "-b", "main"], { cwd: root });
+		execFileSync("git", ["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "--allow-empty", "-m", "init"], { cwd: root });
+		execFileSync("git", ["checkout", "-b", "upstream"], { cwd: root });
+		execFileSync("git", ["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "--allow-empty", "-m", "upstream"], { cwd: root });
+		execFileSync("git", ["checkout", "main"], { cwd: root });
+		execFileSync("git", ["branch", "--set-upstream-to=upstream"], { cwd: root });
+		execFileSync("git", ["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "--allow-empty", "-m", "local"], { cwd: root });
+		execFileSync("git", ["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "--allow-empty", "-m", "local again"], { cwd: root });
+
+		const status = await readGitStatus(root);
+		assert.equal(status.branch, "main");
+		assert.equal(status.ahead, 2);
+		assert.equal(status.behind, 1);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+test("keeps the Git branch when its upstream is gone", async () => {
+	const root = mkdtempSync(join(tmpdir(), "open-tui-git-"));
+	try {
+		execFileSync("git", ["init", "-b", "main"], { cwd: root });
+		execFileSync("git", ["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "--allow-empty", "-m", "init"], { cwd: root });
+		execFileSync("git", ["branch", "upstream"], { cwd: root });
+		execFileSync("git", ["branch", "--set-upstream-to=upstream"], { cwd: root });
+		execFileSync("git", ["branch", "-D", "upstream"], { cwd: root });
+
+		const status = await readGitStatus(root);
+		assert.equal(status.branch, "main");
+		assert.equal(status.ahead, 0);
+		assert.equal(status.behind, 0);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+test("counts Git MM entries as staged and modified, not conflicted", async () => {
+	const root = mkdtempSync(join(tmpdir(), "open-tui-git-"));
+	try {
+		execFileSync("git", ["init", "-b", "main"], { cwd: root });
+		writeFileSync(join(root, "file.txt"), "initial\n");
+		execFileSync("git", ["add", "file.txt"], { cwd: root });
+		execFileSync("git", ["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-m", "init"], { cwd: root });
+		writeFileSync(join(root, "file.txt"), "staged\n");
+		execFileSync("git", ["add", "file.txt"], { cwd: root });
+		writeFileSync(join(root, "file.txt"), "modified again\n");
+		assert.equal(execFileSync("git", ["status", "--porcelain=v1"], { cwd: root, encoding: "utf8" }), "MM file.txt\n");
+
+		const status = await readGitStatus(root);
+		assert.equal(status.conflicted, 0);
+		assert.equal(status.staged, 1);
+		assert.equal(status.modified, 1);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+for (const [code, stages] of [["AA", [2, 3]], ["DD", [1]], ["UU", [1, 2, 3]]] as const) {
+	test(`counts Git ${code} entries as conflicted, not staged or deleted`, async () => {
+		const root = mkdtempSync(join(tmpdir(), "open-tui-git-"));
+		try {
+			execFileSync("git", ["init", "-b", "main"], { cwd: root });
+			execFileSync("git", ["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "--allow-empty", "-m", "init"], { cwd: root });
+			const oid = execFileSync("git", ["hash-object", "-w", "--stdin"], { cwd: root, input: "conflict\n", encoding: "utf8" }).trim();
+			// Populate unmerged index stages directly to cover these porcelain codes.
+			execFileSync("git", ["update-index", "--index-info"], {
+				cwd: root,
+				input: stages.map((stage) => `100644 ${oid} ${stage}\tconflict.txt\n`).join(""),
+			});
+			assert.equal(execFileSync("git", ["status", "--porcelain=v1"], { cwd: root, encoding: "utf8" }), `${code} conflict.txt\n`);
+
+			const status = await readGitStatus(root);
+			assert.equal(status.conflicted, 1);
+			assert.equal(status.staged, 0);
+			assert.equal(status.deleted, 0);
+		} finally {
+			rmSync(root, { recursive: true, force: true });
+		}
+	});
+}
+
+test("preserves Git status for unborn branches and detached HEAD", async () => {
+	const root = mkdtempSync(join(tmpdir(), "open-tui-git-"));
+	try {
+		execFileSync("git", ["init", "-b", "main"], { cwd: root });
+		assert.deepEqual(await readGitStatus(root), emptyGitStatus());
+
+		execFileSync("git", ["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "--allow-empty", "-m", "init"], { cwd: root });
+		execFileSync("git", ["checkout", "--detach"], { cwd: root });
+		assert.deepEqual(await readGitStatus(root), {
+			...emptyGitStatus(),
+			commit: { oid: null, detached: true, tag: null },
+		});
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
 test("branch truncation preserves the branch prefix", () => {
 	assert.equal(truncateBranch("fix/cwd-footer-truncation", 20), "fix/cwd-footer-tr...");
 	assert.equal(truncateBranch("main", 20), "main");

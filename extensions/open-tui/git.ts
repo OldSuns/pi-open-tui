@@ -77,11 +77,13 @@ export async function readGitStatus(
 				status.branch = undefined;
 				status.commit = { oid: null, detached: true, tag: null };
 			} else {
-				const branchMatch = branchPart.match(/^(\S+?)(?:\.\.\.(\S+))?(?:\s+\[(ahead|behind) (\d+)\])?$/);
+				const branchMatch = branchPart.match(/^(\S+?)(?:\.\.\.(\S+))?(?:\s+\[(.*)\])?$/);
 				if (branchMatch) {
 					status.branch = branchMatch[1];
-					if (branchMatch[3] === "ahead") status.ahead = parseInt(branchMatch[4]!, 10);
-					if (branchMatch[3] === "behind") status.behind = parseInt(branchMatch[4]!, 10);
+					const ahead = branchMatch[3]?.match(/\bahead (\d+)\b/);
+					const behind = branchMatch[3]?.match(/\bbehind (\d+)\b/);
+					if (ahead) status.ahead = parseInt(ahead[1]!, 10);
+					if (behind) status.behind = parseInt(behind[1]!, 10);
 				}
 			}
 			continue;
@@ -103,7 +105,7 @@ export async function readGitStatus(
 		const x = line[0]!;
 		const y = line[1]!;
 
-		if (x === "U" || y === "U" || (x === "C" && y === "C")) status.conflicted++;
+		if (x === "U" || y === "U" || (x === "A" && y === "A") || (x === "D" && y === "D")) status.conflicted++;
 		else if (x === "?" && y === "?") status.untracked++;
 		else if (x === "R") status.renamed++;
 		else if (x === "D" || y === "D") status.deleted++;
