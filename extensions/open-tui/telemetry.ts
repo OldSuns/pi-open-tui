@@ -112,7 +112,10 @@ export class TurnTelemetryTracker {
 		const samples = this.turn?.currentMessage?.samples;
 		if (!samples || samples.length < 2) return null;
 		const first = samples[0]!;
-		const elapsedMs = this.now() - first.ms;
+		const now = this.now();
+		// Samples are only pruned on new deltas, so a stall longer than the window means no recent output.
+		if (now - samples.at(-1)!.ms >= LIVE_TPS_WINDOW_MS) return 0;
+		const elapsedMs = now - first.ms;
 		if (elapsedMs <= 0) return null;
 		return round((samples.at(-1)!.tokens - first.tokens) / (elapsedMs / 1000), 1);
 	}

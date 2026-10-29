@@ -643,11 +643,14 @@ test("live TPS tracks the trailing window of the streaming message", () => {
 	}
 	assert.ok(Math.abs(live()! - 10) < 1, `expected ~10, got ${live()}`);
 
-	// Stall: no deltas, the rate decays toward zero.
+	// Stall: no deltas, the rate decays, and reads zero once the window holds no output.
 	const beforeStall = live()!;
-	now += 3000;
+	now += 1000;
 	const decayed = live()!;
-	assert.ok(decayed < beforeStall);
+	assert.ok(decayed > 0 && decayed < beforeStall);
+	now += 1000;
+	assert.equal(live(), 0);
+	now -= 1000;
 
 	// Between messages (tool execution, next TTFT) the last rate stays as stale.
 	tracker.handle({ type: "message_end", message });
