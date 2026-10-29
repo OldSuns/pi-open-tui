@@ -143,6 +143,7 @@ export default function (pi: ExtensionAPI) {
 					scheduleGitRefresh: () => {
 						void scheduleGitRefresh(ctx);
 					},
+					getLiveTps: () => turnTelemetry.getLiveTps(),
 				},
 			);
 			cleanupFooter = footer.cleanup;

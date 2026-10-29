@@ -6,6 +6,7 @@ import type { IconGlyphs } from "./icons.ts";
 import { resolveGlyphs, resolveIconMode, runtimeSymbol } from "./icons.ts";
 import type { GitStatus } from "./git.ts";
 import type { RuntimeInfo } from "./runtime.ts";
+import type { LiveTps } from "./telemetry.ts";
 import {
 	alignRight,
 	basenamePath,
@@ -224,6 +225,7 @@ function renderExtensionStatusLines(
 export interface FooterHooks {
 	setRequestRender: (fn: (() => void) | undefined) => void;
 	scheduleGitRefresh: () => void;
+	getLiveTps?: () => LiveTps | null;
 }
 
 interface FooterDataLike {
@@ -283,6 +285,7 @@ function renderFooterContent(
 	theme: Theme,
 	footerData: FooterDataLike,
 	width: number,
+	getLiveTps: () => LiveTps | null,
 ): { mainLines: [string, string]; inlineLines: InlineFooterLines; extensionLines: string[] } {
 	if (width <= 0) {
 		return {
@@ -364,7 +367,14 @@ function renderFooterContent(
 	}
 	const timerSeg = renderTimerSegment(theme, state, glyphs);
 	if (timerSeg) {
-		leftParts.push({ text: timerSeg, priority: 1 });
+		const liveTps = state.workingSince !== undefined && segments.liveTps
+			? getLiveTps()
+			: null;
+		const text = liveTps === null
+			? timerSeg
+			: `${timerSeg} ${theme.fg("dim", "·")} ${theme.fg(liveTps.stale ? "dim" : "accent", `${glyphs.speed} ~${Math.round(liveTps.tps)} tok/s`)}`;
+		// Narrow widths shed the live TPS before the timer itself.
+		leftParts.push({ text, compactText: liveTps === null ? undefined : timerSeg, priority: 1 });
 		inlineTopRightParts.push(leftParts.at(-1)!);
 	}
 
@@ -443,6 +453,7 @@ export function installFooter(
 			theme,
 			footerData,
 			width,
+			hooks.getLiveTps ?? (() => null),
 		);
 
 		renderInline = (width) => getContent(width).inlineLines;

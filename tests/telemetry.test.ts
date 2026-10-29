@@ -14,7 +14,7 @@ import {
 import { ScrollView, Text } from "@earendil-works/pi-tui";
 import { DEFAULT_CONFIG } from "../extensions/open-tui/config.ts";
 import openTui from "../extensions/open-tui/index.ts";
-import { formatTurnTelemetry, TurnTelemetryTracker } from "../extensions/open-tui/telemetry.ts";
+import { estimateDeltaTokens, formatTurnTelemetry, TurnTelemetryTracker } from "../extensions/open-tui/telemetry.ts";
 
 const theme = {
 	fg: (_color: string, text: string) => text,
@@ -605,4 +605,64 @@ test("open-tui keeps a bounded peek scoped to the current assistant", async () =
 		else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
 		await rm(agentDir, { recursive: true, force: true });
 	}
+});
+
+test("estimates CJK at one token per character and Latin at four characters per token", () => {
+	assert.equal(estimateDeltaTokens("abcdefgh"), 2);
+	assert.equal(estimateDeltaTokens("你好世界"), 4);
+	assert.equal(estimateDeltaTokens("こんにちは안녕"), 7);
+	assert.equal(estimateDeltaTokens("ab你好"), 2.5);
+});
+
+test("live TPS tracks the trailing window of the streaming message", () => {
+	let now = 0;
+	const tracker = new TurnTelemetryTracker(() => now);
+	const message = makeMessage();
+	const live = () => tracker.getLiveTps()?.tps;
+	assert.equal(tracker.getLiveTps(), null);
+	startTurn(tracker, message);
+	assert.equal(tracker.getLiveTps(), null);
+
+	// First chunk after TTFT is only the baseline, so its burst is not counted.
+	now = 1000;
+	tracker.handle(update(message, { type: "text_delta", contentIndex: 0, delta: "x".repeat(400), partial: message }));
+	assert.equal(tracker.getLiveTps(), null);
+
+	// 10 tokens every 100ms = 100 tok/s, across text, thinking, and tool-call deltas.
+	const types = ["text_delta", "thinking_delta", "toolcall_delta"] as const;
+	for (let i = 1; i <= 30; i++) {
+		now = 1000 + i * 100;
+		tracker.handle(update(message, { type: types[i % 3]!, contentIndex: 0, delta: "x".repeat(40), partial: message }));
+	}
+	assert.deepEqual(tracker.getLiveTps(), { tps: 100, stale: false });
+
+	// A 2s window at 10 tok/s after the fast burst only reflects the slow pace.
+	for (let i = 1; i <= 25; i++) {
+		now = 4000 + i * 100;
+		tracker.handle(update(message, { type: "text_delta", contentIndex: 0, delta: "xxxx", partial: message }));
+	}
+	assert.ok(Math.abs(live()! - 10) < 1, `expected ~10, got ${live()}`);
+
+	// Stall: no deltas, the rate decays toward zero.
+	const beforeStall = live()!;
+	now += 3000;
+	const decayed = live()!;
+	assert.ok(decayed < beforeStall);
+
+	// Between messages (tool execution, next TTFT) the last rate stays as stale.
+	tracker.handle({ type: "message_end", message });
+	assert.deepEqual(tracker.getLiveTps(), { tps: decayed, stale: true });
+	endTurn(tracker, message);
+	startTurn(tracker, message, 1);
+	now += 100;
+	tracker.handle(update(message));
+	assert.deepEqual(tracker.getLiveTps(), { tps: decayed, stale: true });
+	now += 100;
+	tracker.handle(update(message, { type: "text_delta", contentIndex: 0, delta: "x".repeat(20), partial: message }));
+	assert.deepEqual(tracker.getLiveTps(), { tps: 50, stale: false });
+
+	// The run is over: nothing carries into the next one.
+	endTurn(tracker, message, 1);
+	tracker.handle({ type: "agent_settled" });
+	assert.equal(tracker.getLiveTps(), null);
 });

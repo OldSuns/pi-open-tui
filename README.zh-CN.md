@@ -75,6 +75,7 @@ pi -e npm:pi-open-tui
     "context": true,
     "tokens": true,
     "cost": true,
+    "liveTps": true,
     "extensionStatuses": true,
     "capitalizeProviderName": true,
     "nerdIconSpacing": false
@@ -121,6 +122,8 @@ pi -e npm:pi-open-tui
 ```
 
 TPS 的计算方式是：将本次运行中服务商报告的全部 Assistant 输出 Token，除以各个生成轮次的总耗时。计时范围从 `turn_start` 到 Assistant 的 `message_end`，包含 TTFT、隐藏推理、缓冲和停顿，但不包含轮次之间的工具执行时间。没有输出 Token 或无法测得生成时间时，会显示 `TPS —`。
+
+回复流式输出时，工作计时器还会显示当前的估算速度，例如 `working 12.3s · ~54 tok/s`。`~` 表示估算值：它是最近 2 秒内流式输出的正文、思考内容和工具调用参数的速率，按拉丁文本和代码约 4 个字符 1 个 Token、中日韩字符每字 1 个 Token 估算。停顿时数值会逐渐降向零；工具执行期间和消息之间以暗色保留上一个值。由**底栏 → 实时 TPS**（`footerSegments.liveTps`）控制，与遥测通知的开关互不影响。运行结束后不再显示，以上面的精确 TPS 为准。
 
 `$ / M` 表示根据 `usage.cost.total` 得到的模型标价速率，不是底栏中的会话累计费用。所有遥测字段都可以在**遥测**页单独开关。
 

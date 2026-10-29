@@ -75,6 +75,7 @@ Run `/open-tui` to open the settings dialog. It provides **General**, **Appearan
     "context": true,
     "tokens": true,
     "cost": true,
+    "liveTps": true,
     "extensionStatuses": true,
     "capitalizeProviderName": true,
     "nerdIconSpacing": false
@@ -121,6 +122,8 @@ After each complete agent run, pi-open-tui shows one transient result. Tool-call
 ```
 
 TPS is calculated from all provider-reported assistant output tokens divided by the total generation time across the run. Timing starts at `turn_start` and ends at the assistant `message_end`, so it includes TTFT, hidden reasoning, buffering, and stalls; tool execution between turns is excluded. Runs without output tokens or measurable generation time show `TPS —`.
+
+While a response streams, the working timer also shows the current estimated speed, for example `working 12.3s · ~54 tok/s`. The `~` marks it as an estimate: it is the rate over the last 2 seconds of streamed text, thinking, and tool-call arguments, estimated at about 4 characters per token for Latin text and code and 1 token per CJK character. It drops toward zero during stalls and stays dimmed at its last value during tool execution and between messages. It is controlled by **Footer → Live TPS** (`footerSegments.liveTps`), independently of the telemetry notification. It disappears when the run ends; the exact TPS above is the authoritative value.
 
 The `$ / M` value is the model's list-price rate from `usage.cost.total`, not the cumulative session cost shown in the footer. Every telemetry field can be toggled from the **Telemetry** tab.
 
