@@ -14,6 +14,10 @@ import { resolveGlyphs } from "./icons.ts";
 import { finiteOrZero, fmtTokens, formatDuration, formatInputBreakdown } from "./utils.ts";
 
 const STALL_THRESHOLD_MS = 1000;
+// Live TPS is the rate over this trailing window, so it tracks current speed.
+const LIVE_TPS_WINDOW_MS = 2000;
+// CJK/kana/hangul/fullwidth: roughly one token per character in common tokenizers.
+const CJK_CHARS = /[\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af\uf900-\ufaff\uff00-\uffef]/g;
 
 type TelemetryEvent =
 	| AgentStartEvent
@@ -31,6 +35,9 @@ interface MessageTiming {
 	lastUpdateMs: number;
 	firstOutputMs: number | null;
 	inStall: boolean;
+	estimatedTokens: number;
+	/** Cumulative estimate per delta; keeps one sample before the window as baseline. */
+	samples: { ms: number; tokens: number }[];
 }
 
 interface TurnTiming {
@@ -59,8 +66,20 @@ export interface TurnTelemetry {
 	measurementMs: number | null;
 }
 
+export interface LiveTps {
+	tps: number;
+	/** True between messages, when the value is the previous message's last rate. */
+	stale: boolean;
+}
+
 function isAssistantMessage(message: AgentMessage): message is AssistantMessage {
 	return message.role === "assistant";
+}
+
+/** ~4 chars/token for Latin text and code, ~1 token per CJK character. */
+export function estimateDeltaTokens(delta: string): number {
+	const cjk = delta.match(CJK_CHARS)?.length ?? 0;
+	return cjk + (delta.length - cjk) / 4;
 }
 
 function round(value: number, decimals: number): number {
@@ -73,9 +92,32 @@ export class TurnTelemetryTracker {
 	private turn: TurnTiming | undefined;
 	private agentStartMs: number | null = null;
 	private agentTurns: TurnTelemetry[] = [];
+	private lastLiveTps: number | null = null;
 
 	constructor(now: () => number = () => performance.now()) {
 		this.now = now;
+	}
+
+	/**
+	 * Estimated output rate of the streaming message over the trailing window.
+	 * Between messages of a run (tools, TTFT) the last rate is kept as `stale`.
+	 */
+	getLiveTps(): LiveTps | null {
+		const tps = this.windowTps();
+		if (tps !== null) return { tps, stale: false };
+		return this.lastLiveTps === null ? null : { tps: this.lastLiveTps, stale: true };
+	}
+
+	private windowTps(): number | null {
+		const samples = this.turn?.currentMessage?.samples;
+		if (!samples || samples.length < 2) return null;
+		const first = samples[0]!;
+		const now = this.now();
+		// Samples are only pruned on new deltas, so a stall longer than the window means no recent output.
+		if (now - samples.at(-1)!.ms >= LIVE_TPS_WINDOW_MS) return 0;
+		const elapsedMs = now - first.ms;
+		if (elapsedMs <= 0) return null;
+		return round((samples.at(-1)!.tokens - first.tokens) / (elapsedMs / 1000), 1);
 	}
 
 	handle(event: TelemetryEvent): TurnTelemetry | undefined {
@@ -84,6 +126,7 @@ export class TurnTelemetryTracker {
 				if (this.agentStartMs === null) {
 					this.agentStartMs = this.now();
 					this.agentTurns = [];
+					this.lastLiveTps = null;
 				}
 				return;
 			case "agent_settled":
@@ -126,6 +169,8 @@ export class TurnTelemetryTracker {
 			lastUpdateMs: now,
 			firstOutputMs: null,
 			inStall: false,
+			estimatedTokens: 0,
+			samples: [],
 		};
 	}
 
@@ -143,6 +188,11 @@ export class TurnTelemetryTracker {
 		if (!turn || !current || !isAssistantMessage(message)) return;
 
 		const now = this.now();
+		current.estimatedTokens += estimateDeltaTokens(streamEvent.delta);
+		const samples = current.samples;
+		samples.push({ ms: now, tokens: current.estimatedTokens });
+		while (samples.length > 2 && samples[1]!.ms <= now - LIVE_TPS_WINDOW_MS) samples.shift();
+
 		if (current.firstOutputMs === null) {
 			current.firstOutputMs = now;
 			turn.firstTokenMs ??= now;
@@ -172,6 +222,7 @@ export class TurnTelemetryTracker {
 			if (current.firstOutputMs === null && finiteOrZero(message.usage?.output) > 0) {
 				turn.firstTokenMs ??= endMs;
 			}
+			this.lastLiveTps = this.windowTps() ?? this.lastLiveTps;
 			turn.currentMessage = null;
 		}
 		turn.messages.push(message);
@@ -234,6 +285,7 @@ export class TurnTelemetryTracker {
 		const turns = this.agentTurns;
 		this.agentStartMs = null;
 		this.agentTurns = [];
+		this.lastLiveTps = null;
 		if (startMs === null || turns.length === 0) return;
 
 		const outputTokens = turns.reduce((sum, turn) => sum + turn.outputTokens, 0);

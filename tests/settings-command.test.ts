@@ -209,6 +209,19 @@ test("remembers the selection for each tab", async () => {
 	assert.match(selectedLine(settings.component), /Git branch/);
 });
 
+test("toggles live TPS from the Footer tab", async () => {
+	const settings = await openSettings();
+
+	settings.component.handleInput("\t");
+	settings.component.handleInput("\t");
+	for (let i = 0; i < 10; i++) settings.component.handleInput("\x1b[B");
+	assert.match(selectedLine(settings.component), /Live TPS/);
+
+	settings.component.handleInput("\r");
+	assert.equal(settings.getConfig().footerSegments.liveTps, false);
+	assert.equal(settings.getConfig().telemetry.tps, true);
+});
+
 test("configures telemetry from its own tab", async () => {
 	const settings = await openSettings();
 
@@ -271,7 +284,7 @@ test("configures the extension status line with Space", async () => {
 	const settings = await openSettings();
 	settings.component.handleInput("\x1b[C");
 	settings.component.handleInput("\x1b[C");
-	for (let i = 0; i < 10; i++) settings.component.handleInput("\x1b[B");
+	for (let i = 0; i < 11; i++) settings.component.handleInput("\x1b[B");
 	assert.match(selectedLine(settings.component), /Extension status line/);
 
 	settings.component.handleInput(" ");

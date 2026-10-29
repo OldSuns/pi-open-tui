@@ -14,6 +14,7 @@ import type { Component, TUI } from "@earendil-works/pi-tui";
 import { visibleWidth } from "@earendil-works/pi-tui";
 import { DEFAULT_CONFIG } from "../extensions/open-tui/config.ts";
 import { installFooter, shortHostname } from "../extensions/open-tui/footer.ts";
+import type { LiveTps } from "../extensions/open-tui/telemetry.ts";
 import { emptyGitStatus, readGitStatus } from "../extensions/open-tui/git.ts";
 import { detectNerdFont, resolveGlyphs, resolveIconMode, runtimeSymbol } from "../extensions/open-tui/icons.ts";
 import { clearRuntimeCache, readRuntimeInfo } from "../extensions/open-tui/runtime.ts";
@@ -1060,4 +1061,71 @@ test("status line wraps coloured text inside the given width", () => {
 	for (const line of lines) {
 		assert.ok(visibleWidth(line) <= 40, `width ${visibleWidth(line)} exceeds 40`);
 	}
+});
+
+test("working timer shows live TPS gated by its footer setting and sheds it first", () => {
+	let footerFactory: NonNullable<Parameters<ExtensionContext["ui"]["setFooter"]>[0]> | undefined;
+	const ctx = {
+		model: { provider: "openai", contextWindow: 1_000 },
+		ui: {
+			setFooter(factory: typeof footerFactory) {
+				footerFactory = factory;
+			},
+		},
+		sessionManager: {
+			getCwd: () => "/work/project",
+			getEntries: () => [],
+			getSessionName: () => undefined,
+		},
+		getContextUsage: () => ({ tokens: 0, contextWindow: 1_000, percent: 0 }),
+	} as unknown as ExtensionContext;
+	const config = structuredClone(DEFAULT_CONFIG);
+	config.icons.mode = "ascii";
+	config.footerSegments.hostname = false;
+	const state: FooterState = {
+		git: emptyGitStatus(),
+		runtime: null,
+		sessionStartEpoch: Date.now(),
+		workingSince: Date.now(),
+		lastDoneIn: undefined,
+	};
+	let liveTps: LiveTps | null = { tps: 53.5, stale: false };
+	installFooter(
+		ctx,
+		() => state,
+		() => config,
+		() => ({ provider: "OpenAI", model: "gpt-5", effort: "off" }),
+		{ setRequestRender() {}, scheduleGitRefresh() {}, getLiveTps: () => liveTps },
+	);
+	assert.ok(footerFactory);
+	const footerData = {
+		onBranchChange: () => () => {},
+		getExtensionStatuses: () => new Map(),
+	} as unknown as ReadonlyFooterDataProvider;
+	// Tag the color of the TPS part so the stale (dim) state is visible.
+	const tpsTheme = { fg: (color: string, text: string) => text.includes("tok/s") ? `<${color}>${text}` : text } as Theme;
+	const component = footerFactory({ requestRender() {} } as TUI, tpsTheme, footerData) as Component;
+	const line = (width = 120) => component.render(width)[0]!;
+
+	assert.match(line(), /o working \S+ · <accent>> ~54 tok\/s/);
+	liveTps = { tps: 53.5, stale: true };
+	assert.match(line(), /o working \S+ · <dim>> ~54 tok\/s/);
+	liveTps = { tps: 53.5, stale: false };
+	const narrow = line(60);
+	assert.match(narrow, /working/);
+	assert.doesNotMatch(narrow, /tok\/s/);
+
+	config.footerSegments.liveTps = false;
+	assert.doesNotMatch(line(), /tok\/s/);
+	config.footerSegments.liveTps = true;
+	// The footer switch is independent of the telemetry notification settings.
+	config.telemetry.enabled = false;
+	assert.match(line(), /~54 tok\/s/);
+	config.telemetry.enabled = true;
+	liveTps = null;
+	assert.doesNotMatch(line(), /tok\/s/);
+	liveTps = { tps: 53.5, stale: false };
+	state.workingSince = undefined;
+	state.lastDoneIn = 1_000;
+	assert.doesNotMatch(line(), /tok\/s/);
 });
