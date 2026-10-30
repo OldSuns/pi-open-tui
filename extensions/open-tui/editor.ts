@@ -318,6 +318,42 @@ export class OpenTuiEditor extends CustomEditor {
 	}
 }
 
+type StreamWrite = (...args: unknown[]) => boolean;
+
+/**
+ * Calls `requestRepaint` after each raw write to a TTY stream. Pi's fullscreen renderer only
+ * rewrites changed rows, so text other extensions print straight to the terminal would
+ * otherwise stay over the editor and footer until a resize.
+ */
+export function repaintAfterStreamWrites(
+	requestRepaint: () => void,
+	stream: NodeJS.WriteStream = process.stderr,
+): () => void {
+	if (!stream.isTTY) return () => {};
+	const original = stream.write as unknown as StreamWrite;
+	let enabled = true;
+	const patched = ((...args: unknown[]) => {
+		const callback = typeof args[args.length - 1] === "function"
+			? (args.pop() as (error?: Error | null) => void)
+			: undefined;
+		// Repaint from the write callback so the redraw lands after the stray text.
+		return original.call(stream, ...args, (error?: Error | null) => {
+			try {
+				if (enabled) requestRepaint();
+			} catch {
+				// A failed repaint must not break the caller's write; logging it here would recurse.
+			}
+			callback?.(error);
+		});
+	}) as typeof stream.write;
+	stream.write = patched;
+	return () => {
+		enabled = false;
+		// A later wrapper may still delegate to ours; leave it as a passthrough then.
+		if (stream.write === patched) stream.write = original as unknown as typeof stream.write;
+	};
+}
+
 export function installEditor(
 	_pi: ExtensionAPI,
 	ctx: ExtensionContext,
@@ -361,6 +397,10 @@ export function installEditor(
 			target.render = originalRender;
 		};
 	};
+	// Only the fullscreen renderer clears and rewrites the whole screen on a forced render.
+	const restoreStderr = repaintAfterStreamWrites(() => {
+		if (activeTui?.mode === "fullscreen") activeTui.requestRender(true);
+	});
 
 	ctx.ui.setEditorComponent((tui, editorTheme, keybindings) => {
 		activeTui = tui;
@@ -386,6 +426,7 @@ export function installEditor(
 			activeEditor?.setCursorStyle(nextCursorStyle, previousHardwareCursor);
 		},
 		cleanup(): void {
+			restoreStderr();
 			resetHiddenThinkingTarget();
 			ctx.ui.setEditorComponent(undefined);
 			if (activeTui) {

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { ExtensionAPI, ExtensionContext, KeybindingsManager } from "@earendil-works/pi-coding-agent";
 import { TuiMainScreen, type EditorTheme, type Terminal, type TUI, visibleWidth } from "@earendil-works/pi-tui";
-import { installEditor, OpenTuiEditor } from "../extensions/open-tui/editor.ts";
+import { installEditor, OpenTuiEditor, repaintAfterStreamWrites } from "../extensions/open-tui/editor.ts";
 import { stripAnsi } from "../extensions/open-tui/utils.ts";
 
 const tui = {
@@ -364,4 +364,74 @@ test("keeps a hardware cursor after Pi re-applies its runtime settings", () => {
 		"software cursor stays stripped",
 	);
 	hostTui.stop();
+});
+
+function fakeTtyStream(written: string[], isTTY = true) {
+	const write = (chunk: string, ...rest: unknown[]) => {
+		written.push(chunk);
+		const callback = rest.find((arg): arg is (error?: Error | null) => void => typeof arg === "function");
+		setImmediate(() => callback?.(chunk === "fail" ? new Error("closed") : null));
+		return false;
+	};
+	return { stream: { isTTY, write } as unknown as NodeJS.WriteStream, write };
+}
+
+const flushImmediates = () => new Promise((resolve) => setImmediate(resolve));
+
+test("repaints after each raw TTY write without changing the write contract", async () => {
+	const written: string[] = [];
+	const { stream } = fakeTtyStream(written);
+	let repaints = 0;
+	repaintAfterStreamWrites(() => repaints++, stream);
+
+	const errors: (Error | null | undefined)[] = [];
+	assert.equal(stream.write("plain\n"), false, "return value passes through");
+	stream.write("encoded\n", "utf8", (error) => errors.push(error));
+	stream.write("fail", (error) => errors.push(error));
+	assert.equal(repaints, 0, "repaint waits for the write to finish");
+	await flushImmediates();
+
+	assert.deepEqual(written, ["plain\n", "encoded\n", "fail"]);
+	assert.equal(repaints, 3);
+	assert.equal(errors[0], null);
+	assert.equal(errors[1]?.message, "closed");
+
+	const throwing = fakeTtyStream([]).stream;
+	repaintAfterStreamWrites(() => {
+		throw new Error("render failed");
+	}, throwing);
+	let called = false;
+	throwing.write("x", () => {
+		called = true;
+	});
+	await flushImmediates();
+	assert.equal(called, true, "a failed repaint still runs the caller callback");
+});
+
+test("stream restore stops repaints and keeps later wrappers", async () => {
+	const written: string[] = [];
+	const { stream, write: originalWrite } = fakeTtyStream(written);
+	let repaints = 0;
+
+	const restore = repaintAfterStreamWrites(() => repaints++, stream);
+	stream.write("pending");
+	restore();
+	assert.equal(stream.write, originalWrite as unknown, "restores the original write");
+	await flushImmediates();
+	assert.equal(repaints, 0, "a write pending at cleanup does not repaint");
+
+	const restoreAgain = repaintAfterStreamWrites(() => repaints++, stream);
+	const ours = stream.write as unknown as (...args: unknown[]) => boolean;
+	const outer = ((...args: unknown[]) => ours(...args)) as typeof stream.write;
+	stream.write = outer;
+	restoreAgain();
+	assert.equal(stream.write, outer, "keeps a later wrapper in place");
+	stream.write("through outer");
+	await flushImmediates();
+	assert.equal(written.at(-1), "through outer");
+	assert.equal(repaints, 0, "the disabled wrapper only passes writes through");
+
+	const pipe = fakeTtyStream([], false);
+	repaintAfterStreamWrites(() => repaints++, pipe.stream);
+	assert.equal(pipe.stream.write, pipe.write as unknown, "non-TTY streams are left alone");
 });
