@@ -40,6 +40,8 @@ export interface InlineFooterRenderer {
 
 interface HiddenThinkingLabelComponent {
 	children: unknown[];
+	outputPad?: unknown;
+	render(width: number): string[];
 	setHiddenThinkingLabel(label: string): void;
 	setHideThinkingBlock(hide: boolean): void;
 	updateContent(message: unknown, isStreaming?: boolean): void;
@@ -48,6 +50,7 @@ interface HiddenThinkingLabelComponent {
 function isHiddenThinkingLabelComponent(value: object): value is HiddenThinkingLabelComponent {
 	const component = value as unknown as Record<string, unknown>;
 	return Array.isArray(component.children)
+		&& typeof component.render === "function"
 		&& typeof component.setHiddenThinkingLabel === "function"
 		&& typeof component.setHideThinkingBlock === "function"
 		&& typeof component.updateContent === "function";
@@ -69,6 +72,13 @@ function findLatestHiddenThinkingLabel(tui: TUI): HiddenThinkingLabelComponent {
 	}
 	if (!latest) throw new Error("Unable to find the active hidden-thinking component");
 	return latest;
+}
+
+/** Width Pi's hidden-thinking `Text(label, outputPad, 0)` wraps at when its message renders at `width`. */
+function hiddenThinkingTextWidth(width: number, outputPad: unknown): number {
+	const pad = typeof outputPad === "number" && Number.isFinite(outputPad) ? Math.max(0, Math.floor(outputPad)) : 1;
+	const paddingX = Math.min(pad, Math.max(0, Math.floor((width - 1) / 2)));
+	return Math.max(1, width - paddingX * 2);
 }
 
 function removeSoftwareCursor(line: string, cursorMarker = ""): string {
@@ -319,41 +329,64 @@ export function installEditor(
 	let previousHardwareCursor: boolean | undefined;
 	let currentCursorStyle = cursorStyle;
 	let hiddenThinkingTarget: HiddenThinkingLabelComponent | undefined;
+	let restoreHiddenThinkingRender: (() => void) | undefined;
+	let buildHiddenThinkingLabel: ((width: number) => string) | undefined;
 	const getActiveTui = (): TUI => {
 		if (!activeTui) throw new Error("Open TUI editor is not mounted");
 		return activeTui;
 	};
+	const resetHiddenThinkingTarget = (): void => {
+		restoreHiddenThinkingRender?.();
+		restoreHiddenThinkingRender = undefined;
+		hiddenThinkingTarget = undefined;
+		buildHiddenThinkingLabel = undefined;
+	};
+	// Build the label at the width Pi actually renders the message with; layout
+	// extensions (e.g. pi-sidebar) can make it much narrower than the terminal.
+	const patchHiddenThinkingRender = (target: HiddenThinkingLabelComponent): void => {
+		const originalRender = target.render;
+		let lastWidth: number | undefined;
+		let lastBuild: ((width: number) => string) | undefined;
+		target.render = function (this: HiddenThinkingLabelComponent, width: number): string[] {
+			const build = buildHiddenThinkingLabel;
+			const textWidth = hiddenThinkingTextWidth(width, this.outputPad);
+			if (build && (build !== lastBuild || textWidth !== lastWidth)) {
+				lastBuild = build;
+				lastWidth = textWidth;
+				this.setHiddenThinkingLabel(build(textWidth));
+			}
+			return originalRender.call(this, width);
+		};
+		restoreHiddenThinkingRender = () => {
+			target.render = originalRender;
+		};
+	};
 
 	ctx.ui.setEditorComponent((tui, editorTheme, keybindings) => {
 		activeTui = tui;
-		hiddenThinkingTarget = undefined;
+		resetHiddenThinkingTarget();
 		previousHardwareCursor = tui.getShowHardwareCursor();
 		activeEditor = new OpenTuiEditor(tui, editorTheme, keybindings, currentCursorStyle, inlineFooter);
 		return activeEditor;
 	});
 	return {
-		getViewportWidth(): number {
-			const columns = getActiveTui().terminal.columns;
-			if (typeof columns !== "number" || !Number.isFinite(columns)) {
-				throw new Error("Open TUI editor terminal has an invalid width");
-			}
-			return Math.max(1, Math.floor(columns));
-		},
-		setLatestHiddenThinkingLabel(label: string): void {
+		/** `build` receives the hidden-thinking text width and runs again whenever that width changes. */
+		setLatestHiddenThinkingLabel(build: (width: number) => string): void {
 			const tui = getActiveTui();
-			hiddenThinkingTarget ??= findLatestHiddenThinkingLabel(tui);
-			hiddenThinkingTarget.setHiddenThinkingLabel(label);
+			if (!hiddenThinkingTarget) {
+				hiddenThinkingTarget = findLatestHiddenThinkingLabel(tui);
+				patchHiddenThinkingRender(hiddenThinkingTarget);
+			}
+			buildHiddenThinkingLabel = build;
 			tui.requestRender();
 		},
-		resetHiddenThinkingLabelTarget(): void {
-			hiddenThinkingTarget = undefined;
-		},
+		resetHiddenThinkingLabelTarget: resetHiddenThinkingTarget,
 		setCursorStyle(nextCursorStyle: CursorStyle): void {
 			currentCursorStyle = nextCursorStyle;
 			activeEditor?.setCursorStyle(nextCursorStyle, previousHardwareCursor);
 		},
 		cleanup(): void {
-			hiddenThinkingTarget = undefined;
+			resetHiddenThinkingTarget();
 			ctx.ui.setEditorComponent(undefined);
 			if (activeTui) {
 				if (currentCursorStyle !== "block") activeTui.terminal.write(DEFAULT_CURSOR_STYLE_SEQUENCE);

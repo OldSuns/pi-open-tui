@@ -24,9 +24,6 @@ import {
 } from "./peek.ts";
 
 type PendingUiChange = "install" | "uninstall";
-const HIDDEN_THINKING_HORIZONTAL_PADDING = 2;
-// Pi's fullscreen transcript can reserve one more column for its scrollbar.
-const HIDDEN_THINKING_SCROLLBAR_RESERVE = 1;
 
 export function getPendingUiChange(enabled: boolean, active: boolean): PendingUiChange | undefined {
 	if (enabled === active) return undefined;
@@ -78,29 +75,16 @@ export default function (pi: ExtensionAPI) {
 	/** Pi decides whether this label is visible; our toggle only controls updates. */
 	const isPeekEnabled = () => sessionLifecycle.isCurrent() && config.enabled && config.thinkingPeek.lines > 0 && active;
 
-	/** Keep each native hidden-thinking label row within Pi's narrowest transcript width. */
-	const hiddenThinkingLabelWidth = (): number => {
-		if (!editor) throw new Error("Open TUI editor is not installed");
-		return Math.max(
-			1,
-			editor.getViewportWidth() - HIDDEN_THINKING_HORIZONTAL_PADDING - HIDDEN_THINKING_SCROLLBAR_RESERVE,
-		);
-	};
-
 	const setPeekLabel = (ctx?: ExtensionContext): void => {
 		if (!isPeekEnabled() || peek.phase === "idle") return;
 		const target = ctx ?? lastCtx;
 		if (!target || !isTuiContext(target)) return;
 		if (!editor) throw new Error("Open TUI editor is not installed");
-		editor.setLatestHiddenThinkingLabel(
-			buildPeekLabel(
-				peek,
-				peekFrame,
-				resolveGlyphs(config.icons.mode),
-				hiddenThinkingLabelWidth(),
-				config.thinkingPeek.lines,
-			),
-		);
+		const snapshot = { ...peek };
+		const frame = peekFrame;
+		const glyphs = resolveGlyphs(config.icons.mode);
+		const lines = config.thinkingPeek.lines;
+		editor.setLatestHiddenThinkingLabel((width) => buildPeekLabel(snapshot, frame, glyphs, width, lines));
 		peekLabelActive = true;
 	};
 
