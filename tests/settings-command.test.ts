@@ -7,7 +7,7 @@ import type { ExtensionAPI, ExtensionContext, Theme } from "@earendil-works/pi-c
 import { visibleWidth, type Component, type KeybindingsManager, type TUI } from "@earendil-works/pi-tui";
 import { DEFAULT_CONFIG, loadConfig, type OpenTuiConfig } from "../extensions/open-tui/config.ts";
 import { installEditor } from "../extensions/open-tui/editor.ts";
-import { getPendingUiChange } from "../extensions/open-tui/index.ts";
+import { applyHeader, getPendingUiChange } from "../extensions/open-tui/index.ts";
 import { registerSettingsCommand } from "../extensions/open-tui/settings-command.ts";
 
 interface SettingsComponent extends Component {
@@ -242,6 +242,7 @@ test("supports localized settings and keyboard shortcuts", async () => {
 	assert.match(settings.component.render(80).join("\n"), /Open TUI Settings.*General.*Language/s);
 
 	settings.component.handleInput("\x1b[B");
+	settings.component.handleInput("\x1b[B");
 	settings.component.handleInput(" ");
 	assert.equal(settings.getConfig().settingsLanguage, "zh");
 	assert.match(settings.component.render(80).join("\n"), /Open TUI 设置.*常规.*语言.*简体中文/s);
@@ -250,6 +251,7 @@ test("supports localized settings and keyboard shortcuts", async () => {
 	const reopened = await openSettings(structuredClone(settings.getConfig()));
 	assert.match(reopened.component.render(80).join("\n"), /Open TUI 设置.*简体中文/s);
 
+	reopened.component.handleInput("\x1b[B");
 	reopened.component.handleInput("\x1b[B");
 	reopened.component.handleInput("\x1b[C");
 	assert.match(reopened.component.render(80).join("\n"), /\[外观\].*图标模式.*光标样式/s);
@@ -261,11 +263,42 @@ test("supports localized settings and keyboard shortcuts", async () => {
 
 test("configures inline footer from General settings", async () => {
 	const settings = await openSettings();
-	// Enabled → Language → Thinking peek → Footer in editor border
-	for (let i = 0; i < 3; i++) settings.component.handleInput("\x1b[B");
+	// Enabled → Header → Language → Thinking peek → Footer in editor border
+	for (let i = 0; i < 4; i++) settings.component.handleInput("\x1b[B");
 	assert.match(selectedLine(settings.component), /Footer in editor border/);
 	settings.component.handleInput(" ");
 	assert.equal(settings.getConfig().inlineFooter, true);
+});
+
+test("toggles the open-tui header from General settings", async () => {
+	const settings = await openSettings();
+	settings.component.handleInput("\x1b[B");
+	assert.match(selectedLine(settings.component), /open-tui header/);
+
+	settings.component.handleInput(" ");
+	assert.equal(settings.getConfig().header, false);
+	assert.match(selectedLine(settings.component), /open-tui header/);
+
+	settings.component.handleInput(" ");
+	assert.equal(settings.getConfig().header, true);
+});
+
+test("restores Pi's built-in header when the open-tui header is disabled", () => {
+	const factories: unknown[] = [];
+	const ctx = {
+		ui: { setHeader: (factory: unknown) => factories.push(factory) },
+	} as unknown as ExtensionContext;
+	const pi = { getCommands: () => [] } as unknown as ExtensionAPI;
+
+	assert.equal(applyHeader(pi, ctx, false), undefined);
+	assert.deepEqual(factories, [undefined]);
+
+	const cleanup = applyHeader(pi, ctx, true);
+	assert.equal(factories.length, 2);
+	assert.equal(typeof factories[1], "function");
+	assert.ok(cleanup);
+	cleanup();
+	assert.deepEqual(factories, [undefined, factories[1], undefined]);
 });
 
 test("configures the hostname footer segment", async () => {
@@ -316,6 +349,7 @@ test("normalizes invalid settings values", () => {
 		writeFileSync(join(agentDir, "open-tui.json"), JSON.stringify({
 			settingsLanguage: "de",
 			cursorStyle: "invalid",
+			header: "no",
 			inlineFooter: "yes",
 			thinkingPeek: { lines: 9 },
 			fullscreen: { wheelScrollLines: 10 },
@@ -323,6 +357,7 @@ test("normalizes invalid settings values", () => {
 		const loaded = loadConfig();
 		assert.equal(loaded.settingsLanguage, "en");
 		assert.equal(loaded.cursorStyle, "block");
+		assert.equal(loaded.header, true);
 		assert.equal(loaded.inlineFooter, false);
 		assert.equal(loaded.thinkingPeek.lines, 1);
 		assert.equal("fullscreen" in loaded, true);
@@ -336,7 +371,8 @@ test("normalizes invalid settings values", () => {
 test("cycles the thinking peek line count from General settings", async () => {
 	const config = structuredClone(DEFAULT_CONFIG);
 	const settings = await openSettings(config);
-	// Enabled → Language → Thinking peek
+	// Enabled → Header → Language → Thinking peek
+	settings.component.handleInput("\x1b[B");
 	settings.component.handleInput("\x1b[B");
 	settings.component.handleInput("\x1b[B");
 	assert.match(selectedLine(settings.component), /Thinking peek/);

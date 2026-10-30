@@ -58,6 +58,7 @@ Run `/open-tui` to open the settings dialog. It provides **General**, **Appearan
 ```json
 {
   "enabled": true,
+  "header": true,
   "inlineFooter": false,
   "settingsLanguage": "en",
   "cursorStyle": "block",
@@ -100,6 +101,7 @@ Key options:
 | Option | Values | Notes |
 | --- | --- | --- |
 | `settingsLanguage` | `en`, `zh` | Changes the `/open-tui` interface language |
+| `header` | `true`, `false` | Shows the open-tui header; set it to `false` to keep Pi's built-in header |
 | `inlineFooter` | `true`, `false` | Moves the two main Footer rows into the editor's top and bottom borders; defaults to `false`. Extension status rows remain below the editor |
 | `cursorStyle` | `block`, `bar`, `underline` | `bar` and `underline` require terminal cursor-shape support |
 | `icons.mode` | `auto`, `nerd`, `unicode`, `ascii` | Controls footer and telemetry icons |

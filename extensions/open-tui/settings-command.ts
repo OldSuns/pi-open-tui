@@ -28,6 +28,7 @@ const COPY = {
 		hint: "Tab/Shift+Tab/←/→: tabs · ↑/↓: move · Enter/Space: change · Esc/q: close",
 		labels: {
 			enabled: "Enabled",
+			header: "open-tui header",
 			inlineFooter: "Footer in editor border",
 			thinkingPeek: "Thinking peek",
 			language: "Language",
@@ -67,6 +68,7 @@ const COPY = {
 		hint: "Tab/Shift+Tab/←/→：切页 · ↑/↓：移动 · Enter/Space：更改 · Esc/q：关闭",
 		labels: {
 			enabled: "启用",
+			header: "open-tui 顶部信息栏",
 			inlineFooter: "底栏嵌入输入框",
 			thinkingPeek: "思考预览",
 			language: "语言",
@@ -160,6 +162,7 @@ function buildFeaturesItems(config: OpenTuiConfig, copy: SettingsCopy): SettingI
 	const flag = (value: boolean) => value ? copy.values.on : copy.values.off;
 	return [
 		{ id: "enabled", label: copy.labels.enabled, currentValue: flag(config.enabled) },
+		{ id: "header", label: copy.labels.header, currentValue: flag(config.header) },
 		{ id: "settingsLanguage", label: copy.labels.language, currentValue: copy.values.languages[config.settingsLanguage] },
 		{ id: "thinkingPeek", label: copy.labels.thinkingPeek, currentValue: formatThinkingPeekLines(config.thinkingPeek.lines, copy) },
 		{ id: "inlineFooter", label: copy.labels.inlineFooter, currentValue: flag(config.inlineFooter) },
@@ -225,6 +228,7 @@ function handleSettingChange(
 ): OpenTuiConfig {
 	if (tab === "features") {
 		if (itemId === "enabled") return toggleEnabled(config);
+		if (itemId === "header") return { ...config, header: !config.header };
 		if (itemId === "inlineFooter") return { ...config, inlineFooter: !config.inlineFooter };
 		if (itemId === "settingsLanguage") return toggleLanguage(config);
 		if (itemId === "thinkingPeek") return cycleThinkingPeek(config);

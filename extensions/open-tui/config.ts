@@ -42,6 +42,8 @@ export interface ThinkingPeekConfig {
 
 export interface OpenTuiConfig {
 	enabled: boolean;
+	/** Use the open-tui header. When false, Pi's built-in header stays visible. */
+	header: boolean;
 	inlineFooter: boolean;
 	settingsLanguage: SettingsLanguage;
 	cursorStyle: CursorStyle;
@@ -55,6 +57,7 @@ export interface OpenTuiConfig {
 
 export const DEFAULT_CONFIG: OpenTuiConfig = {
 	enabled: true,
+	header: true,
 	inlineFooter: false,
 	settingsLanguage: "en",
 	cursorStyle: "block",
@@ -159,6 +162,9 @@ export function loadConfig(notify?: (msg: string, level: "warning" | "info") => 
 		const config = deepMerge(DEFAULT_CONFIG, parsed);
 		if (typeof config.enabled !== "boolean") {
 			config.enabled = DEFAULT_CONFIG.enabled;
+		}
+		if (typeof config.header !== "boolean") {
+			config.header = DEFAULT_CONFIG.header;
 		}
 		if (typeof config.inlineFooter !== "boolean") {
 			config.inlineFooter = DEFAULT_CONFIG.inlineFooter;
