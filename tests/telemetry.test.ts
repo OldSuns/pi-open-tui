@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -8,10 +8,11 @@ import {
 	AssistantMessageComponent,
 	type ExtensionAPI,
 	type ExtensionContext,
+	initTheme,
 	type MessageUpdateEvent,
 	type Theme,
 } from "@earendil-works/pi-coding-agent";
-import { ScrollView, Text } from "@earendil-works/pi-tui";
+import { ScrollView } from "@earendil-works/pi-tui";
 import { DEFAULT_CONFIG } from "../extensions/open-tui/config.ts";
 import openTui from "../extensions/open-tui/index.ts";
 import { estimateDeltaTokens, formatTurnTelemetry, TurnTelemetryTracker } from "../extensions/open-tui/telemetry.ts";
@@ -499,7 +500,9 @@ test("open-tui notifies once after a complete agent run", () => {
 });
 
 test("open-tui keeps a bounded peek scoped to the current assistant", async () => {
-	const effectiveWidth = 85;
+	const terminalWidth = 120;
+	// pi-sidebar renders the transcript next to a 36-column sidebar without changing terminal.columns.
+	const transcriptWidth = terminalWidth - 36;
 	const handlers = new Map<string, Array<(event: any, ctx: ExtensionContext) => void | Promise<void>>>();
 	const globalLabelUpdates: Array<string | undefined> = [];
 	const thought = "x".repeat(200);
@@ -515,7 +518,7 @@ test("open-tui keeps a bounded peek scoped to the current assistant", async () =
 		(component as unknown as { hiddenThinkingLabel: string }).hiddenThinkingLabel;
 	const tui = {
 		mode: "fullscreen",
-		terminal: { columns: effectiveWidth, write() {} },
+		terminal: { columns: terminalWidth, write() {} },
 		children: [{ children: thinkingComponents }],
 		getShowHardwareCursor: () => false,
 		setShowHardwareCursor() {},
@@ -555,9 +558,19 @@ test("open-tui keeps a bounded peek scoped to the current assistant", async () =
 	const previousColumns = Object.getOwnPropertyDescriptor(process.stdout, "columns");
 	const agentDir = await mkdtemp(join(tmpdir(), "open-tui-peek-"));
 	process.env.PI_CODING_AGENT_DIR = agentDir;
+	await writeFile(
+		join(agentDir, "open-tui.json"),
+		JSON.stringify({ ...DEFAULT_CONFIG, thinkingPeek: { lines: 2 } }),
+		"utf8",
+	);
+	initTheme();
+	for (const component of thinkingComponents) component.updateContent(assistant as unknown as AssistantMessage);
+	// Rows of the hidden-thinking block, without the leading Spacer.
+	const renderPeekRows = (width: number) =>
+		new ScrollView(thinkingComponents[1]!, { scrollbar: "always" }).render(width).length - 1;
 
 	try {
-		Object.defineProperty(process.stdout, "columns", { configurable: true, value: 120 });
+		Object.defineProperty(process.stdout, "columns", { configurable: true, value: terminalWidth });
 		openTui(pi);
 		await emit("session_start", { type: "session_start" });
 		await emit("agent_start", { type: "agent_start" });
@@ -568,20 +581,20 @@ test("open-tui keeps a bounded peek scoped to the current assistant", async () =
 			message: assistant,
 			assistantMessageEvent: { type: "thinking_delta", delta: assistant.content[0]!.thinking },
 		});
+		assert.equal(renderPeekRows(transcriptWidth), 2, "the peek rows must fit the sidebar-narrowed transcript");
 		const currentLabel = getThinkingLabel(thinkingComponents[1]!);
-		assert.ok(currentLabel);
+		assert.match(currentLabel, /think/);
 		assert.equal(getThinkingLabel(thinkingComponents[0]!), "Thinking...");
-		assert.equal(
-			new ScrollView(new Text(currentLabel, 1, 0), { scrollbar: "always" }).render(effectiveWidth).length,
-			1,
-			"the peek row must fit the narrowed fullscreen transcript",
-		);
+		assert.equal(renderPeekRows(terminalWidth), 2, "the peek must rebuild when the transcript width changes");
+		assert.notEqual(getThinkingLabel(thinkingComponents[1]!), currentLabel);
+		assert.equal(renderPeekRows(transcriptWidth), 2);
 		assistant.content[0]!.thinking += "y";
 		await emit("message_update", {
 			type: "message_update",
 			message: assistant,
 			assistantMessageEvent: { type: "thinking_delta", delta: "y" },
 		});
+		renderPeekRows(transcriptWidth);
 		const streamedLabel = getThinkingLabel(thinkingComponents[1]!);
 		assert.notEqual(streamedLabel, currentLabel, "each thinking delta must update the label immediately");
 
