@@ -8,6 +8,7 @@ import { readRuntimeInfo } from "./runtime.ts";
 import { SessionLifecycle } from "./session-lifecycle.ts";
 import { registerSettingsCommand } from "./settings-command.ts";
 import { formatTurnTelemetry, TurnTelemetryTracker } from "./telemetry.ts";
+import { registerToolView } from "./tool-view.ts";
 import {
 	createInitialState,
 	getModelMeta,
@@ -45,6 +46,7 @@ export default function (pi: ExtensionAPI) {
 	const turnTelemetry = new TurnTelemetryTracker();
 
 	let config: OpenTuiConfig = structuredClone(DEFAULT_CONFIG);
+	let configLoaded = false;
 	let active = false;
 	let lastCtx: ExtensionContext | undefined;
 	let requestFooterRender: (() => void) | undefined;
@@ -229,6 +231,7 @@ export default function (pi: ExtensionAPI) {
 
 		ensureConfigExists();
 		config = loadConfig((msg, level) => ctx.ui.notify(msg, level));
+		configLoaded = true;
 		clearPeekLabel(ctx);
 
 		applyUi(ctx);
@@ -366,6 +369,21 @@ export default function (pi: ExtensionAPI) {
 		invalidateUsageCache();
 		refreshInteractiveState(ctx);
 	});
+
+	if (typeof pi.registerToolRenderer === "function") {
+		registerToolView(
+			pi,
+			() => {
+				// Resumed sessions rebuild their rows before session_start fires, so read the file once here.
+				if (!configLoaded) {
+					config = loadConfig();
+					configLoaded = true;
+				}
+				return config.enabled ? config.toolView.mode : "native";
+			},
+			() => resolveGlyphs(config.icons.mode),
+		);
+	}
 
 	registerSettingsCommand(pi, {
 		getConfig: () => config,

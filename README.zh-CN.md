@@ -20,7 +20,7 @@
 
 ## 环境要求
 
-- Pi 1.0 或更高版本
+- Pi 1.1 或更高版本
 - 支持 UTF-8 和彩色输出的终端
 - 使用完整图标集时需要 [Nerd Font](https://www.nerdfonts.com/font-downloads)（可选；内置可移植 Unicode 图标）
 
@@ -94,6 +94,9 @@ pi -e npm:pi-open-tui
   },
   "thinkingPeek": {
     "lines": 1
+  },
+  "toolView": {
+    "mode": "native"
   }
 }
 ```
@@ -112,6 +115,7 @@ pi -e npm:pi-open-tui
 | `footerSegments.nerdIconSpacing` | 布尔开关 | 在底栏 Nerd Font 图标后额外留一格空白；默认 `false` |
 | `telemetry` | 布尔开关 | 控制遥测总开关和各项指标 |
 | `thinkingPeek.lines` | `0`、`1`、`2` | 关闭、单行或双行思考预览 |
+| `toolView.mode` | `native`、`compact` | 内置工具调用显示为 Pi 原生卡片，或紧凑的两行摘要；默认 `native`。只对切换后新建的行生效 |
 
 `sessionName` 仅在会话有名称时显示；`hostname` 会显示主机名的短名称（主机名的第一个标签，例如从 `mba.example.com` 显示为 `mba`），并使用服务器图标；处于分离 HEAD（detached HEAD）状态时，`gitBranch` 会显示 `HEAD` 和短提交哈希，`gitCommit` 会在其后追加指向该提交的标签，且仅在开启 `gitBranch` 时生效；关闭 `extensionStatuses` 会隐藏整行扩展状态，其中也包括 MCP 状态。每条状态会保留其扩展通过 `ctx.ui.theme.fg()` 设置的颜色；未设置颜色的状态使用 muted 主题色显示。
 
@@ -146,6 +150,25 @@ TPS 的计算方式是：将本次运行中服务商报告的全部 Assistant �
 ```
 
 该字幕仅在模型真正输出推理内容后出现，非推理模型不会显示。可见性由 Pi 自身的 Hide thinking 开关控制，切换后立即生效。每一行都按*显示宽度*截断（全角字符计 2 列），因此包含中文的思考文本也不会溢出终端。可在 `/open-tui` 的**常规 → 思考预览**中切换，或直接修改 `open-tui.json` 中的 `thinkingPeek.lines`。
+
+## 工具视图
+
+将**常规 → 工具视图**设为**紧凑**（`toolView.mode: "compact"`）后，Pi 内置工具（`read`、`bash`、`powershell`、`edit`、`write`、`grep`、`find`、`ls`）显示为一行调用加一行摘要：
+
+```text
+● Read(extensions/open-tui/footer.ts:1-120)
+  └  120 lines
+● Edit(extensions/open-tui/footer.ts)
+  └  +2 −1
+● Bash(npm test)
+  └  Done · 131 lines · 6.4s
+```
+
+- Shell 命令运行中会显示最新 3 行输出和已用时间。
+- 圆点运行中为黄色、完成为绿色、失败为红色；失败的调用同样保持紧凑行，并显示红色摘要；Shell 命令的摘要末尾带上最后一行输出（如 `Exited with code 1 · 12 lines · 1.2s · FAIL tests/a.test.ts`），按 Ctrl+O 查看完整输出。
+- 点击某行只展开这一行为 Pi 原生卡片，`Ctrl+O` 展开全部行；完整输出、diff 和截断提示保持不变。
+- 只改变显示：工具、参数、结果以及模型看到的内容都不受影响，第三方和 MCP 工具保持各自的渲染。
+- 模式在 Pi 创建某行时确定，因此切换只影响新建的行；执行 `/reload` 或新开会话后整个记录都会应用。
 
 ## 本地开发
 

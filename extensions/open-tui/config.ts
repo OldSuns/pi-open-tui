@@ -6,6 +6,7 @@ import type { IconMode } from "./icons.ts";
 export type SettingsLanguage = "en" | "zh";
 export type CursorStyle = "block" | "bar" | "underline";
 export type ThinkingPeekLines = 0 | 1 | 2;
+export type ToolViewMode = "native" | "compact";
 
 export type { IconMode } from "./icons.ts";
 
@@ -53,6 +54,9 @@ export interface OpenTuiConfig {
 	footerSegments: FooterSegments;
 	telemetry: TelemetryConfig;
 	thinkingPeek: ThinkingPeekConfig;
+	toolView: {
+		mode: ToolViewMode;
+	};
 }
 
 export const DEFAULT_CONFIG: OpenTuiConfig = {
@@ -91,6 +95,9 @@ export const DEFAULT_CONFIG: OpenTuiConfig = {
 	},
 	thinkingPeek: {
 		lines: 1,
+	},
+	toolView: {
+		mode: "native",
 	},
 };
 
@@ -184,6 +191,10 @@ export function loadConfig(notify?: (msg: string, level: "warning" | "info") => 
 			config.thinkingPeek = structuredClone(DEFAULT_CONFIG.thinkingPeek);
 		} else {
 			config.thinkingPeek.lines = normalizeThinkingPeekLines(config.thinkingPeek.lines);
+		}
+		if (typeof config.toolView !== "object" || config.toolView === null
+			|| (config.toolView.mode !== "native" && config.toolView.mode !== "compact")) {
+			config.toolView = structuredClone(DEFAULT_CONFIG.toolView);
 		}
 		return config;
 	} catch (err) {
