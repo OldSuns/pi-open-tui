@@ -20,7 +20,7 @@ A polished terminal interface for the [Pi](https://pi.dev) coding agent. It brin
 
 ## Requirements
 
-- Pi 1.0 or later
+- Pi 1.1 or later
 - A terminal with UTF-8 and color support
 - A [Nerd Font](https://www.nerdfonts.com/font-downloads) for the full icon set (optional; portable Unicode icons are built in)
 
@@ -93,6 +93,9 @@ Run `/open-tui` to open the settings dialog. It provides **General**, **Appearan
   },
   "thinkingPeek": {
     "lines": 1
+  },
+  "toolView": {
+    "mode": "native"
   }
 }
 ```
@@ -110,6 +113,7 @@ Key options:
 | `footerSegments.nerdIconSpacing` | Boolean | Adds an extra blank cell after Nerd Font icons in the footer; defaults to `false` |
 | `telemetry` | Boolean flags | Enables telemetry and its individual measurements |
 | `thinkingPeek.lines` | `0`, `1`, `2` | Off, one-line, or two-line hidden thinking preview |
+| `toolView.mode` | `native`, `compact` | Draws built-in tool calls as Pi's cards or as compact two-line rows; defaults to `native`. Applies to rows created after the change |
 
 `sessionName` appears only when the session has a name. `hostname` shows the short host name (first label of the machine's host name, e.g. `mba` from `mba.example.com`) with a server icon. In detached HEAD state, `gitBranch` shows `HEAD` with the short commit hash; `gitCommit` appends the tag pointing at that commit and only takes effect while `gitBranch` is on. Disabling `extensionStatuses` hides the entire extension status line, including MCP status. Each status keeps the colours its extension applied with `ctx.ui.theme.fg()`. A status without colours renders in the muted theme colour.
 
@@ -144,6 +148,25 @@ When Pi's **Hide thinking** setting is enabled, pi-open-tui shows a compact tick
 ```
 
 The ticker appears only once the model actually streams reasoning, so non-reasoning models never show it. Pi's own Hide thinking toggle controls visibility; changing it takes effect immediately. Each row is truncated by *visible* width, so CJK-wide thinking text cannot overflow. Configure it from **General → Thinking peek** in `/open-tui`, or via `thinkingPeek.lines` in `open-tui.json`.
+
+## Tool view
+
+With **General → Tool view** set to **Compact** (`toolView.mode: "compact"`), Pi's built-in tools (`read`, `bash`, `powershell`, `edit`, `write`, `grep`, `find`, `ls`) render as one call line and one summary line:
+
+```text
+● Read(extensions/open-tui/footer.ts:1-120)
+  └  120 lines
+● Edit(extensions/open-tui/footer.ts)
+  └  +2 −1
+● Bash(npm test)
+  └  Done · 131 lines · 6.4s
+```
+
+- While a shell command runs, the newest 3 output lines and the elapsed time are shown.
+- The dot is yellow while running, green when done, and red when failed. Failed calls always show Pi's native card.
+- Clicking a row expands only that row into Pi's native card, and `Ctrl+O` expands all rows. The full output, diff, and truncation notices are unchanged.
+- Only the display changes. Tools, arguments, results, and what the model sees are untouched, and third-party or MCP tools keep their own rendering.
+- The mode is chosen when Pi creates a row, so switching it affects new rows; `/reload` or a new session applies it to the whole transcript.
 
 ## Local development
 
