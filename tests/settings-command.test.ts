@@ -7,7 +7,7 @@ import type { ExtensionAPI, ExtensionContext, Theme } from "@earendil-works/pi-c
 import { visibleWidth, type Component, type KeybindingsManager, type TUI } from "@earendil-works/pi-tui";
 import { DEFAULT_CONFIG, loadConfig, type OpenTuiConfig } from "../extensions/open-tui/config.ts";
 import { installEditor } from "../extensions/open-tui/editor.ts";
-import { applyHeader, getPendingUiChange } from "../extensions/open-tui/index.ts";
+import openTui, { getPendingUiChange } from "../extensions/open-tui/index.ts";
 import { registerSettingsCommand } from "../extensions/open-tui/settings-command.ts";
 
 interface SettingsComponent extends Component {
@@ -270,35 +270,51 @@ test("configures inline footer from General settings", async () => {
 	assert.equal(settings.getConfig().inlineFooter, true);
 });
 
-test("toggles the open-tui header from General settings", async () => {
-	const settings = await openSettings();
-	settings.component.handleInput("\x1b[B");
-	assert.match(selectedLine(settings.component), /open-tui header/);
+test("toggles the header without resetting the slot while disabled", async () => {
+	const agentDir = mkdtempSync(join(tmpdir(), "pi-open-tui-"));
+	const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+	try {
+		process.env.PI_CODING_AGENT_DIR = agentDir;
+		writeFileSync(join(agentDir, "open-tui.json"), JSON.stringify({ ...DEFAULT_CONFIG, header: false }));
+		const handlers = new Map<string, (event: unknown, ctx: ExtensionContext) => unknown>();
+		let command: ((args: string, ctx: ExtensionContext) => unknown) | undefined;
+		let settings: SettingsComponent | undefined;
+		const headers: unknown[] = [];
+		const pi = {
+			on: (event: string, handler: (event: unknown, ctx: ExtensionContext) => unknown) => handlers.set(event, handler),
+			registerCommand: (_name: string, options: { handler: typeof command }) => (command = options.handler),
+		} as unknown as ExtensionAPI;
+		const ctx = {
+			hasUI: true,
+			mode: "tui",
+			// Git/runtime probes spawn in cwd; keeping them out of agentDir lets Windows delete it.
+			cwd: process.cwd(),
+			ui: {
+				setFooter() {},
+				setEditorComponent() {},
+				setHeader: (factory: unknown) => headers.push(factory),
+				custom: (factory: (tui: TUI, theme: Theme) => SettingsComponent) =>
+					void (settings = factory({ requestRender() {} } as TUI, theme)),
+			},
+		} as unknown as ExtensionContext;
 
-	settings.component.handleInput(" ");
-	assert.equal(settings.getConfig().header, false);
-	assert.match(selectedLine(settings.component), /open-tui header/);
+		openTui(pi);
+		await handlers.get("session_start")?.({ type: "session_start" }, ctx);
+		assert.deepEqual(headers, [], "a disabled header must not reset another extension's header");
 
-	settings.component.handleInput(" ");
-	assert.equal(settings.getConfig().header, true);
-});
-
-test("restores Pi's built-in header when the open-tui header is disabled", () => {
-	const factories: unknown[] = [];
-	const ctx = {
-		ui: { setHeader: (factory: unknown) => factories.push(factory) },
-	} as unknown as ExtensionContext;
-	const pi = { getCommands: () => [] } as unknown as ExtensionAPI;
-
-	assert.equal(applyHeader(pi, ctx, false), undefined);
-	assert.deepEqual(factories, [undefined]);
-
-	const cleanup = applyHeader(pi, ctx, true);
-	assert.equal(factories.length, 2);
-	assert.equal(typeof factories[1], "function");
-	assert.ok(cleanup);
-	cleanup();
-	assert.deepEqual(factories, [undefined, factories[1], undefined]);
+		void command?.("", ctx);
+		assert.ok(settings);
+		settings.handleInput("\x1b[B");
+		assert.match(selectedLine(settings), /Override header/);
+		settings.handleInput(" ");
+		settings.handleInput(" ");
+		assert.equal(typeof headers[0], "function");
+		assert.deepEqual(headers.slice(1), [undefined], "disabling restores Pi's built-in header once");
+	} finally {
+		if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+		else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+		rmSync(agentDir, { recursive: true, force: true });
+	}
 });
 
 test("configures the hostname footer segment", async () => {

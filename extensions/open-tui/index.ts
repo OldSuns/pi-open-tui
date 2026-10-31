@@ -30,18 +30,6 @@ export function getPendingUiChange(enabled: boolean, active: boolean): PendingUi
 	return enabled ? "install" : "uninstall";
 }
 
-/** Install the open-tui header, or restore Pi's built-in header when disabled. */
-export function applyHeader(
-	pi: ExtensionAPI,
-	ctx: ExtensionContext,
-	enabled: boolean,
-): (() => void) | undefined {
-	if (enabled) return installHeader(pi, ctx);
-	// Passing undefined restores the built-in header.
-	ctx.ui.setHeader(undefined);
-	return undefined;
-}
-
 function isTuiContext(ctx: ExtensionContext): boolean {
 	try {
 		const mode = (ctx as ExtensionContext & { mode?: string }).mode;
@@ -126,7 +114,8 @@ export default function (pi: ExtensionAPI) {
 			return;
 		}
 		if (!active) {
-			cleanupHeader = applyHeader(pi, ctx, config.header);
+			// Leave the header slot alone when disabled so another extension's header survives.
+			if (config.header) cleanupHeader = installHeader(pi, ctx);
 			const footer = installFooter(
 				ctx,
 				() => state,
@@ -397,7 +386,7 @@ export default function (pi: ExtensionAPI) {
 			}
 			if (headerChanged && active && lastCtx) {
 				cleanupHeader?.();
-				cleanupHeader = applyHeader(pi, lastCtx, newConfig.header);
+				cleanupHeader = newConfig.header ? installHeader(pi, lastCtx) : undefined;
 			}
 			if (lastCtx) {
 				pendingUiChange = getPendingUiChange(newConfig.enabled, active);

@@ -28,7 +28,7 @@ const COPY = {
 		hint: "Tab/Shift+Tab/←/→: tabs · ↑/↓: move · Enter/Space: change · Esc/q: close",
 		labels: {
 			enabled: "Enabled",
-			header: "open-tui header",
+			header: "Override header",
 			inlineFooter: "Footer in editor border",
 			thinkingPeek: "Thinking peek",
 			language: "Language",
@@ -68,7 +68,7 @@ const COPY = {
 		hint: "Tab/Shift+Tab/←/→：切页 · ↑/↓：移动 · Enter/Space：更改 · Esc/q：关闭",
 		labels: {
 			enabled: "启用",
-			header: "open-tui 顶部信息栏",
+			header: "覆盖顶部信息栏",
 			inlineFooter: "底栏嵌入输入框",
 			thinkingPeek: "思考预览",
 			language: "语言",
