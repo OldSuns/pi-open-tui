@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { join, resolve } from "node:path";
 import test from "node:test";
 import type { ExtensionAPI, Theme, ToolRenderers } from "@earendil-works/pi-coding-agent";
 import type { Component } from "@earendil-works/pi-tui";
@@ -6,11 +7,21 @@ import { resolveGlyphs } from "../extensions/open-tui/icons.ts";
 import {
 	callDetail,
 	createCompactRenderers,
+	displayPath,
 	firstLine,
 	registerToolView,
 	summarizeResult,
 	tailLines,
 } from "../extensions/open-tui/tool-view.ts";
+
+test("home paths shorten only inside the home directory", () => {
+	const home = resolve("/home/sam");
+	const cwd = resolve("/work/repo");
+	assert.equal(displayPath(join(home, "x", "a.ts"), cwd, home), "~/x/a.ts");
+	assert.equal(displayPath(home, cwd, home), "~");
+	const sibling = resolve("/home/sam-old/file.ts");
+	assert.equal(displayPath(sibling, cwd, home), sibling);
+});
 
 type RenderCall = NonNullable<ToolRenderers["renderCall"]>;
 type RenderContext = Parameters<RenderCall>[2];

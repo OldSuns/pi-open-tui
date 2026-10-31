@@ -1,5 +1,5 @@
 import { homedir } from "node:os";
-import { isAbsolute, relative } from "node:path";
+import { isAbsolute, relative, sep } from "node:path";
 import type { ExtensionAPI, Theme, ThemeColor, ToolRenderers } from "@earendil-works/pi-coding-agent";
 import { Box, type Component, Spacer, stripTerminalSequences, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import type { ToolViewMode } from "./config.ts";
@@ -48,7 +48,10 @@ function cleanOutput(text: string): string {
 	return stripTerminalSequences(text)
 		.replace(/\r\n/g, "\n")
 		.split("\n")
-		.map((line) => line.slice(line.lastIndexOf("\r") + 1))
+		.map((line) => {
+			const frames = line.replace(/\r+$/, "");
+			return frames.slice(frames.lastIndexOf("\r") + 1);
+		})
 		.join("\n")
 		.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\uFFF9-\uFFFB]/g, "");
 }
@@ -88,12 +91,18 @@ export function tailLines(text: string, count: number): string[] {
 	return lines.slice(-count);
 }
 
-function displayPath(path: string, cwd: string): string {
+/** `rel` when `path` is `base` or inside it; undefined for siblings such as `/home/sam-old`. */
+function inside(base: string, path: string): string | undefined {
+	const rel = relative(base, path);
+	return rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel) ? rel.split(sep).join("/") : undefined;
+}
+
+export function displayPath(path: string, cwd: string, home = homedir()): string {
 	if (!path || !isAbsolute(path)) return path;
-	const rel = relative(cwd, path);
-	if (rel && !rel.startsWith("..") && !isAbsolute(rel)) return rel.split("\\").join("/");
-	const home = homedir();
-	return path.startsWith(home) ? `~${path.slice(home.length)}` : path;
+	const inCwd = inside(cwd, path);
+	if (inCwd) return inCwd;
+	const inHome = inside(home, path);
+	return inHome === undefined ? path : inHome ? `~/${inHome}` : "~";
 }
 
 function lineRange(offset: unknown, limit: unknown): string {
