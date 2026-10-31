@@ -318,6 +318,7 @@ test("normalizes invalid settings values", () => {
 			cursorStyle: "invalid",
 			inlineFooter: "yes",
 			thinkingPeek: { lines: 9 },
+			toolView: { mode: "hidden" },
 			fullscreen: { wheelScrollLines: 10 },
 		}), "utf8");
 		const loaded = loadConfig();
@@ -325,6 +326,7 @@ test("normalizes invalid settings values", () => {
 		assert.equal(loaded.cursorStyle, "block");
 		assert.equal(loaded.inlineFooter, false);
 		assert.equal(loaded.thinkingPeek.lines, 1);
+		assert.equal(loaded.toolView.mode, "native");
 		assert.equal("fullscreen" in loaded, true);
 	} finally {
 		if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
