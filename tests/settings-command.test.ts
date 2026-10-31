@@ -7,7 +7,7 @@ import type { ExtensionAPI, ExtensionContext, Theme } from "@earendil-works/pi-c
 import { visibleWidth, type Component, type KeybindingsManager, type TUI } from "@earendil-works/pi-tui";
 import { DEFAULT_CONFIG, loadConfig, type OpenTuiConfig } from "../extensions/open-tui/config.ts";
 import { installEditor } from "../extensions/open-tui/editor.ts";
-import { getPendingUiChange } from "../extensions/open-tui/index.ts";
+import openTui, { getPendingUiChange } from "../extensions/open-tui/index.ts";
 import { registerSettingsCommand } from "../extensions/open-tui/settings-command.ts";
 
 interface SettingsComponent extends Component {
@@ -242,6 +242,7 @@ test("supports localized settings and keyboard shortcuts", async () => {
 	assert.match(settings.component.render(80).join("\n"), /Open TUI Settings.*General.*Language/s);
 
 	settings.component.handleInput("\x1b[B");
+	settings.component.handleInput("\x1b[B");
 	settings.component.handleInput(" ");
 	assert.equal(settings.getConfig().settingsLanguage, "zh");
 	assert.match(settings.component.render(80).join("\n"), /Open TUI 设置.*常规.*语言.*简体中文/s);
@@ -250,6 +251,7 @@ test("supports localized settings and keyboard shortcuts", async () => {
 	const reopened = await openSettings(structuredClone(settings.getConfig()));
 	assert.match(reopened.component.render(80).join("\n"), /Open TUI 设置.*简体中文/s);
 
+	reopened.component.handleInput("\x1b[B");
 	reopened.component.handleInput("\x1b[B");
 	reopened.component.handleInput("\x1b[C");
 	assert.match(reopened.component.render(80).join("\n"), /\[外观\].*图标模式.*光标样式/s);
@@ -261,11 +263,58 @@ test("supports localized settings and keyboard shortcuts", async () => {
 
 test("configures inline footer from General settings", async () => {
 	const settings = await openSettings();
-	// Enabled → Language → Thinking peek → Footer in editor border
-	for (let i = 0; i < 3; i++) settings.component.handleInput("\x1b[B");
+	// Enabled → Header → Language → Thinking peek → Footer in editor border
+	for (let i = 0; i < 4; i++) settings.component.handleInput("\x1b[B");
 	assert.match(selectedLine(settings.component), /Footer in editor border/);
 	settings.component.handleInput(" ");
 	assert.equal(settings.getConfig().inlineFooter, true);
+});
+
+test("toggles the header without resetting the slot while disabled", async () => {
+	const agentDir = mkdtempSync(join(tmpdir(), "pi-open-tui-"));
+	const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+	try {
+		process.env.PI_CODING_AGENT_DIR = agentDir;
+		writeFileSync(join(agentDir, "open-tui.json"), JSON.stringify({ ...DEFAULT_CONFIG, header: false }));
+		const handlers = new Map<string, (event: unknown, ctx: ExtensionContext) => unknown>();
+		let command: ((args: string, ctx: ExtensionContext) => unknown) | undefined;
+		let settings: SettingsComponent | undefined;
+		const headers: unknown[] = [];
+		const pi = {
+			on: (event: string, handler: (event: unknown, ctx: ExtensionContext) => unknown) => handlers.set(event, handler),
+			registerCommand: (_name: string, options: { handler: typeof command }) => (command = options.handler),
+		} as unknown as ExtensionAPI;
+		const ctx = {
+			hasUI: true,
+			mode: "tui",
+			// Git/runtime probes spawn in cwd; keeping them out of agentDir lets Windows delete it.
+			cwd: process.cwd(),
+			ui: {
+				setFooter() {},
+				setEditorComponent() {},
+				setHeader: (factory: unknown) => headers.push(factory),
+				custom: (factory: (tui: TUI, theme: Theme) => SettingsComponent) =>
+					void (settings = factory({ requestRender() {} } as TUI, theme)),
+			},
+		} as unknown as ExtensionContext;
+
+		openTui(pi);
+		await handlers.get("session_start")?.({ type: "session_start" }, ctx);
+		assert.deepEqual(headers, [], "a disabled header must not reset another extension's header");
+
+		void command?.("", ctx);
+		assert.ok(settings);
+		settings.handleInput("\x1b[B");
+		assert.match(selectedLine(settings), /Override header/);
+		settings.handleInput(" ");
+		settings.handleInput(" ");
+		assert.equal(typeof headers[0], "function");
+		assert.deepEqual(headers.slice(1), [undefined], "disabling restores Pi's built-in header once");
+	} finally {
+		if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+		else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+		rmSync(agentDir, { recursive: true, force: true });
+	}
 });
 
 test("configures the hostname footer segment", async () => {
@@ -316,6 +365,7 @@ test("normalizes invalid settings values", () => {
 		writeFileSync(join(agentDir, "open-tui.json"), JSON.stringify({
 			settingsLanguage: "de",
 			cursorStyle: "invalid",
+			header: "no",
 			inlineFooter: "yes",
 			thinkingPeek: { lines: 9 },
 			fullscreen: { wheelScrollLines: 10 },
@@ -323,6 +373,7 @@ test("normalizes invalid settings values", () => {
 		const loaded = loadConfig();
 		assert.equal(loaded.settingsLanguage, "en");
 		assert.equal(loaded.cursorStyle, "block");
+		assert.equal(loaded.header, true);
 		assert.equal(loaded.inlineFooter, false);
 		assert.equal(loaded.thinkingPeek.lines, 1);
 		assert.equal("fullscreen" in loaded, true);
@@ -336,7 +387,8 @@ test("normalizes invalid settings values", () => {
 test("cycles the thinking peek line count from General settings", async () => {
 	const config = structuredClone(DEFAULT_CONFIG);
 	const settings = await openSettings(config);
-	// Enabled → Language → Thinking peek
+	// Enabled → Header → Language → Thinking peek
+	settings.component.handleInput("\x1b[B");
 	settings.component.handleInput("\x1b[B");
 	settings.component.handleInput("\x1b[B");
 	assert.match(selectedLine(settings.component), /Thinking peek/);

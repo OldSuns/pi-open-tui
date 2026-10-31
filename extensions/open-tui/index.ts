@@ -114,7 +114,8 @@ export default function (pi: ExtensionAPI) {
 			return;
 		}
 		if (!active) {
-			cleanupHeader = installHeader(pi, ctx);
+			// Leave the header slot alone when disabled so another extension's header survives.
+			if (config.header) cleanupHeader = installHeader(pi, ctx);
 			const footer = installFooter(
 				ctx,
 				() => state,
@@ -370,6 +371,7 @@ export default function (pi: ExtensionAPI) {
 		getConfig: () => config,
 		onConfigChanged: (newConfig) => {
 			const cursorStyleChanged = config.cursorStyle !== newConfig.cursorStyle;
+			const headerChanged = config.header !== newConfig.header;
 			const thinkingPeekLinesChanged = config.thinkingPeek.lines !== newConfig.thinkingPeek.lines;
 			saveConfig(newConfig);
 			config = newConfig;
@@ -381,6 +383,10 @@ export default function (pi: ExtensionAPI) {
 			}
 			if (cursorStyleChanged && active && editor) {
 				editor.setCursorStyle(newConfig.cursorStyle);
+			}
+			if (headerChanged && active && lastCtx) {
+				cleanupHeader?.();
+				cleanupHeader = newConfig.header ? installHeader(pi, lastCtx) : undefined;
 			}
 			if (lastCtx) {
 				pendingUiChange = getPendingUiChange(newConfig.enabled, active);

@@ -60,6 +60,7 @@ pi -e npm:pi-open-tui
 ```json
 {
   "enabled": true,
+  "header": true,
   "inlineFooter": false,
   "settingsLanguage": "zh",
   "cursorStyle": "block",
@@ -102,6 +103,7 @@ pi -e npm:pi-open-tui
 | 选项 | 可选值 | 说明 |
 | --- | --- | --- |
 | `settingsLanguage` | `en`、`zh` | 切换 `/open-tui` 设置界面的语言 |
+| `header` | `true`、`false` | 决定是否用 open-tui 顶部信息栏覆盖 Pi 的 Header；设为 `false` 时把顶部栏位置留给 Pi 或其他扩展 |
 | `inlineFooter` | `true`、`false` | 将两条主要 Footer 信息行移入编辑器上下边框以节省垂直空间，默认关闭；扩展状态行仍显示在编辑器外 |
 | `cursorStyle` | `block`、`bar`、`underline` | `bar` 和 `underline` 需要终端支持光标形状转义序列 |
 | `icons.mode` | `auto`、`nerd`、`unicode`、`ascii` | 控制底栏和遥测通知使用的图标 |
