@@ -365,7 +365,7 @@ test("excludes tool gaps between assistant messages", () => {
 		}
 		now = secondStartMs + 400;
 		endTurn(tracker, second, 1);
-		return tracker.handle({ type: "agent_settled" })!;
+		return tracker.handle({ type: "agent_settled", aborted: false })!;
 	}
 
 	assert.equal(measure(0).tps, 50);
@@ -392,7 +392,7 @@ test("includes every message's tokens and generation time", () => {
 	}
 	now = 700;
 	endTurn(tracker, measured, 1);
-	const telemetry = tracker.handle({ type: "agent_settled" })!;
+	const telemetry = tracker.handle({ type: "agent_settled", aborted: false })!;
 
 	assert.equal(telemetry.tps, 35.7);
 	assert.equal(telemetry.measurementMs, 700);
@@ -413,7 +413,7 @@ test("counts cache-write tokens as input, matching /session's uncached figure", 
 	tracker.handle(update(message));
 	now = 150;
 	endTurn(tracker, message);
-	const telemetry = tracker.handle({ type: "agent_settled" })!;
+	const telemetry = tracker.handle({ type: "agent_settled", aborted: false })!;
 
 	assert.equal(telemetry.inputTokens, 27099);
 	assert.equal(telemetry.cacheReadTokens, 5000);
@@ -455,7 +455,7 @@ test("aggregates all output and generation time across an agent run", () => {
 	now = 1_600;
 	endTurn(tracker, second, 2);
 	now = 1_700;
-	const telemetry = tracker.handle({ type: "agent_settled" })!;
+	const telemetry = tracker.handle({ type: "agent_settled", aborted: false })!;
 
 	assert.equal(telemetry.tps, 37.9);
 	assert.equal(telemetry.measurementMs, 1_450);
@@ -679,6 +679,6 @@ test("live TPS tracks the trailing window of the streaming message", () => {
 
 	// The run is over: nothing carries into the next one.
 	endTurn(tracker, message, 1);
-	tracker.handle({ type: "agent_settled" });
+	tracker.handle({ type: "agent_settled", aborted: false });
 	assert.equal(tracker.getLiveTps(), null);
 });
