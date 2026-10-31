@@ -157,11 +157,17 @@ function incomplete(result: ToolResult): string {
 	return (limit ? " · limit reached" : "") + (truncation(result).truncated ? " · truncated" : "");
 }
 
+/** Line count of shell output plus any incomplete-result hint. */
+function shellLines(output: string, result: ToolResult): string {
+	const text = output.trim();
+	const lines = text === "(no output)" ? 0 : truncation(result).totalLines ?? countLines(text);
+	return (lines === 0 ? "no output" : plural(lines, "line")) + incomplete(result);
+}
+
 /** One-line result summary for a finished, successful call. */
 export function summarizeResult(toolName: string, result: ToolResult, args: Args): string {
 	const raw = textOutput(result);
 	const text = stripNotice(raw);
-	const trunc = truncation(result);
 	switch (toolName) {
 		case "read": {
 			if (result.content.some((block) => block.type === "image")) return "image";
@@ -170,10 +176,8 @@ export function summarizeResult(toolName: string, result: ToolResult, args: Args
 			return plural(countLines(text), "line") + incomplete(result) + more;
 		}
 		case "bash":
-		case "powershell": {
-			const lines = text.trim() === "(no output)" ? 0 : trunc.totalLines ?? countLines(text.trim());
-			return `Done · ${lines === 0 ? "no output" : plural(lines, "line")}${incomplete(result)}`;
-		}
+		case "powershell":
+			return `Done · ${shellLines(text, result)}`;
 		case "edit": {
 			const diff = details(result).diff;
 			if (typeof diff !== "string") return "Edited";
@@ -201,6 +205,18 @@ export function summarizeResult(toolName: string, result: ToolResult, args: Args
 		default:
 			return "";
 	}
+}
+
+/** One-line summary for a failed call: the shell's closing status, otherwise the error's first line. */
+export function summarizeError(toolName: string, result: ToolResult): string {
+	const text = textOutput(result).trim();
+	// Pi ends failed shell output with "Command exited with code N", "Command aborted", etc.
+	const status = toolName === "bash" || toolName === "powershell" ? /(?:^|\n\n)Command ([^\n]+)$/.exec(text) : null;
+	if (status) {
+		const reason = status[1]!;
+		return `${reason[0]!.toUpperCase()}${reason.slice(1)} · ${shellLines(stripNotice(text.slice(0, status.index)), result)}`;
+	}
+	return text.split("\n").find((line) => line.trim())?.trim() ?? "Failed";
 }
 
 function formatElapsed(ms: number): string {
@@ -237,8 +253,8 @@ export function createCompactRenderers(
 ): ToolRenderers {
 	const label = TOOL_LABELS[toolName] ?? toolName;
 	const isShell = toolName === "bash" || toolName === "powershell";
-	// Expanded or failed rows hand off to Pi's own card so nothing is hidden.
-	const showNative = (context: RenderContext) => context.expanded || context.isError;
+	// Expanded rows hand off to Pi's own card so nothing is hidden.
+	const showNative = (context: RenderContext) => context.expanded;
 
 	return {
 		renderShell: "self",
@@ -297,12 +313,13 @@ export function createCompactRenderers(
 					return [...tail, theme.fg("warning", `Running…${elapsed}`)]
 						.map((line, index) => (index === 0 ? gutter : indent) + line);
 				}
+				const duration = isShell && context.durationMs !== undefined ? ` · ${formatElapsed(context.durationMs)}` : "";
+				if (context.isError) return [gutter + theme.fg("error", summarizeError(toolName, result) + duration)];
 				const summary = summarizeResult(toolName, result, args);
 				if (toolName === "edit" && /^\+\d+ −\d+$/.test(summary)) {
 					const [added, removed] = summary.split(" ");
 					return [gutter + theme.fg("toolDiffAdded", added!) + " " + theme.fg("toolDiffRemoved", removed!)];
 				}
-				const duration = isShell && context.durationMs !== undefined ? ` · ${formatElapsed(context.durationMs)}` : "";
 				return [gutter + theme.fg("muted", summary + duration)];
 			});
 		},

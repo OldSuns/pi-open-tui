@@ -10,6 +10,7 @@ import {
 	displayPath,
 	firstLine,
 	registerToolView,
+	summarizeError,
 	summarizeResult,
 	tailLines,
 } from "../extensions/open-tui/tool-view.ts";
@@ -162,11 +163,35 @@ test("running shell rows show a bounded live tail", () => {
 	assert.match(rendered[3]!, /^ {6}Running… \d+ms$/);
 });
 
-test("expanded and failed rows hand off to Pi's native card", () => {
-	for (const overrides of [{ expanded: true }, { isError: true }]) {
+test("failed rows stay compact with a red summary", () => {
+	const tagged = { ...theme, fg: (color: string, value: string) => `<${color}>${value}` } as unknown as Theme;
+	const { renderers } = fakeNative();
+	const compact = createCompactRenderers("bash", renderers, glyphs);
+	const ctx = context({ isError: true, durationMs: 1200 });
+	assert.deepEqual(compact.renderCall!({ command: "npm test" }, tagged, ctx).render(80), [
+		" <error>● <toolTitle>Bash<muted>(npm test)",
+	]);
+	assert.deepEqual(
+		compact.renderResult!(text("a\nb\n\nCommand exited with code 1"), { expanded: false, isPartial: false }, tagged, ctx).render(80),
+		["   <dim>└  <error>Exited with code 1 · 2 lines · 1.2s"],
+	);
+
+	assert.equal(summarizeError("bash", text("Command aborted")), "Aborted · no output");
+	assert.equal(
+		summarizeError("bash", text("x\n\n[Showing lines 2-3 of 3. Full output: /tmp/o]\n\nCommand timed out after 30 seconds", {
+			truncation: { truncated: true, totalLines: 3 },
+		})),
+		"Timed out after 30 seconds · 3 lines · truncated",
+	);
+	assert.equal(summarizeError("edit", text("Could not edit file: a.ts. Not found.\nmore")), "Could not edit file: a.ts. Not found.");
+	assert.equal(summarizeError("read", text("")), "Failed");
+});
+
+test("expanded rows hand off to Pi's native card", () => {
+	{
 		const { renderers } = fakeNative();
 		const compact = createCompactRenderers("bash", renderers, glyphs);
-		const ctx = context(overrides);
+		const ctx = context({ expanded: true, isError: true });
 		const call = compact.renderCall!({ command: "npm test" }, theme, ctx);
 		const result = compact.renderResult!(text("x"), { expanded: ctx.expanded, isPartial: false }, theme, ctx);
 		// Default-shell tools are wrapped in a padded card: blank, call, result, blank.

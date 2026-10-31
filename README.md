@@ -163,7 +163,7 @@ With **General → Tool view** set to **Compact** (`toolView.mode: "compact"`), 
 ```
 
 - While a shell command runs, the newest 3 output lines and the elapsed time are shown.
-- The dot is yellow while running, green when done, and red when failed. Failed calls always show Pi's native card.
+- The dot is yellow while running, green when done, and red when failed. Failed calls keep the compact row with a red summary such as `Exited with code 1 · 12 lines · 1.2s`; press Ctrl+O for the full output.
 - Clicking a row expands only that row into Pi's native card, and `Ctrl+O` expands all rows. The full output, diff, and truncation notices are unchanged.
 - Only the display changes. Tools, arguments, results, and what the model sees are untouched, and third-party or MCP tools keep their own rendering.
 - The mode is chosen when Pi creates a row, so switching it affects new rows; `/reload` or a new session applies it to the whole transcript.
