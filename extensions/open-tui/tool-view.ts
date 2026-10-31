@@ -1,6 +1,7 @@
+import { homedir } from "node:os";
 import { isAbsolute, relative } from "node:path";
 import type { ExtensionAPI, Theme, ThemeColor, ToolRenderers } from "@earendil-works/pi-coding-agent";
-import { Box, type Component, Spacer, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import { Box, type Component, Spacer, stripTerminalSequences, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import type { ToolViewMode } from "./config.ts";
 import type { IconGlyphs } from "./icons.ts";
 
@@ -39,11 +40,21 @@ function plural(count: number, one: string, many = `${one}s`): string {
 	return `${count} ${count === 1 ? one : many}`;
 }
 
-export function textOutput(result: ToolResult): string {
-	return result.content
-		.map((block) => (block.type === "text" ? block.text : ""))
+/**
+ * Streaming shell output arrives raw: drop escape sequences and control characters as Pi does,
+ * and keep only the text after a lone `\r` so progress bars show their latest frame.
+ */
+function cleanOutput(text: string): string {
+	return stripTerminalSequences(text)
+		.replace(/\r\n/g, "\n")
+		.split("\n")
+		.map((line) => line.slice(line.lastIndexOf("\r") + 1))
 		.join("\n")
-		.replace(/\r\n?/g, "\n");
+		.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\uFFF9-\uFFFB]/g, "");
+}
+
+export function textOutput(result: ToolResult): string {
+	return cleanOutput(result.content.map((block) => (block.type === "text" ? block.text : "")).join("\n"));
 }
 
 /** Drops Pi's trailing `[...]` notice (truncation, limits, continuation hints) and the blank line before it. */
@@ -73,14 +84,16 @@ export function firstLine(text: string): string {
 }
 
 export function tailLines(text: string, count: number): string[] {
-	const lines = text.replace(/\r\n?/g, "\n").split("\n").filter((line) => line.trim() !== "");
+	const lines = cleanOutput(text).split("\n").filter((line) => line.trim() !== "");
 	return lines.slice(-count);
 }
 
 function displayPath(path: string, cwd: string): string {
 	if (!path || !isAbsolute(path)) return path;
 	const rel = relative(cwd, path);
-	return rel && !rel.startsWith("..") && !isAbsolute(rel) ? rel.split("\\").join("/") : path;
+	if (rel && !rel.startsWith("..") && !isAbsolute(rel)) return rel.split("\\").join("/");
+	const home = homedir();
+	return path.startsWith(home) ? `~${path.slice(home.length)}` : path;
 }
 
 function lineRange(offset: unknown, limit: unknown): string {
