@@ -172,8 +172,8 @@ test("failed rows stay compact with a red summary", () => {
 		" <error>● <toolTitle>Bash<muted>(npm test)",
 	]);
 	assert.deepEqual(
-		compact.renderResult!(text("a\nb\n\nCommand exited with code 1"), { expanded: false, isPartial: false }, tagged, ctx).render(80),
-		["   <dim>└  <error>Exited with code 1 · 2 lines · 1.2s"],
+		compact.renderResult!(text("a\nFAIL b.test.ts\n\nCommand exited with code 1"), { expanded: false, isPartial: false }, tagged, ctx).render(80),
+		["   <dim>└  <error>Exited with code 1 · 2 lines · 1.2s · FAIL b.test.ts"],
 	);
 
 	assert.equal(summarizeError("bash", text("Command aborted")), "Aborted · no output");
@@ -181,7 +181,7 @@ test("failed rows stay compact with a red summary", () => {
 		summarizeError("bash", text("x\n\n[Showing lines 2-3 of 3. Full output: /tmp/o]\n\nCommand timed out after 30 seconds", {
 			truncation: { truncated: true, totalLines: 3 },
 		})),
-		"Timed out after 30 seconds · 3 lines · truncated",
+		"Timed out after 30 seconds · 3 lines · truncated · x",
 	);
 	assert.equal(summarizeError("edit", text("Could not edit file: a.ts. Not found.\nmore")), "Could not edit file: a.ts. Not found.");
 	assert.equal(summarizeError("read", text("")), "Failed");

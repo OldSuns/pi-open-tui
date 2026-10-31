@@ -207,14 +207,21 @@ export function summarizeResult(toolName: string, result: ToolResult, args: Args
 	}
 }
 
-/** One-line summary for a failed call: the shell's closing status, otherwise the error's first line. */
-export function summarizeError(toolName: string, result: ToolResult): string {
+/**
+ * One-line summary for a failed call: the shell's closing status plus its last output line,
+ * otherwise the error's first line.
+ */
+export function summarizeError(toolName: string, result: ToolResult, duration = ""): string {
 	const text = textOutput(result).trim();
 	// Pi ends failed shell output with "Command exited with code N", "Command aborted", etc.
 	const status = toolName === "bash" || toolName === "powershell" ? /(?:^|\n\n)Command ([^\n]+)$/.exec(text) : null;
 	if (status) {
 		const reason = status[1]!;
-		return `${reason[0]!.toUpperCase()}${reason.slice(1)} · ${shellLines(stripNotice(text.slice(0, status.index)), result)}`;
+		const output = stripNotice(text.slice(0, status.index));
+		// The last output line usually names the failure; it goes last so narrow rows cut it first.
+		const last = tailLines(output, 1)[0]?.trim();
+		const tail = last && last !== "(no output)" ? ` · ${last}` : "";
+		return `${reason[0]!.toUpperCase()}${reason.slice(1)} · ${shellLines(output, result)}${duration}${tail}`;
 	}
 	return text.split("\n").find((line) => line.trim())?.trim() ?? "Failed";
 }
@@ -314,7 +321,7 @@ export function createCompactRenderers(
 						.map((line, index) => (index === 0 ? gutter : indent) + line);
 				}
 				const duration = isShell && context.durationMs !== undefined ? ` · ${formatElapsed(context.durationMs)}` : "";
-				if (context.isError) return [gutter + theme.fg("error", summarizeError(toolName, result) + duration)];
+				if (context.isError) return [gutter + theme.fg("error", summarizeError(toolName, result, duration))];
 				const summary = summarizeResult(toolName, result, args);
 				if (toolName === "edit" && /^\+\d+ −\d+$/.test(summary)) {
 					const [added, removed] = summary.split(" ");
