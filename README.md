@@ -1,5 +1,7 @@
 # pi-open-tui
 
+[![omp status](https://omppackages.com/badge/pi-open-tui.svg)](https://omppackages.com/packages/pi-open-tui)
+
 **English** | [简体中文](./README.zh-CN.md)
 
 A polished terminal interface for the [Pi](https://pi.dev) coding agent. It brings the strongest ideas from pi-haiku, pi-claude-code-tui, and pi-zentui into one configurable extension.
