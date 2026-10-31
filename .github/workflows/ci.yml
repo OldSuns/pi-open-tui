@@ -1,0 +1,71 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: test · ${{ matrix.os }} · node ${{ matrix.node }} · pi ${{ matrix.pi }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        # Pi needs Node 22.19 or later.
+        node: ["22.19.0", "24"]
+        # 1.1.0 is the lowest supported Pi (#69); latest catches breaking Pi releases.
+        pi: ["1.1.0", latest]
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+
+      - run: npm ci --no-audit --no-fund
+
+      - name: Install Pi ${{ matrix.pi }}
+        shell: bash
+        run: |
+          version=$(npm view "@earendil-works/pi-coding-agent@${{ matrix.pi }}" version)
+          # Move every installed @earendil-works package to one version: Pi fails to load from a mixed tree.
+          packages=$(ls node_modules/@earendil-works | sed "s|.*|@earendil-works/&@$version|")
+          npm install --no-save --no-audit --no-fund $packages
+          found=$( (npm ls --all 2>/dev/null || true) | grep -oE '@earendil-works/[a-z0-9-]+@[0-9][^ ]*' | sort -u)
+          echo "$found"
+          if echo "$found" | grep -v "@$version\$"; then
+            echo "::error::Pi packages are not all at $version"
+            exit 1
+          fi
+
+      - name: Type check
+        run: npm run typecheck
+
+      - name: Tests
+        run: npm test
+
+  package:
+    name: package contents
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+
+      - name: List the files npm would publish
+        run: npm pack --dry-run --ignore-scripts
