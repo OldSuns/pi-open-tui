@@ -383,7 +383,9 @@ export function installEditor(
 		const originalRender = target.render;
 		let lastWidth: number | undefined;
 		let lastBuild: ((width: number) => string) | undefined;
-		target.render = function (this: HiddenThinkingLabelComponent, width: number): string[] {
+		let active = true;
+		const patched = function (this: HiddenThinkingLabelComponent, width: number): string[] {
+			if (!active) return originalRender.call(this, width);
 			const build = buildHiddenThinkingLabel;
 			const textWidth = hiddenThinkingTextWidth(width, this.outputPad);
 			if (build && (build !== lastBuild || textWidth !== lastWidth)) {
@@ -393,8 +395,11 @@ export function installEditor(
 			}
 			return originalRender.call(this, width);
 		};
+		target.render = patched;
 		restoreHiddenThinkingRender = () => {
-			target.render = originalRender;
+			active = false;
+			// Another copy of this extension may have wrapped us; unwinding then would drop its wrapper.
+			if (target.render === patched) target.render = originalRender;
 		};
 	};
 	// Only the fullscreen renderer clears and rewrites the whole screen on a forced render.
