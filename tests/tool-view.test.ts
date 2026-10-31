@@ -69,9 +69,16 @@ test("summaries describe each built-in tool in one line", () => {
 		"2 lines · truncated",
 	);
 	assert.equal(summarizeResult("read", { content: [{ type: "image", data: "", mimeType: "image/png" }], details: undefined }, {}), "image");
+	assert.equal(
+		summarizeResult("read", text("a\nb\n\n[40 more lines in file. Use offset=3 to continue.]"), { limit: 2 }),
+		"2 lines · more",
+	);
 	assert.equal(summarizeResult("bash", text("one\ntwo\n"), {}), "Done · 2 lines");
 	assert.equal(summarizeResult("bash", text("(no output)"), {}), "Done · no output");
-	assert.equal(summarizeResult("bash", text("tail", { truncation: { truncated: true, totalLines: 131 } }), {}), "Done · 131 lines");
+	assert.equal(
+		summarizeResult("bash", text("tail", { truncation: { truncated: true, totalLines: 131 } }), {}),
+		"Done · 131 lines · truncated",
+	);
 	assert.equal(summarizeResult("edit", text("ok", { diff: " 1 a\n-2 b\n+2 c\n+3 d" }), {}), "+2 −1");
 	assert.equal(summarizeResult("write", text("Successfully wrote"), { content: "x\ny\n" }), "2 lines written");
 	assert.equal(
@@ -80,6 +87,18 @@ test("summaries describe each built-in tool in one line", () => {
 	);
 	assert.equal(summarizeResult("grep", text("No matches found"), {}), "No matches");
 	assert.equal(summarizeResult("find", text("a.ts\nb.ts"), {}), "2 files");
+	assert.equal(
+		summarizeResult("find", text("a.ts\nb.ts\n\n[2 results limit reached]", { resultLimitReached: 2 }), {}),
+		"2 files · limit reached",
+	);
+	assert.equal(
+		summarizeResult("ls", text("a/\n\n[50KB limit reached]", { truncation: { truncated: true } }), {}),
+		"1 entry · truncated",
+	);
+	assert.equal(
+		summarizeResult("ls", text("a/\nb/\n\n[2 entries limit reached]", { entryLimitReached: 2 }), {}),
+		"2 entries · limit reached",
+	);
 	assert.equal(summarizeResult("ls", text("(empty directory)"), {}), "Empty");
 	assert.equal(summarizeResult("ls", text("a/\nb.ts"), {}), "2 entries");
 });

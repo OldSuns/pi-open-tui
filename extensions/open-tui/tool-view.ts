@@ -128,19 +128,29 @@ function truncation(result: ToolResult): { truncated: boolean; totalLines?: numb
 	return { truncated: truncated === true, totalLines: typeof totalLines === "number" ? totalLines : undefined };
 }
 
+/** Keeps the hint that a result is incomplete, which stripNotice drops from the text. */
+function incomplete(result: ToolResult): string {
+	const info = details(result);
+	const limit = ["matchLimitReached", "resultLimitReached", "entryLimitReached"].some((key) => info[key] !== undefined);
+	return (limit ? " · limit reached" : "") + (truncation(result).truncated ? " · truncated" : "");
+}
+
 /** One-line result summary for a finished, successful call. */
 export function summarizeResult(toolName: string, result: ToolResult, args: Args): string {
-	const text = stripNotice(textOutput(result));
+	const raw = textOutput(result);
+	const text = stripNotice(raw);
 	const trunc = truncation(result);
 	switch (toolName) {
 		case "read": {
 			if (result.content.some((block) => block.type === "image")) return "image";
-			return plural(countLines(text), "line") + (trunc.truncated ? " · truncated" : "");
+			// An explicit `limit` that stops early adds this notice without setting details.truncation.
+			const more = /\n\n\[\d+ more lines in file\.[^\n]*\]\s*$/.test(raw) ? " · more" : "";
+			return plural(countLines(text), "line") + incomplete(result) + more;
 		}
 		case "bash":
 		case "powershell": {
 			const lines = text.trim() === "(no output)" ? 0 : trunc.totalLines ?? countLines(text.trim());
-			return `Done · ${lines === 0 ? "no output" : plural(lines, "line")}`;
+			return `Done · ${lines === 0 ? "no output" : plural(lines, "line")}${incomplete(result)}`;
 		}
 		case "edit": {
 			const diff = details(result).diff;
@@ -160,13 +170,12 @@ export function summarizeResult(toolName: string, result: ToolResult, args: Args
 				matches++;
 				files.add(match[1]!);
 			}
-			const limit = details(result).matchLimitReached !== undefined ? " · limit reached" : "";
-			return `${plural(matches, "match", "matches")} in ${plural(files.size, "file")}${limit}`;
+			return `${plural(matches, "match", "matches")} in ${plural(files.size, "file")}${incomplete(result)}`;
 		}
 		case "find":
-			return text === "No files found matching pattern" ? "No files" : plural(countLines(text), "file");
+			return text === "No files found matching pattern" ? "No files" : plural(countLines(text), "file") + incomplete(result);
 		case "ls":
-			return text === "(empty directory)" ? "Empty" : plural(countLines(text), "entry", "entries");
+			return text === "(empty directory)" ? "Empty" : plural(countLines(text), "entry", "entries") + incomplete(result);
 		default:
 			return "";
 	}
