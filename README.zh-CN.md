@@ -20,7 +20,7 @@
 
 ## 环境要求
 
-- Pi 1.1 或更高版本
+- Pi 1.2 或更高版本
 - 支持 UTF-8 和彩色输出的终端
 - 使用完整图标集时需要 [Nerd Font](https://www.nerdfonts.com/font-downloads)（可选；内置可移植 Unicode 图标）
 

@@ -184,7 +184,7 @@ test("uses the terminal hardware cursor for non-block styles", () => {
 
 		assert.equal(hardwareCursor, true);
 		assert.ok(writes.includes(sequence), `${cursorStyle} cursor sequence was sent`);
-		assert.ok(lines.every((line) => !line.includes("\x1b[7m")), "software block cursor was removed");
+		assert.ok(lines.every((line) => !line.includes("\x1b_pi:fc")), "software block cursor was removed");
 	}
 });
 
@@ -360,7 +360,7 @@ test("keeps a hardware cursor after Pi re-applies its runtime settings", () => {
 	assert.equal(cursorEvents.at(-1), "show");
 
 	assert.ok(
-		editor.render(40).every((line) => !line.includes("\x1b[7m")),
+		editor.render(40).every((line) => !line.includes("\x1b_pi:fc")),
 		"software cursor stays stripped",
 	);
 	hostTui.stop();

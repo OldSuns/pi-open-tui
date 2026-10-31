@@ -20,7 +20,7 @@ A polished terminal interface for the [Pi](https://pi.dev) coding agent. It brin
 
 ## Requirements
 
-- Pi 1.1 or later
+- Pi 1.2 or later
 - A terminal with UTF-8 and color support
 - A [Nerd Font](https://www.nerdfonts.com/font-downloads) for the full icon set (optional; portable Unicode icons are built in)
 

@@ -81,8 +81,11 @@ function hiddenThinkingTextWidth(width: number, outputPad: unknown): number {
 	return Math.max(1, width - paddingX * 2);
 }
 
+// pi-tui's renderFakeCursor() markers (FAKE_CURSOR_START/END, not exported). Truncation can drop the end marker.
+const FAKE_CURSOR = /\x1b_pi:fc\x07([\s\S]*?)(?:\x1b_pi:\/fc\x07|$)/g;
+
 function removeSoftwareCursor(line: string, cursorMarker = ""): string {
-	return line.replace(/\x1b\[7m([\s\S]*?)\x1b\[0m/g, (_match, cursor: string) => {
+	return line.replace(FAKE_CURSOR, (_match, cursor: string) => {
 		const replacement = `${cursorMarker}${cursor}`;
 		cursorMarker = "";
 		return replacement;
