@@ -42,7 +42,7 @@ export interface ThinkingPeekConfig {
 
 export interface OpenTuiConfig {
 	enabled: boolean;
-	/** Use the open-tui header. When false, Pi's built-in header stays visible. */
+	/** Override Pi's header with the open-tui header. When false, the header slot is left to Pi or another extension. */
 	header: boolean;
 	inlineFooter: boolean;
 	settingsLanguage: SettingsLanguage;
