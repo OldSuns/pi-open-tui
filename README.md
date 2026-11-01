@@ -62,6 +62,7 @@ Run `/open-tui` to open the settings dialog. It provides **General**, **Appearan
   "enabled": true,
   "header": true,
   "inlineFooter": false,
+  "copyButtons": true,
   "settingsLanguage": "en",
   "cursorStyle": "block",
   "icons": {
@@ -108,6 +109,7 @@ Key options:
 | `settingsLanguage` | `en`, `zh` | Changes the `/open-tui` interface language |
 | `header` | `true`, `false` | Overrides Pi's header with the open-tui header; set it to `false` to leave the header slot to Pi or another extension |
 | `inlineFooter` | `true`, `false` | Moves the two main Footer rows into the editor's top and bottom borders; defaults to `false`. Extension status rows remain below the editor |
+| `copyButtons` | `true`, `false` | Frames code blocks and shows a clickable `[Copy]` label on code blocks and user messages in fullscreen mode; defaults to `true`. See [Copy buttons](#copy-buttons) |
 | `cursorStyle` | `block`, `bar`, `underline` | `bar` and `underline` require terminal cursor-shape support |
 | `icons.mode` | `auto`, `nerd`, `unicode`, `ascii` | Controls footer and telemetry icons |
 | `footerSegments` | Boolean flags | Shows or hides individual footer data |
@@ -169,6 +171,26 @@ With **General → Tool view** set to **Compact** (`toolView.mode: "compact"`), 
 - Clicking a row expands only that row into Pi's native card, and `Ctrl+O` expands all rows. The full output, diff, and truncation notices are unchanged.
 - Only the display changes. Tools, arguments, results, and what the model sees are untouched, and third-party or MCP tools keep their own rendering.
 - The mode is chosen when Pi creates a row, so switching it affects new rows; `/reload` or a new session applies it to the whole transcript.
+
+## Copy buttons
+
+In fullscreen mode (Pi's `tuiMode: "fullscreen"`), every fenced code block is drawn in a rounded frame with its language and an always-visible `[Copy]` label in the top border, and every user message gets a `[Copy]` label too. Click it to put the source text on the clipboard; Pi flashes `Copied!`.
+
+```text
+╭─ sh ─────────────── [Copy] ╮
+│ pi install npm:pi-open-tui │
+╰────────────────────────────╯
+```
+
+- Code blocks: the frame replaces the two fence rows, so a block keeps its height; long lines wrap inside the frame. The label copies the code without the fences, with indentation and tabs preserved. This applies to code in both user and assistant messages.
+- User messages: the label sits on the bubble's last row and copies the message as you typed it.
+- Whole assistant replies have no label; use Pi's `/copy` for that.
+- While a reply streams, its code blocks are framed without a label, so you cannot copy unfinished code. The label is also dropped when the frame is too narrow; thinking blocks keep Pi's plain fences.
+- Regular mode has no mouse capture, so code blocks keep Pi's plain fences there.
+- Drag-selecting across a frame includes its border characters and the `[Copy]` text.
+- If pi-pretty-tui is installed, its own code-block frames and copy buttons are kept and these are not drawn.
+
+Toggle it from **General → Copy buttons** in `/open-tui`, or via `copyButtons` in `open-tui.json`.
 
 ## Local development
 

@@ -429,6 +429,7 @@ export function installEditor(
 			tui.requestRender();
 		},
 		resetHiddenThinkingLabelTarget: resetHiddenThinkingTarget,
+		getTui: (): TUI | undefined => activeTui,
 		setCursorStyle(nextCursorStyle: CursorStyle): void {
 			currentCursorStyle = nextCursorStyle;
 			activeEditor?.setCursorStyle(nextCursorStyle, previousHardwareCursor);
