@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { ExtensionAPI, ExtensionContext, KeybindingsManager } from "@earendil-works/pi-coding-agent";
+import { VERSION, type ExtensionAPI, type ExtensionContext, type KeybindingsManager } from "@earendil-works/pi-coding-agent";
 import { TuiMainScreen, type EditorTheme, type Terminal, type TUI, visibleWidth } from "@earendil-works/pi-tui";
 import { installEditor, OpenTuiEditor, repaintAfterStreamWrites } from "../extensions/open-tui/editor.ts";
+import { OpenTuiHeader } from "../extensions/open-tui/header.ts";
 import { stripAnsi } from "../extensions/open-tui/utils.ts";
 
 const tui = {
@@ -34,6 +35,24 @@ test("compensates Pi editor padding for the custom left rail", () => {
 	const contentLine = stripAnsi(editor.render(40)[1] ?? "");
 
 	assert.equal(contentLine.indexOf("x"), 2);
+});
+
+test("preserves legal editor text that resembles a border or scroll indicator", () => {
+	for (const [width, text] of [
+		[40, "↑ 3 more"],
+		[40, "↓ 2 more"],
+		[40, "─── ↑ 3 more ───"],
+		[5, "─"],
+	] as const) {
+		const editor = new OpenTuiEditor(
+			tui,
+			editorTheme,
+			{ matches: () => false } as unknown as KeybindingsManager,
+		);
+		editor.setText(`${text}\nx`);
+
+		assert.equal(stripAnsi(editor.render(width)[1] ?? ""), `│ ${text.padEnd(width - 4)} │`);
+	}
 });
 
 test("maps framed editor clicks to the Pi editor coordinate space", () => {
@@ -116,7 +135,7 @@ test("renders inline footer lines in the editor frame", () => {
 		"block",
 		{
 			enabled: () => true,
-			render: (width) => ({
+			render: () => ({
 				top: { left: "cwd", right: "context" },
 				bottom: { left: "model", right: "stats" },
 			}),
@@ -265,6 +284,7 @@ test("does not override Pi's native fullscreen wheel setting", () => {
 
 	const editor = installEditor({} as ExtensionAPI, ctx);
 	assert.equal(wheelSettingChanges, 0);
+	assert.equal(editor.getTui(), fullscreenTui);
 	editor.cleanup();
 	assert.equal(wheelSettingChanges, 0);
 });
@@ -364,6 +384,57 @@ test("keeps a hardware cursor after Pi re-applies its runtime settings", () => {
 		"software cursor stays stripped",
 	);
 	hostTui.stop();
+});
+
+function createHeader(accent = "\x1b[35m"): OpenTuiHeader {
+	return new OpenTuiHeader(
+		{
+			getCommands: () => [],
+			getThinkingLevel: () => "off",
+		} as unknown as ExtensionAPI,
+		{
+			cwd: process.cwd(),
+			ui: {
+				theme: {
+					fg: (color: string, text: string) => color === "accent" ? `${accent}${text}\x1b[39m` : text,
+					bold: (text: string) => text,
+				},
+			},
+		} as unknown as ExtensionContext,
+		tui,
+	);
+}
+
+test("clips the compact header to every narrow viewport width", () => {
+	const header = createHeader();
+	for (let width = 0; width < 24; width++) {
+		const lines = header.render(width);
+		assert.equal(lines.length, 1);
+		assert.ok(lines.every((line) => visibleWidth(line) <= width), `header width ${width}`);
+		assert.equal(stripAnsi(lines[0] ?? ""), `Pi v${VERSION}`.slice(0, width));
+	}
+});
+
+test("keeps the static seven-row logo shape, spacing, and per-cell theme coloring", () => {
+	const logo = [
+		"            ",
+		"            ",
+		"█████████   ",
+		"███   ███   ",
+		"██████   ███",
+		"███      ███",
+		"            ",
+	];
+	for (const accent of ["\x1b[35m", "\x1b[36m"]) {
+		const header = createHeader(accent);
+		const paint = (text: string) => `${accent}${text}\x1b[39m`;
+		const expected = logo.map((line) =>
+			`${paint("│")}${" ".repeat(13)}${line.replace(/███/g, paint)}${" ".repeat(13)}${paint("│")}`,
+		);
+		assert.deepEqual(header.render(40).slice(1, 8), expected);
+		header.invalidate();
+		assert.deepEqual(header.render(40).slice(1, 8), expected);
+	}
 });
 
 function fakeTtyStream(written: string[], isTTY = true) {

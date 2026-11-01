@@ -146,6 +146,51 @@ test("preserves Git status for unborn branches and detached HEAD", async () => {
 	}
 });
 
+test("counts Git stashes from explicit-format list entries", async () => {
+	const root = mkdtempSync(join(tmpdir(), "open-tui-git-"));
+	try {
+		execFileSync("git", ["init", "-b", "main"], { cwd: root });
+		writeFileSync(join(root, "file.txt"), "initial\n");
+		execFileSync("git", ["add", "file.txt"], { cwd: root });
+		execFileSync("git", ["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-m", "init"], { cwd: root });
+		assert.equal((await readGitStatus(root)).stashed, 0);
+		for (const content of ["first\n", "second\n"]) {
+			writeFileSync(join(root, "file.txt"), content);
+			execFileSync("git", ["stash", "push", "-m", "123 is not the stash count"], { cwd: root });
+		}
+		assert.equal((await readGitStatus(root)).stashed, 2);
+		assert.equal((await readGitStatus(root, { readCounts: false })).stashed, 0);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+test("counts Git RM entries as renamed and modified while preserving deletions", async () => {
+	const root = mkdtempSync(join(tmpdir(), "open-tui-git-"));
+	try {
+		execFileSync("git", ["init", "-b", "main"], { cwd: root });
+		for (const file of ["original.txt", "staged-delete.txt", "worktree-delete.txt"]) {
+			writeFileSync(join(root, file), "initial\n");
+		}
+		execFileSync("git", ["add", "."], { cwd: root });
+		execFileSync("git", ["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-m", "init"], { cwd: root });
+		execFileSync("git", ["mv", "original.txt", "renamed.txt"], { cwd: root });
+		writeFileSync(join(root, "renamed.txt"), "modified after rename\n");
+		execFileSync("git", ["rm", "staged-delete.txt"], { cwd: root });
+		rmSync(join(root, "worktree-delete.txt"));
+		assert.match(execFileSync("git", ["status", "--porcelain=v1"], { cwd: root, encoding: "utf8" }), /^RM original.txt -> renamed.txt$/m);
+
+		const status = await readGitStatus(root);
+		assert.equal(status.renamed, 1);
+		assert.equal(status.modified, 1);
+		assert.equal(status.deleted, 2);
+		assert.equal(status.staged, 0);
+		assert.equal(status.conflicted, 0);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
 test("branch truncation preserves the branch prefix", () => {
 	assert.equal(truncateBranch("fix/cwd-footer-truncation", 20), "fix/cwd-footer-tr...");
 	assert.equal(truncateBranch("main", 20), "main");
@@ -226,16 +271,16 @@ test("footer layout terminates and drops unshrinkable segments", () => {
 		},
 	]);
 	assert.ok(visibleWidth(fitted!.join(" ")) <= 10);
-	assert.deepEqual(dropped, ["keep"]);
+	assert.deepEqual(dropped, ["", "keep"]);
 });
 
 test("footer compacts cwd before truncating lower-priority segments", () => {
 	assert.deepEqual(
 		fitSegmentsByPriority(
 			[
-				{ text: "@ ~/projects/pi-open-tui", compactText: "@ pi-open-tui", priority: 0 },
-				{ text: "* fix/cwd-footer-truncation", priority: 3 },
-				{ text: "node 24.6.0", priority: 4 },
+				{ text: "@ ~/projects/pi-open-tui", compactText: "@ pi-open-tui", priority: 4 },
+				{ text: "* fix/cwd-footer-truncation", priority: 1 },
+				{ text: "node 24.6.0", priority: 0 },
 			],
 			53,
 		),
@@ -243,7 +288,8 @@ test("footer compacts cwd before truncating lower-priority segments", () => {
 	);
 });
 
-test("narrow footer keeps the cwd basename and drops runtime first", () => {
+test("narrow plain and inline footers keep cwd before runtime and context", () => {
+	let cwd = "/work/projects/pi-open-tui";
 	let footerFactory: NonNullable<Parameters<ExtensionContext["ui"]["setFooter"]>[0]> | undefined;
 	const ctx = {
 		model: { provider: "openai", contextWindow: 1_000 },
@@ -253,7 +299,8 @@ test("narrow footer keeps the cwd basename and drops runtime first", () => {
 			},
 		},
 		sessionManager: {
-			getCwd: () => "/work/projects/pi-open-tui",
+			getCwd: () => cwd,
+			getLeafId: () => null,
 			getEntries: () => [],
 			getSessionName: () => undefined,
 		},
@@ -264,11 +311,10 @@ test("narrow footer keeps the cwd basename and drops runtime first", () => {
 	const state: FooterState = {
 		git: { ...emptyGitStatus(), branch: "main" },
 		runtime: { name: "nodejs", version: "24.6.0" },
-		sessionStartEpoch: Date.now(),
 		workingSince: undefined,
 		lastDoneIn: undefined,
 	};
-	installFooter(
+	const handle = installFooter(
 		ctx,
 		() => state,
 		() => config,
@@ -290,6 +336,24 @@ test("narrow footer keeps the cwd basename and drops runtime first", () => {
 	const out = component.render(59).join("\n");
 	assert.ok(out.includes("pi-o"), `cwd basename prefix missing\n${out}`);
 	assert.ok(!out.includes("~/work/projects"), `full cwd should be compacted\n${out}`);
+
+	// A short basename fits intact even at the width where context is dropped.
+	// Git must stay beside cwd rather than being popped into the context slot.
+	cwd = "/work/projects/app";
+	const narrow = component.render(16)[0]!;
+	assert.match(narrow, /^@ app \* main +$/);
+	assert.doesNotMatch(narrow, /node|%/);
+	const inline = handle.renderInline(16)!;
+	assert.equal(inline.top.left, "* main");
+	assert.equal(inline.top.right, "@ app");
+	for (let width = 0; width <= 120; width++) {
+		for (const line of component.render(width)) assert.ok(visibleWidth(line) <= width);
+		const fitted = handle.renderInline(width)!;
+		for (const line of [fitted.top, fitted.bottom]) {
+			const gap = line.left && line.right ? 1 : 0;
+			assert.ok(visibleWidth(line.left) + gap + visibleWidth(line.right) <= width, `inline exceeds ${width}`);
+		}
+	}
 });
 
 test("narrow footer sheds the context bar before left segments", () => {
@@ -303,6 +367,7 @@ test("narrow footer sheds the context bar before left segments", () => {
 		},
 		sessionManager: {
 			getCwd: () => "/work/project",
+			getLeafId: () => null,
 			getEntries: () => [],
 			getSessionName: () => undefined,
 		},
@@ -313,7 +378,6 @@ test("narrow footer sheds the context bar before left segments", () => {
 	const state: FooterState = {
 		git: { ...emptyGitStatus(), branch: "main" },
 		runtime: null,
-		sessionStartEpoch: Date.now(),
 		workingSince: undefined,
 		lastDoneIn: undefined,
 	};
@@ -345,10 +409,10 @@ test("narrow footer sheds the context bar before left segments", () => {
 	assert.ok(!narrow.includes("250/1.0k"), `token counts should be compacted\n${narrow}`);
 	assert.ok(narrow.includes("project"), `cwd should survive\n${narrow}`);
 
-	// Extremely narrow: the context segment is truncated to nothing useful
-	// once it no longer fits even alone (everything else is already gone).
+	// Extremely narrow: context and git yield before the cwd is truncated.
 	const tiny = component.render(6).join("\n").split("\n")[0]!;
 	assert.ok(!tiny.includes("25.0%"), `context should be dropped\n${tiny}`);
+	assert.match(tiny, /^@ /);
 });
 
 test("provides inline footer content without duplicating native rows", () => {
@@ -362,6 +426,7 @@ test("provides inline footer content without duplicating native rows", () => {
 		},
 		sessionManager: {
 			getCwd: () => "/work/project",
+			getLeafId: () => null,
 			getEntries: () => [],
 			getSessionName: () => "session-title",
 		},
@@ -372,7 +437,6 @@ test("provides inline footer content without duplicating native rows", () => {
 	const state: FooterState = {
 		git: { ...emptyGitStatus(), branch: "main" },
 		runtime: null,
-		sessionStartEpoch: Date.now(),
 		workingSince: undefined,
 		lastDoneIn: undefined,
 	};
@@ -574,6 +638,62 @@ test("prefers Bun lockfiles while preserving the Node fallback", async () => {
 	}
 });
 
+test("detects runtime project suffixes and Java versions on either output stream", () => {
+	const root = mkdtempSync(join(tmpdir(), "open-tui-runtime-"));
+	try {
+		const script = `
+			import assert from "node:assert/strict";
+			import childProcess from "node:child_process";
+			import { syncBuiltinESMExports } from "node:module";
+			import { mkdirSync, writeFileSync } from "node:fs";
+			import { join } from "node:path";
+			import { promisify } from "node:util";
+			let stdout = "";
+			let stderr = "";
+			let fail = false;
+			childProcess.execFile = Object.assign(() => {}, {
+				[promisify.custom]: async () => {
+					if (fail) throw new Error("version command failed");
+					return { stdout, stderr };
+				},
+			});
+			syncBuiltinESMExports();
+			const { readRuntimeInfo, clearRuntimeCache } = await import(${JSON.stringify(pathToFileURL(join(import.meta.dirname, "..", "extensions", "open-tui", "runtime.ts")).href)});
+			const root = ${JSON.stringify(root)};
+			for (const key of ["MESON_DEVENV", "IN_NIX_SHELL", "GUIX_ENVIRONMENT", "CONDA_DEFAULT_ENV", "PIXI_ENVIRONMENT_NAME", "SPACK_ENV"]) delete process.env[key];
+			for (const [marker, name] of [
+				["app.csproj", "dotnet"], ["app.fsproj", "dotnet"],
+				["app.nimble", "nim"], ["app.Rproj", "r"],
+				["app.cabal", "haskell"], ["app.opam", "ocaml"],
+				["CMakeLists.txt", "cpp"], ["Makefile", "cpp"],
+			]) {
+				const cwd = join(root, marker);
+				mkdirSync(cwd);
+				writeFileSync(join(cwd, marker), "", "utf8");
+				assert.equal((await readRuntimeInfo(cwd))?.name, name, marker);
+			}
+			const cwd = join(root, "java");
+			mkdirSync(cwd);
+			writeFileSync(join(cwd, "pom.xml"), "", "utf8");
+			for (const stream of ["stdout", "stderr"]) {
+				stdout = stream === "stdout" ? 'openjdk version "21.0.2"' : "launcher notice\\n";
+				stderr = stream === "stderr" ? 'openjdk version "21.0.2"' : "";
+				clearRuntimeCache();
+				assert.deepEqual(await readRuntimeInfo(cwd), { name: "java", version: "21.0.2" });
+			}
+			fail = true;
+			clearRuntimeCache();
+			assert.deepEqual(await readRuntimeInfo(cwd), { name: "java", version: undefined });
+		`;
+		execFileSync(process.execPath, ["--input-type=module", "-e", script], {
+			encoding: "utf8",
+			timeout: 15_000,
+		});
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
 test("normalizes invalid usage totals", () => {
 	const usage = {
 		input: Number.POSITIVE_INFINITY,
@@ -584,6 +704,7 @@ test("normalizes invalid usage totals", () => {
 	};
 	const ctx = {
 		sessionManager: {
+			getLeafId: () => "invalid-usage",
 			getEntries: () => [{ id: "invalid-usage", timestamp: 1, type: "message", message: { role: "assistant", usage } }],
 		},
 	} as unknown as ExtensionContext;
@@ -607,6 +728,7 @@ test("usage totals count cache-write tokens as input, matching /session's uncach
 	};
 	const ctx = {
 		sessionManager: {
+			getLeafId: () => "cache-write",
 			getEntries: () => [{ id: "cache-write", timestamp: 1, type: "message", message: { role: "assistant", usage } }],
 		},
 	} as unknown as ExtensionContext;
@@ -651,7 +773,7 @@ test("usage totals include tool result and summary usage", () => {
 			usage: { input: 11, output: 4, cacheRead: 300, cacheWrite: 9, cost: { total: 0.04 } },
 		},
 	];
-	const ctx = { sessionManager: { getEntries: () => entries } } as unknown as ExtensionContext;
+	const ctx = { sessionManager: { getLeafId: () => entries.at(-1)?.id ?? null, getEntries: () => entries } } as unknown as ExtensionContext;
 
 	invalidateUsageCache();
 	assert.deepEqual(getUsageTotals(ctx), {
@@ -659,6 +781,61 @@ test("usage totals include tool result and summary usage", () => {
 		latestCacheHitRate: (5000 / 32_099) * 100,
 	});
 	invalidateUsageCache();
+});
+
+test("usage prewarming is accumulated without changing assistant cache-hit rate or copying entries on cache hits", () => {
+	const warm = {
+		id: "warm-1", parentId: null, timestamp: "2026-01-01T00:00:00.000Z",
+		type: "usage", kind: "cache_warm", provider: "openai", model: "gpt-5",
+		usage: { input: 2, output: 0, cacheRead: 100, cacheWrite: 8, cost: { total: 0.125 } },
+	};
+	const entries: unknown[] = [warm];
+	let leafId: string | null = warm.id;
+	let reads = 0;
+	const ctx = {
+		sessionManager: {
+			getLeafId: () => leafId,
+			getEntries: () => {
+				reads++;
+				return entries.slice();
+			},
+		},
+	} as unknown as ExtensionContext;
+	invalidateUsageCache();
+	try {
+		const initial = getUsageTotals(ctx);
+		assert.deepEqual(initial, {
+			input: 10, output: 0, cacheRead: 100, cacheWrite: 8, cost: 0.125,
+			latestCacheHitRate: undefined,
+		});
+		assert.strictEqual(getUsageTotals(ctx), initial);
+		assert.equal(reads, 1);
+		// Branch navigation invalidates the leaf cache, not accumulated usage.
+		leafId = null;
+		assert.deepEqual(getUsageTotals(ctx), initial);
+		assert.equal(reads, 2);
+
+		entries.push({
+			id: "assistant", type: "message", message: {
+				role: "assistant",
+				usage: { input: 10, output: 3, cacheRead: 40, cacheWrite: 30, cost: { total: 0.25 } },
+			},
+		});
+		leafId = "assistant";
+		assert.equal(getUsageTotals(ctx).latestCacheHitRate, 50);
+		assert.equal(reads, 3);
+		entries.push({ ...warm, id: "warm-2", parentId: "assistant" });
+		leafId = "warm-2";
+		const total = getUsageTotals(ctx);
+		assert.deepEqual(total, {
+			input: 60, output: 3, cacheRead: 240, cacheWrite: 46, cost: 0.5,
+			latestCacheHitRate: 50,
+		});
+		assert.strictEqual(getUsageTotals(ctx), total);
+		assert.equal(reads, 4);
+	} finally {
+		invalidateUsageCache();
+	}
 });
 
 test("ASCII footer renders icons as semantic labels", () => {
@@ -687,6 +864,7 @@ test("ASCII footer renders icons as semantic labels", () => {
 		},
 		sessionManager: {
 			getCwd: () => "C:\\work\\project",
+			getLeafId: () => entries.at(-1)?.id ?? null,
 			getEntries: () => entries,
 			getSessionName: () => undefined,
 		},
@@ -697,7 +875,6 @@ test("ASCII footer renders icons as semantic labels", () => {
 	const state: FooterState = {
 		git: { ...emptyGitStatus(), branch: "main", modified: 2 },
 		runtime: { name: "nodejs", version: "24.6.0" },
-		sessionStartEpoch: Date.now(),
 		workingSince: Date.now() - 2_000,
 		lastDoneIn: undefined,
 	};
@@ -777,6 +954,7 @@ function renderFooterWithSession(opts: {
 		},
 		sessionManager: {
 			getCwd: () => "/work/project",
+			getLeafId: () => null,
 			getEntries: () => [],
 			getSessionName: () => name,
 		},
@@ -789,7 +967,6 @@ function renderFooterWithSession(opts: {
 	const state: FooterState = {
 		git: emptyGitStatus(),
 		runtime: null,
-		sessionStartEpoch: Date.now(),
 		workingSince: undefined,
 		lastDoneIn: undefined,
 	};
@@ -867,6 +1044,7 @@ function renderFooterWithHost(opts: {
 		},
 		sessionManager: {
 			getCwd: () => "/work/project",
+			getLeafId: () => null,
 			getEntries: () => [],
 			getSessionName: () => undefined,
 		},
@@ -878,7 +1056,6 @@ function renderFooterWithHost(opts: {
 	const state: FooterState = {
 		git: emptyGitStatus(),
 		runtime: null,
-		sessionStartEpoch: Date.now(),
 		workingSince: undefined,
 		lastDoneIn: undefined,
 	};
@@ -946,6 +1123,7 @@ function renderStatusLines(statuses: Map<string, string>, width = 160): string[]
 		},
 		sessionManager: {
 			getCwd: () => "/work/project",
+			getLeafId: () => null,
 			getEntries: () => [],
 			getSessionName: () => undefined,
 		},
@@ -956,7 +1134,6 @@ function renderStatusLines(statuses: Map<string, string>, width = 160): string[]
 	const state: FooterState = {
 		git: emptyGitStatus(),
 		runtime: null,
-		sessionStartEpoch: Date.now(),
 		workingSince: undefined,
 		lastDoneIn: undefined,
 	};
@@ -1074,6 +1251,7 @@ test("working timer shows live TPS gated by its footer setting and sheds it firs
 		},
 		sessionManager: {
 			getCwd: () => "/work/project",
+			getLeafId: () => null,
 			getEntries: () => [],
 			getSessionName: () => undefined,
 		},
@@ -1085,7 +1263,6 @@ test("working timer shows live TPS gated by its footer setting and sheds it firs
 	const state: FooterState = {
 		git: emptyGitStatus(),
 		runtime: null,
-		sessionStartEpoch: Date.now(),
 		workingSince: Date.now(),
 		lastDoneIn: undefined,
 	};

@@ -8,6 +8,8 @@ A polished terminal interface for the [Pi](https://pi.dev) coding agent. It brin
 
 ![pi-open-tui preview](https://raw.githubusercontent.com/OldSuns/pi-open-tui/main/assets/preview_dashboard_1.png)
 
+Live terminal screenshot with Pi 1.4.0.
+
 ## Highlights
 
 - **Pi header** with model, thinking level, working directory, and useful slash-command hints
@@ -20,7 +22,8 @@ A polished terminal interface for the [Pi](https://pi.dev) coding agent. It brin
 
 ## Requirements
 
-- Pi 1.2 or later
+- Pi 1.2.0 or later
+- Node.js 22.19.0 or later (Pi's minimum)
 - A terminal with UTF-8 and color support
 - A [Nerd Font](https://www.nerdfonts.com/font-downloads) for the full icon set (optional; portable Unicode icons are built in)
 
@@ -55,7 +58,9 @@ If wide Nerd Font icons visually consume the gap before their labels (for exampl
 
 ## Configuration
 
-Run `/open-tui` to open the settings dialog. It provides **General**, **Appearance**, **Footer**, and **Telemetry** tabs. Settings are stored in `~/.pi/agent/open-tui.json`:
+Run `/open-tui` to open the settings dialog. It provides **General**, **Appearance**, **Footer**, and **Telemetry** tabs and adapts to the terminal size. Settings are stored in `open-tui.json` inside Pi's agent directory, which defaults to `~/.pi/agent`; `PI_CODING_AGENT_DIR` overrides that directory. If saving fails, a warning explains that the change applies only to the current session.
+
+Example configuration:
 
 ```json
 {
@@ -121,6 +126,8 @@ Key options:
 
 `sessionName` appears only when the session has a name. `hostname` shows the short host name (first label of the machine's host name, e.g. `mba` from `mba.example.com`) with a server icon. In detached HEAD state, `gitBranch` shows `HEAD` with the short commit hash; `gitCommit` appends the tag pointing at that commit and only takes effect while `gitBranch` is on. Disabling `extensionStatuses` hides the entire extension status line, including MCP status. Each status keeps the colours its extension applied with `ctx.ui.theme.fg()`. A status without colours renders in the muted theme colour.
 
+Footer token and cost totals include assistant responses, tool-reported usage, compaction and branch summaries, and cache warming. The cache-hit percentage describes the most recent assistant response, not the cumulative session.
+
 With `inlineFooter` enabled, the two normal Footer rows are rendered inside the editor frame to save vertical space. The top border places the Git branch on the left and CWD first in the right-hand group; the session title appears on the left too when `sessionName` is enabled. The Header and extension status rows remain separate; narrow terminals truncate lower-priority Footer data first, keeping the right-hand statistics and the border corner.
 
 ## Turn telemetry
@@ -169,7 +176,8 @@ With **General → Tool view** set to **Compact** (`toolView.mode: "compact"`), 
 - While a shell command runs, the newest 3 output lines and the elapsed time are shown.
 - The dot is yellow while running, green when done, and red when failed. Failed calls keep the compact row with a red summary; for shell commands it ends with the last output line, such as `Exited with code 1 · 12 lines · 1.2s · FAIL tests/a.test.ts`. Press Ctrl+O for the full output.
 - Clicking a row expands only that row into Pi's native card, and `Ctrl+O` expands all rows. The full output, diff, and truncation notices are unchanged.
-- Only the display changes. Tools, arguments, results, and what the model sees are untouched, and third-party or MCP tools keep their own rendering.
+- Only the display changes. Tools, arguments, results, and what the model sees are untouched. Only tools confirmed by Pi as built-in are wrapped; third-party and MCP tools, including replacements with built-in names, keep their own rendering.
+- Compact summaries flag truncated output, including grep's long-line truncation. Bracketed output and failure messages are preserved rather than mistaken for tool notices.
 - The mode is chosen when Pi creates a row, so switching it affects new rows; `/reload` or a new session applies it to the whole transcript.
 
 ## Copy buttons
@@ -201,16 +209,18 @@ npm run typecheck
 pi -e .
 ```
 
+CI checks Pi 1.2.0 and the latest release on Node.js 22.19.0 and 24, across Linux, Windows, and macOS. Keep Pi packages on the same version when checking compatibility. Automated tests do not replace checking terminal fonts, mouse interaction, and cursor support with `pi -e .`.
+
 ## Acknowledgements
 
 This project builds on several Pi community packages:
 
 - **[pi-haiku](https://github.com/nnocte/pi-haiku)** — two-line footer structure and working timer
-- **[pi-claude-code-tui](https://github.com/Phoobobo/pi-claude-code-tui)** — Pi logo frames and rounded editor border technique
+- **[pi-claude-code-tui](https://github.com/Phoobobo/pi-claude-code-tui)** — Pi logo artwork and rounded editor border technique
 - **[pi-zentui](https://github.com/lmilojevicc/pi-zentui)** — Starship-style footer segments, runtime detection, session lifecycle, and settings UI pattern
 - **[pi-tps](https://github.com/monotykamary/pi-tps)** — turn timing, stall detection, and conservative TPS measurement
 
-The logo frames are derived from Pi's official install script (`pi.dev/install.sh`). Runtime detection and Git porcelain parsing borrow structure from `pi-zentui`.
+The logo artwork is derived from Pi's official install script (`pi.dev/install.sh`). Runtime detection and Git porcelain parsing borrow structure from `pi-zentui`.
 
 Special thanks to the **[LINUX DO](https://linux.do)** community for its support.
 

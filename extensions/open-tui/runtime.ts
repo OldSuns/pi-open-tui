@@ -31,10 +31,9 @@ const RUNTIMES: readonly RuntimeDef[] = [
 	{ name: "swift", files: ["Package.swift"], versionCommand: { cmd: "swift", args: ["--version"], pattern: /Swift\s+(\d+\.\d+)/ } },
 	{ name: "kotlin", files: ["build.gradle.kts", "settings.gradle.kts"] },
 	{ name: "cpp", files: ["CMakeLists.txt", "Makefile"] },
-	{ name: "c", files: ["Makefile", "CMakeLists.txt"] },
 	{ name: "deno", files: ["deno.json", "deno.jsonc", "deno.lock"], versionCommand: { cmd: "deno", args: ["--version"], pattern: /deno\s+(\d+\.\d+\.\d+)/ } },
 	{ name: "php", files: ["composer.json"], versionCommand: { cmd: "php", args: ["--version"], pattern: /PHP\s+(\d+\.\d+\.\d+)/ } },
-	{ name: "haskell", files: ["stack.yaml", "cabal.project", ".cabal"], versionCommand: { cmd: "ghc", args: ["--version"], pattern: /(\d+\.\d+\.\d+)/ } },
+	{ name: "haskell", files: ["stack.yaml", "cabal.project"], extensions: [".cabal"], versionCommand: { cmd: "ghc", args: ["--version"], pattern: /(\d+\.\d+\.\d+)/ } },
 	{ name: "julia", files: ["Project.toml", "Manifest.toml"], versionCommand: { cmd: "julia", args: ["--version"], pattern: /julia\s+(\d+\.\d+\.\d+)/ } },
 	{ name: "lua", files: ["stylua.toml", ".luarc.json"], versionCommand: { cmd: "lua", args: ["-v"], pattern: /Lua\s+(\d+\.\d+)/ } },
 	{ name: "elixir", files: ["mix.exs"], versionCommand: { cmd: "elixir", args: ["--version"], pattern: /Elixir\s+(\d+\.\d+\.\d+)/ } },
@@ -42,13 +41,13 @@ const RUNTIMES: readonly RuntimeDef[] = [
 	{ name: "gleam", files: ["gleam.toml"], versionCommand: { cmd: "gleam", args: ["--version"], pattern: /gleam\s+(\d+\.\d+\.\d+)/ } },
 	{ name: "crystal", files: ["shard.yml"], versionCommand: { cmd: "crystal", args: ["--version"], pattern: /Crystal\s+(\d+\.\d+\.\d+)/ } },
 	{ name: "dart", files: ["pubspec.yaml"], versionCommand: { cmd: "dart", args: ["--version"], pattern: /Dart\s+SDK\s+version:\s+(\d+\.\d+\.\d+)/ } },
-	{ name: "nim", files: ["nim.cfg", ".nimble"] },
+	{ name: "nim", files: ["nim.cfg"], extensions: [".nimble"] },
 	{ name: "zig", files: ["build.zig"], versionCommand: { cmd: "zig", args: ["version"], pattern: /(\d+\.\d+\.\d+)/ } },
-	{ name: "ocaml", files: [".opam", "dune", "dune-project"] },
+	{ name: "ocaml", files: ["dune", "dune-project"], extensions: [".opam"] },
 	{ name: "clojure", files: ["project.clj", "deps.edn"] },
 	{ name: "scala", files: ["build.sbt", ".scala", ".metals"] },
 	{ name: "perl", files: ["Makefile.PL", "cpanfile"] },
-	{ name: "r", files: [".Rproj", "DESCRIPTION"] },
+	{ name: "r", files: ["DESCRIPTION"], extensions: [".Rproj"] },
 	{ name: "elm", files: ["elm.json"] },
 	{ name: "haxe", files: ["haxelib.json", ".haxerc"] },
 	{ name: "vagrant", files: ["Vagrantfile"] },
@@ -65,7 +64,6 @@ const RUNTIMES: readonly RuntimeDef[] = [
 	{ name: "v", files: ["v.mod", "vpkg.json"], extensions: [".v"] },
 	{ name: "xmake", files: ["xmake.lua"] },
 	{ name: "gradle", files: ["build.gradle", "build.gradle.kts"], folders: ["gradle"] },
-	{ name: "maven", files: ["pom.xml"] },
 	{ name: "cmake", files: ["CMakeLists.txt", "CMakeCache.txt"] },
 	{ name: "meson", files: ["meson.build"], env: "MESON_DEVENV" },
 	{ name: "nix", files: ["flake.nix", "shell.nix"], env: "IN_NIX_SHELL" },
@@ -76,7 +74,7 @@ const RUNTIMES: readonly RuntimeDef[] = [
 	{ name: "pulumi", files: ["Pulumi.yaml", "Pulumi.yml"] },
 	{ name: "typst", files: ["template.typ"], extensions: [".typ"] },
 	{ name: "buf", files: ["buf.yaml", "buf.gen.yaml", "buf.work.yaml"] },
-	{ name: "dotnet", files: [".csproj", ".fsproj", "global.json", "Directory.Build.props"] },
+	{ name: "dotnet", files: ["global.json", "Directory.Build.props"], extensions: [".csproj", ".fsproj"] },
 	{ name: "cobol", files: [], extensions: [".cbl", ".cob"] },
 ];
 
@@ -124,16 +122,17 @@ function matchesDef(cwd: string, def: RuntimeDef): boolean {
 async function fetchVersion(def: RuntimeDef, cwd: string): Promise<string | undefined> {
 	if (!def.versionCommand) return undefined;
 	try {
-		const { stdout } = await execFileAsync(def.versionCommand.cmd, def.versionCommand.args ?? [], {
+		const { stdout, stderr } = await execFileAsync(def.versionCommand.cmd, def.versionCommand.args ?? [], {
 			cwd,
 			timeout: VERSION_TIMEOUT_MS,
 			maxBuffer: 64 * 1024,
 		});
+		const output = `${stdout}\n${stderr}`;
 		if (def.versionCommand.pattern) {
-			const match = stdout.match(def.versionCommand.pattern);
+			const match = output.match(def.versionCommand.pattern);
 			return match?.[1];
 		}
-		return stdout.trim() || undefined;
+		return output.trim() || undefined;
 	} catch {
 		return undefined;
 	}

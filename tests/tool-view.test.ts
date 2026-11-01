@@ -10,9 +10,11 @@ import {
 	displayPath,
 	firstLine,
 	registerToolView,
+	stripNotice,
 	summarizeError,
 	summarizeResult,
 	tailLines,
+	textOutput,
 } from "../extensions/open-tui/tool-view.ts";
 
 test("home paths shorten only inside the home directory", () => {
@@ -94,7 +96,7 @@ test("summaries describe each built-in tool in one line", () => {
 	assert.equal(summarizeResult("edit", text("ok", { diff: " 1 a\n-2 b\n+2 c\n+3 d" }), {}), "+2 −1");
 	assert.equal(summarizeResult("write", text("Successfully wrote"), { content: "x\ny\n" }), "2 lines written");
 	assert.equal(
-		summarizeResult("grep", text("a.ts:1: x\na.ts-2- ctx\nb.ts:9: y\n\n[100 matches limit reached]", { matchLimitReached: 100 }), {}),
+		summarizeResult("grep", text("a.ts:1: x\na.ts-2- ctx\nb.ts:9: y\n\n[100 matches limit reached. Use limit=200 for more, or refine pattern]", { matchLimitReached: 100 }), {}),
 		"2 matches in 2 files · limit reached",
 	);
 	assert.equal(summarizeResult("grep", text("No matches found"), {}), "No matches");
@@ -108,11 +110,85 @@ test("summaries describe each built-in tool in one line", () => {
 		"1 entry · truncated",
 	);
 	assert.equal(
-		summarizeResult("ls", text("a/\nb/\n\n[2 entries limit reached]", { entryLimitReached: 2 }), {}),
+		summarizeResult("ls", text("a/\nb/\n\n[2 entries limit reached. Use limit=4 for more]", { entryLimitReached: 2 }), {}),
 		"2 entries · limit reached",
 	);
 	assert.equal(summarizeResult("ls", text("(empty directory)"), {}), "Empty");
 	assert.equal(summarizeResult("ls", text("a/\nb.ts"), {}), "2 entries");
+});
+
+test("only the current tool's confirmed Pi notices are removed", () => {
+	const notices: Array<[string, string]> = [
+		["read", "Showing lines 1-2 of 9. Use offset=3 to continue."],
+		["read", "Showing lines 1-2 of 9 (50.0KB limit). Use offset=3 to continue."],
+		["read", "40 more lines in file. Use offset=3 to continue."],
+		["bash", "Showing lines 2-3 of 3. Full output: /tmp/o"],
+		["bash", "Showing lines 2-3 of 3 (50.0KB limit). Full output: /tmp/o"],
+		["powershell", "Showing last 50.0KB of line 1 (line is 1.2MB). Full output: C:/tmp/o"],
+		["grep", "100 matches limit reached. Use limit=200 for more, or refine pattern"],
+		["grep", "Some lines truncated to 500 chars. Use read tool to see full lines"],
+		["grep", "100 matches limit reached. Use limit=200 for more, or refine pattern. 50.0KB limit reached. Some lines truncated to 500 chars. Use read tool to see full lines"],
+		["find", "2 results limit reached"],
+		["find", "2 results limit reached. Use limit=4 for more, or refine pattern. 50.0KB limit reached"],
+		["ls", "2 entries limit reached. Use limit=4 for more. 50.0KB limit reached"],
+	];
+	for (const [toolName, notice] of notices) {
+		assert.equal(stripNotice(toolName, `body\n\n[${notice}]\n`), "body", `${toolName}: ${notice}`);
+	}
+	for (const toolName of ["read", "bash", "powershell", "grep", "find", "ls", "edit", "write"]) {
+		assert.equal(stripNotice(toolName, "body\n\n[first]\n"), "body\n\n[first]");
+		assert.equal(stripNotice(toolName, "body\n\n[Showing lines of real content]"), "body\n\n[Showing lines of real content]");
+	}
+	assert.equal(stripNotice("bash", "body\n\n[2 results limit reached]"), "body\n\n[2 results limit reached]");
+	assert.equal(summarizeResult("read", text("body\n\n[first]"), {}), "3 lines");
+	assert.equal(summarizeResult("find", text("body\n\n[first]"), {}), "3 files");
+	assert.equal(summarizeResult("ls", text("body\n\n[first]"), {}), "3 entries");
+	assert.equal(summarizeError("bash", text("body\n\n[first]\n\nCommand exited with code 1")),
+		"Exited with code 1 · 3 lines · [first]");
+	assert.equal(summarizeError("read", text("[first]\nmore")), "[first]");
+});
+
+test("grep long-line truncation is visible without byte truncation", () => {
+	const output = text("a.ts:1: long\n\n[Some lines truncated to 500 chars. Use read tool to see full lines]", {
+		linesTruncated: true,
+	});
+	assert.equal(summarizeResult("grep", output, {}), "1 match in 1 file · truncated");
+	assert.equal(summarizeResult("grep", text("a.ts:1: x", { linesTruncated: false }), {}), "1 match in 1 file");
+	assert.equal(summarizeResult("grep", text("a.ts:1: x", {
+		linesTruncated: true, truncation: { truncated: true },
+	}), {}), "1 match in 1 file · truncated");
+});
+
+test("output cleaning preserves text between CSI sequences and the latest CR frame", () => {
+	const output = "\x1b[2~first\x1b[31m red\x1b[0m\r\nold\r\x9b2~latest\x1b[0m\x1b]52;c;Y2xpcA==\x07";
+	assert.equal(textOutput(text(output)), "first red\nlatest");
+	assert.deepEqual(tailLines(output, 3), ["first red", "latest"]);
+	assert.equal(summarizeError("read", text(output)), "first red");
+});
+
+test("call details are sanitized before coloring without changing native arguments", () => {
+	const unsafe = "first\x1b]52;c;Y2xpcA==\x07\x1b]52;c;Y2xpcA==\x1b\\\nsecond";
+	for (const [toolName, args] of [
+		["read", { path: unsafe }], ["edit", { path: unsafe }], ["write", { path: unsafe }],
+		["ls", { path: unsafe }], ["grep", { pattern: unsafe }], ["find", { pattern: unsafe }],
+		["bash", { command: unsafe }], ["powershell", { command: unsafe }],
+	] as const) {
+		let nativeArgs: unknown;
+		const native: ToolRenderers = { renderCall: (value) => { nativeArgs = value; return { render: () => [], invalidate() {} }; } };
+		const compact = createCompactRenderers(toolName, native, glyphs);
+		const checkedTheme = {
+			...theme,
+			fg: (_color: string, value: string) => {
+				assert.doesNotMatch(value, /[\x00-\x1f\x7f-\x9f]/, toolName);
+				return value;
+			},
+		} as unknown as Theme;
+		const rendered = compact.renderCall!(args, checkedTheme, context()).render(200);
+		assert.equal(nativeArgs, args);
+		assert.equal(rendered.length, 1);
+		assert.match(rendered[0]!, toolName === "bash" || toolName === "powershell" ? /first … \(\+1 lines\)/ : /first second/);
+		assert.doesNotMatch(rendered[0]!, /52;c|Y2xpcA/);
+	}
 });
 
 test("call details show the key argument", () => {
@@ -125,7 +201,17 @@ test("call details show the key argument", () => {
 
 test("the resolver only takes over built-in tools in compact mode", () => {
 	let resolver: Parameters<ExtensionAPI["registerToolRenderer"]>[0] | undefined;
-	const pi = { registerToolRenderer: (fn: typeof resolver) => { resolver = fn; } } as unknown as ExtensionAPI;
+	let sourceInfo: ReturnType<ExtensionAPI["getAllTools"]>[number]["sourceInfo"] | undefined = {
+		path: "builtin:bash",
+		source: "builtin",
+		scope: "temporary",
+		origin: "top-level",
+	};
+	let configured = true;
+	const pi = {
+		registerToolRenderer: (fn: typeof resolver) => { resolver = fn; },
+		getAllTools: () => configured ? [{ name: "bash", sourceInfo }] : [],
+	} as unknown as ExtensionAPI;
 	let mode: "native" | "compact" = "native";
 	registerToolView(pi, () => mode, glyphs);
 	const { renderers } = fakeNative();
@@ -135,6 +221,14 @@ test("the resolver only takes over built-in tools in compact mode", () => {
 	assert.equal(resolver!("mcp__search", () => renderers), renderers, "unowned tools are untouched");
 	assert.equal(resolver!("bash", () => undefined), undefined);
 	assert.equal(resolver!("bash", () => renderers)?.renderShell, "self");
+	for (const source of ["local", "npm:third-party", "sdk", "unknown"]) {
+		sourceInfo = { ...sourceInfo!, path: "/third-party/tool.ts", source };
+		assert.equal(resolver!("bash", () => renderers), renderers, `same-name ${source} tool is untouched`);
+	}
+	sourceInfo = undefined;
+	assert.equal(resolver!("bash", () => renderers), renderers, "missing source metadata is untouched");
+	configured = false;
+	assert.equal(resolver!("bash", () => renderers), renderers, "unregistered tools are untouched");
 });
 
 test("collapsed rows are compact while native renderers keep their own state", () => {
