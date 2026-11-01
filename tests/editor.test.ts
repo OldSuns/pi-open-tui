@@ -850,6 +850,57 @@ test("leaves fully capable custom layouts untouched instead of replacing content
 	}
 });
 
+test("preserves changed layouts on each render and resumes framing native borders", () => {
+	for (const inlineFooter of [false, true]) {
+		const inner = createInnerEditor();
+		const nativeRender = inner.render.bind(inner);
+		let content: string[] | undefined;
+		inner.render = (width) => content === undefined ? nativeRender(width) : [...content];
+		const host = createEditorHost(() => inner);
+		const handle = installEditor({} as ExtensionAPI, host.ctx, "block", {
+			enabled: () => inlineFooter,
+			render: () => ({ top: { left: "branch", right: "" }, bottom: { left: "model", right: "" } }),
+		});
+		try {
+			assert.match(stripAnsi(inner.render(60)[0]!), /^╭/);
+			for (content of [
+				[],
+				["only content"],
+				["first content", "middle content", "last content"],
+				["────────", "middle content", "last content"],
+				["first content", "middle content", "────────"],
+			]) {
+				assert.deepEqual(inner.render(60), content);
+			}
+			content = undefined;
+			assert.match(stripAnsi(inner.render(60)[0]!), /^╭/);
+		} finally {
+			handle.cleanup();
+		}
+	}
+});
+
+test("checks the layout rendered at the frame inner width", () => {
+	const inner = createInnerEditor();
+	const nativeRender = inner.render.bind(inner);
+	const content = ["first content", "middle content", "last content"];
+	const widths: number[] = [];
+	inner.render = (width) => {
+		widths.push(width);
+		return width >= 80 ? nativeRender(width) : [...content];
+	};
+	const host = createEditorHost(() => inner);
+	const handle = installEditor({} as ExtensionAPI, host.ctx);
+	try {
+		assert.deepEqual(widths, [80]);
+		assert.deepEqual(inner.render(80), content);
+		assert.deepEqual(widths, [80, 76]);
+		assert.match(stripAnsi(inner.render(84)[0]!), /^╭/);
+	} finally {
+		handle.cleanup();
+	}
+});
+
 test("recognizes native borders with ghost text and completion rows below the editor", () => {
 	const inner = createInnerEditor();
 	const render = inner.render.bind(inner);

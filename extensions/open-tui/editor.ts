@@ -289,9 +289,12 @@ function renderFrame(decoration: EditorDecoration, width: number): string[] {
 
 	const innerWidth = Math.max(0, width - EDITOR_FRAME_HORIZONTAL_CHROME);
 	const baseLines = renderWithCursor(decoration, innerWidth);
+	const bottomIdx = findBottomBorderIndex(baseLines);
+	if (bottomIdx <= 1 || !isEditorBorderLine(baseLines[0] ?? "") || !isEditorBorderLine(baseLines[bottomIdx] ?? "")) {
+		return baseLines;
+	}
 	const borderPaint = (text: string) => decoration.editor.borderColor(text);
 	const rail = borderPaint("│");
-	const bottomIdx = findBottomBorderIndex(baseLines);
 
 	const result: string[] = [];
 	const inlineFooter = decoration.inlineFooter?.enabled() === true;
