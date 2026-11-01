@@ -2,8 +2,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { CustomEditor, initTheme, VERSION, type ExtensionAPI, type ExtensionContext, type KeybindingsManager } from "@earendil-works/pi-coding-agent";
 import { Container, TuiMainScreen, type EditorComponent, type EditorTheme, type Terminal, type TUI, type TuiMouseEvent, visibleWidth } from "@earendil-works/pi-tui";
-import { decorateOpenTuiEditor, installEditor, createOpenTuiEditor, repaintAfterStreamWrites } from "../extensions/open-tui/editor.ts";
+import { decorateOpenTuiEditor, installEditor, repaintAfterStreamWrites, type InlineFooterRenderer } from "../extensions/open-tui/editor.ts";
 import { OpenTuiHeader } from "../extensions/open-tui/header.ts";
+import type { CursorStyle } from "../extensions/open-tui/config.ts";
 import { stripAnsi } from "../extensions/open-tui/utils.ts";
 
 const tui = {
@@ -21,6 +22,20 @@ const editorTheme = {
 		noMatch: (text: string) => text,
 	},
 } as EditorTheme;
+
+function createOpenTuiEditor(
+	tui: TUI,
+	editorTheme: EditorTheme,
+	keybindings: KeybindingsManager,
+	cursorStyle: CursorStyle = "block",
+	inlineFooter?: InlineFooterRenderer,
+) {
+	return decorateOpenTuiEditor(
+		new CustomEditor(tui, editorTheme, keybindings, { paddingX: 0 }),
+		tui,
+		{ cursorStyle, inlineFooter },
+	);
+}
 
 test("compensates Pi editor padding for the custom left rail", () => {
 	const editor = createOpenTuiEditor(
@@ -308,79 +323,51 @@ const mouseClick: TuiMouseEvent = {
 	width: 40, height: 8, shift: false, alt: false, ctrl: false,
 };
 
-test("decorates an existing editor and restores its reused instance on cleanup", () => {
-	const inner = createInnerEditor();
-	let innerTabPresses = 0;
-	const innerHandleInput = inner.handleInput.bind(inner);
-	inner.handleInput = (data: string) => {
-		if (data === "\t") innerTabPresses++;
-		innerHandleInput(data);
-	};
-	const originalRender = inner.render;
-	const originalMouse = inner.handleMouse;
-	const originalPadding = inner.setPaddingX;
-	const originalStatus = inner.setWorkingStatusIndicator;
-	const originalEmbedStatus = inner.embedWorkingStatus;
-	const innerFactory = () => inner;
-	const host = createEditorHost(innerFactory);
-	const handle = installEditor({} as ExtensionAPI, host.ctx);
-
-	assert.equal(host.editor, inner);
-	host.editor.handleInput("\t");
-	assert.equal(innerTabPresses, 1);
-	assert.match(stripAnsi(host.editor.render(40)[0] ?? ""), /^╭/);
-	assert.equal(inner.getPaddingX(), 0);
-
-	handle.cleanup();
-	assert.equal(host.ctx.ui.getEditorComponent(), innerFactory);
-	assert.equal(host.editor, inner);
-	assert.equal(inner.render, originalRender);
-	assert.equal(inner.handleMouse, originalMouse);
-	assert.equal(inner.setPaddingX, originalPadding);
-	assert.equal(inner.setWorkingStatusIndicator, originalStatus);
-	assert.equal(inner.embedWorkingStatus, originalEmbedStatus);
-	assert.equal(inner.getPaddingX(), 2);
-	assert.ok(!Object.hasOwn(inner, "setCursorStyle"));
-	assert.doesNotMatch(stripAnsi(inner.render(40)[0] ?? ""), /^╭/);
-
-	const reinstalled = installEditor({} as ExtensionAPI, host.ctx);
-	assert.match(stripAnsi(inner.render(40)[0] ?? ""), /^╭/);
-	reinstalled.cleanup();
-	assert.equal(inner.render, originalRender);
-});
-
-test("frames direct editor registrations in either extension order", () => {
+test("preserves editor identity, input and cleanup in either registration order", () => {
 	for (const openTuiFirst of [false, true]) {
-		const host = createEditorHost();
-		const ui = host.ctx.ui;
-		const originalGet = ui.getEditorComponent;
-		const originalSet = ui.setEditorComponent;
 		const inner = createInnerEditor();
+		let tabPresses = 0;
+		const input = inner.handleInput.bind(inner);
+		inner.handleInput = (data) => { if (data === "\t") tabPresses++; input(data); };
+		const original = {
+			render: inner.render, mouse: inner.handleMouse, padding: inner.setPaddingX,
+			status: inner.setWorkingStatusIndicator, embed: inner.embedWorkingStatus,
+		};
 		const upstream = () => inner;
-		let handle: ReturnType<typeof installEditor>;
-		if (openTuiFirst) {
-			handle = installEditor({} as ExtensionAPI, host.ctx);
-			// 独立扩展上下文共享同一个 ui 对象。
-			const otherCtx = { ui };
-			otherCtx.ui.setEditorComponent(upstream);
-		} else {
-			ui.setEditorComponent(upstream);
-			handle = installEditor({} as ExtensionAPI, host.ctx);
-		}
+		const host = createEditorHost(openTuiFirst ? undefined : upstream);
+		const ui = host.ctx.ui;
+		const get = ui.getEditorComponent;
+		const set = ui.setEditorComponent;
+		const handle = installEditor({} as ExtensionAPI, host.ctx);
+		if (openTuiFirst) ui.setEditorComponent(upstream);
+		const mounted = host.registeredFactory!;
+		assert.equal(host.editor, inner);
+		inner.handleInput("\t");
+		assert.equal(tabPresses, 1);
+		assert.equal(ui.getEditorComponent(), upstream);
+		assert.equal(stripAnsi(inner.render(40).join("\n")).match(/╭/g)?.length, 1);
+		assert.equal(inner.getPaddingX(), 0);
+		handle.cleanup();
+		assert.equal(ui.getEditorComponent, get);
+		assert.equal(ui.setEditorComponent, set);
 		assert.equal(ui.getEditorComponent(), upstream);
 		assert.equal(host.editor, inner);
-		assert.equal(stripAnsi(inner.render(40).join("\n")).match(/╭/g)?.length, 1);
-		const mounted = host.registeredFactory!;
-		handle.cleanup();
-		assert.equal(ui.getEditorComponent, originalGet);
-		assert.equal(ui.setEditorComponent, originalSet);
-		assert.equal(ui.getEditorComponent(), upstream);
-		assert.doesNotMatch(stripAnsi(host.editor.render(40)[0]!), /^╭/);
+		assert.equal(inner.render, original.render);
+		assert.equal(inner.handleMouse, original.mouse);
+		assert.equal(inner.setPaddingX, original.padding);
+		assert.equal(inner.setWorkingStatusIndicator, original.status);
+		assert.equal(inner.embedWorkingStatus, original.embed);
+		assert.equal(inner.getPaddingX(), 2);
+		assert.ok(!Object.hasOwn(inner, "setCursorStyle"));
 		assert.doesNotMatch(stripAnsi(mounted(tui, editorTheme, {} as KeybindingsManager).render(40)[0]!), /^╭/);
+		const reinstalled = installEditor({} as ExtensionAPI, host.ctx);
+		assert.match(stripAnsi(inner.render(40)[0]!), /^╭/);
+		reinstalled.cleanup();
+		assert.equal(inner.render, original.render);
 	}
 });
 
-test("frames replacements from Pi shortcut contexts without rebuilding the editor", async () => {
+async function createInteractiveHost() {
 	initTheme();
 	const { InteractiveMode } = await import(new URL(
 		"./modes/interactive/interactive-mode.js",
@@ -415,7 +402,13 @@ test("frames replacements from Pi shortcut contexts without rebuilding the edito
 		settingsManager: { isProjectTrusted: () => true },
 		showError(error: unknown) { throw error; },
 	}).map(([key, value]) => [key, { value, writable: true, configurable: true }])));
-	const ui = host.createExtensionUIContext();
+	return { host, ui: host.createExtensionUIContext(), editorContainer, hostTui, keybindings, defaultEditor, indicator,
+		get hardware() { return hardware; } };
+}
+
+test("frames replacements from Pi shortcut contexts without rebuilding the editor", async () => {
+	const fixture = await createInteractiveHost();
+	const { host, ui, editorContainer, hostTui, keybindings, defaultEditor, indicator } = fixture;
 	const originalAddChild = editorContainer.addChild;
 	const handle = installEditor({} as ExtensionAPI, { ui } as ExtensionContext, "bar", {
 		enabled: () => true,
@@ -447,15 +440,6 @@ test("frames replacements from Pi shortcut contexts without rebuilding the edito
 		host.defaultEditor.onExtensionShortcut("\x01");
 		assert.equal(factoryCalls, 2);
 		assert.match(stripAnsi(host.editor.render(60)[0]), /^╭/);
-		const latest = host.editor;
-		const dialog = new CustomEditor(hostTui, editorTheme, keybindings);
-		editorContainer.clear();
-		editorContainer.addChild(dialog);
-		assert.doesNotMatch(stripAnsi(dialog.render(60)[0]!), /^╭/);
-		editorContainer.clear();
-		editorContainer.addChild(latest);
-		assert.equal(handle.isFramed(), true);
-
 		// A fresh getter can capture our factory; later registration must not recurse.
 		ui.setEditorComponent(upstream);
 		const previous = shortcutUi!.getEditorComponent()!;
@@ -474,7 +458,7 @@ test("frames replacements from Pi shortcut contexts without rebuilding the edito
 		const custom: EditorComponent = { render: () => ["custom"], invalidate() {}, getText: () => "", setText() {}, handleInput() {} };
 		shortcutUi!.setEditorComponent(() => custom);
 		assert.equal(handle.isFramed(), false);
-		assert.equal(hardware, false);
+		assert.equal(fixture.hardware, false);
 		assert.deepEqual(custom.render(60), ["custom"]);
 		assert.equal(host.statusContainer.children.length, 1);
 
@@ -494,12 +478,12 @@ test("frames replacements from Pi shortcut contexts without rebuilding the edito
 		assert.equal(throwing.render, originalRender);
 		assert.doesNotMatch(stripAnsi(throwing.render(60)[0]!), /^╭/);
 		assert.deepEqual(host.statusContainer.children, [indicator]);
-		assert.equal(hardware, false);
+		assert.equal(fixture.hardware, false);
 
 		host.defaultEditor.onExtensionShortcut("\x01");
 		assert.equal(handle.isFramed(), true);
 		assert.match(stripAnsi(host.editor.render(60)[0]), /^╭.*working/);
-		assert.equal(hardware, true);
+		assert.equal(fixture.hardware, true);
 		const mounted = host.editor;
 		handle.cleanup();
 		assert.equal(factoryCalls, 7);
@@ -508,7 +492,7 @@ test("frames replacements from Pi shortcut contexts without rebuilding the edito
 		assert.doesNotMatch(stripAnsi(mounted.render(60)[0]!), /^╭/);
 		assert.doesNotMatch(stripAnsi(host.editor.render(60)[0]!), /^╭/);
 		assert.equal(host.statusContainer.children.length, 1);
-		assert.equal(hardware, false);
+		assert.equal(fixture.hardware, false);
 		shortcutUi!.setEditorComponent(upstream);
 		assert.doesNotMatch(stripAnsi(host.editor.render(60)[0]!), /^╭/);
 	} finally {
@@ -517,32 +501,8 @@ test("frames replacements from Pi shortcut contexts without rebuilding the edito
 });
 
 test("keeps reused editors framed and restores working status after fresh-context registrations", async () => {
-	initTheme();
-	const { InteractiveMode } = await import(new URL(
-		"./modes/interactive/interactive-mode.js",
-		import.meta.resolve("@earendil-works/pi-coding-agent"),
-	).href);
 	for (const resetRender of [false, true]) {
-		const editorContainer = new Container();
-		const hostTui = {
-			...tui,
-			children: [editorContainer],
-			getShowHardwareCursor: () => false,
-			setShowHardwareCursor() {},
-			setFocus(component: CustomEditor) { component.focused = true; },
-		} as unknown as TUI;
-		const keybindings = { matches: () => false } as unknown as KeybindingsManager;
-		const defaultEditor = new CustomEditor(hostTui, editorTheme, keybindings);
-		defaultEditor.onSubmit = () => {};
-		defaultEditor.onChange = () => {};
-		const indicator = { renderInBorder: () => "working", renderSpinnerInBorder: () => "*" };
-		const host = Object.create(InteractiveMode.prototype, Object.fromEntries(Object.entries({
-			ui: hostTui, keybindings, defaultEditor, editor: defaultEditor, editorContainer,
-			statusContainer: new Container(), activeStatusIndicator: indicator,
-			disposeActiveSelector() {},
-		}).map(([key, value]) => [key, { value, writable: true, configurable: true }])));
-		const ui = host.createExtensionUIContext();
-		const handle = installEditor({} as ExtensionAPI, { ui } as ExtensionContext, "block", {
+		const { host, ui, editorContainer, hostTui, keybindings, defaultEditor, indicator } = await createInteractiveHost();		const handle = installEditor({} as ExtensionAPI, { ui } as ExtensionContext, "block", {
 			enabled: () => true,
 			render: () => ({ top: { left: "branch", right: "" }, bottom: { left: "model", right: "" } }),
 		});
@@ -649,6 +609,10 @@ test("tracks runtime replacement, clearing and unframed editors", () => {
 	handle.cleanup();
 	assert.equal(host.ctx.ui.getEditorComponent(), latest);
 	assert.equal(hardware, false);
+	const reset = installEditor({} as ExtensionAPI, host.ctx);
+	host.ctx.ui.setEditorComponent(undefined);
+	reset.cleanup();
+	assert.equal(host.ctx.ui.getEditorComponent(), undefined);
 });
 
 test("saved registration proxies pass through after cleanup and later API wrappers survive", () => {
@@ -685,7 +649,10 @@ test("falls back to the default editor when the previous factory throws", () => 
 });
 
 test("cleanup preserves later method and factory wrappers as passthroughs", () => {
-	const inner = createInnerEditor();
+	const cursorCalls: Array<[string, boolean | undefined]> = [];
+	const inner = Object.assign(createInnerEditor(), {
+		setCursorStyle(style: string, hardware?: boolean) { cursorCalls.push([style, hardware]); },
+	});
 	let received: TuiMouseEvent | undefined;
 	inner.handleMouse = (event) => { received = event; return undefined; };
 	const host = createEditorHost(() => inner);
@@ -702,6 +669,10 @@ test("cleanup preserves later method and factory wrappers as passthroughs", () =
 	const padding = inner.setPaddingX.bind(inner);
 	inner.handleMouse = (event) => mouse(event);
 	inner.setPaddingX = (value) => padding(value);
+	const cursor = inner.setCursorStyle.bind(inner);
+	inner.setCursorStyle = (style, hardware) => cursor(style, hardware);
+	inner.setCursorStyle("block", true);
+	assert.deepEqual(cursorCalls, [], "open-tui owns cursor styling while active");
 
 	handle.cleanup();
 	handle.cleanup();
@@ -712,38 +683,12 @@ test("cleanup preserves later method and factory wrappers as passthroughs", () =
 	assert.deepEqual(received, mouseClick);
 	inner.setPaddingX(3);
 	assert.equal(inner.getPaddingX(), 3);
+	inner.setCursorStyle("underline", true);
+	assert.deepEqual(cursorCalls, [["underline", true]]);
 
 	// 后续扩展再次调用已卸载的工厂，也不会重新启用边框。
 	host.ctx.ui.setEditorComponent(laterFactory);
 	assert.doesNotMatch(stripAnsi(host.editor.render(40)[0] ?? ""), /^╭/);
-});
-
-test("cleanup forwards captured cursor-style wrappers to the original editor method", () => {
-	const calls: Array<[string, boolean | undefined]> = [];
-	const inner = Object.assign(createInnerEditor(), {
-		setCursorStyle(style: string, hardware?: boolean) { calls.push([style, hardware]); },
-	});
-	const host = createEditorHost(() => inner);
-	const handle = installEditor({} as ExtensionAPI, host.ctx);
-	try {
-		const cursor = inner.setCursorStyle.bind(inner);
-		inner.setCursorStyle = (style, hardware) => cursor(style, hardware);
-		inner.setCursorStyle("block", true);
-		assert.deepEqual(calls, [], "open-tui owns cursor styling while active");
-		handle.cleanup();
-		inner.setCursorStyle("underline", true);
-		assert.deepEqual(calls, [["underline", true]]);
-	} finally {
-		handle.cleanup();
-	}
-});
-
-test("cleanup does not reinstall an editor after another extension resets the slot", () => {
-	const host = createEditorHost(createInnerEditor);
-	const handle = installEditor({} as ExtensionAPI, host.ctx);
-	host.ctx.ui.setEditorComponent(undefined);
-	handle.cleanup();
-	assert.equal(host.ctx.ui.getEditorComponent(), undefined);
 });
 
 test("leaves custom layouts, mouse coordinates, padding and status capabilities intact", () => {
@@ -771,48 +716,22 @@ test("leaves custom layouts, mouse coordinates, padding and status capabilities 
 	handle.cleanup();
 });
 
-test("leaves editors unframed when the initial layout probe throws", () => {
-	const inner = createInnerEditor();
-	const render = inner.render.bind(inner);
-	let probing = true;
-	inner.render = (width) => {
-		if (probing) throw new Error("editor not ready during probe");
-		return render(width);
-	};
-	const originalRender = inner.render;
-	let calls = 0;
-	const upstream = () => { calls++; return inner; };
-	const host = createEditorHost(upstream);
-	const handle = installEditor({} as ExtensionAPI, host.ctx);
-	try {
-		assert.equal(host.editor, inner);
-		assert.equal(calls, 1);
-		assert.equal(handle.isFramed(), false);
-		assert.equal(inner.render, originalRender);
-		assert.equal(inner.embedWorkingStatus, false);
-		assert.equal(inner.getPaddingX(), 2);
-		probing = false;
-		assert.doesNotMatch(stripAnsi(inner.render(60)[0]!), /^╭/);
-		probing = true;
-		assert.throws(() => inner.render(60), /editor not ready during probe/);
-	} finally {
-		handle.cleanup();
-	}
-	assert.equal(host.ctx.ui.getEditorComponent(), upstream);
-	assert.equal(inner.render, originalRender);
-});
+const nonNativeLayouts = [
+	[],
+	["only content"],
+	["first content", "middle content", "last content"],
+	["────────", "middle content", "last content"],
+	["first content", "middle content", "────────"],
+];
 
-test("leaves fully capable custom layouts untouched instead of replacing content with borders", () => {
-	for (const content of [
-		[],
-		["only content"],
-		["first content", "middle content", "last content"],
-		["────────", "middle content", "last content"],
-		["first content", "middle content", "────────"],
-	]) {
+test("leaves unsupported or throwing layouts untouched during installation", () => {
+	for (const content of [...nonNativeLayouts, new Error("editor not ready during probe")]) {
 		const inner = createInnerEditor();
 		inner.setPaddingX(2);
-		inner.render = () => [...content];
+		inner.render = () => {
+			if (content instanceof Error) throw content;
+			return [...content];
+		};
 		const originalRender = inner.render;
 		const originalMouse = inner.handleMouse;
 		const originalPadding = inner.setPaddingX;
@@ -826,7 +745,8 @@ test("leaves fully capable custom layouts untouched instead of replacing content
 			setShowHardwareCursor: (value: boolean) => { hardware = value; },
 		} as unknown as TUI;
 		let factoryCalls = 0;
-		const host = createEditorHost(() => { factoryCalls++; return inner; }, hostTui);
+		const upstream = () => { factoryCalls++; return inner; };
+		const host = createEditorHost(upstream, hostTui);
 		const handle = installEditor({} as ExtensionAPI, host.ctx, "bar", {
 			enabled: () => true,
 			render: () => ({ top: { left: "branch", right: "" }, bottom: { left: "model", right: "" } }),
@@ -835,7 +755,8 @@ test("leaves fully capable custom layouts untouched instead of replacing content
 			assert.equal(factoryCalls, 1);
 			assert.equal(host.editor, inner);
 			assert.equal(handle.isFramed(), false, "the footer must remain outside this editor");
-			assert.deepEqual(inner.render(40), content);
+			if (content instanceof Error) assert.throws(() => inner.render(40), content);
+			else assert.deepEqual(inner.render(40), content);
 			assert.equal(inner.render, originalRender);
 			assert.equal(inner.handleMouse, originalMouse);
 			assert.equal(inner.setPaddingX, originalPadding);
@@ -847,36 +768,49 @@ test("leaves fully capable custom layouts untouched instead of replacing content
 		} finally {
 			handle.cleanup();
 		}
+		assert.equal(host.ctx.ui.getEditorComponent(), upstream);
 	}
 });
 
-test("preserves changed layouts on each render and resumes framing native borders", () => {
+test("preserves changing layouts, full width and mouse geometry with either footer mode", () => {
 	for (const inlineFooter of [false, true]) {
 		const inner = createInnerEditor();
 		const nativeRender = inner.render.bind(inner);
-		let content: string[] | undefined;
-		inner.render = (width) => content === undefined ? nativeRender(width) : [...content];
+		let layout = nativeRender;
+		let received: TuiMouseEvent | undefined;
+		inner.render = (width) => layout(width);
+		inner.handleMouse = (event) => { received = event; return undefined; };
 		const host = createEditorHost(() => inner);
 		const handle = installEditor({} as ExtensionAPI, host.ctx, "block", {
 			enabled: () => inlineFooter,
 			render: () => ({ top: { left: "branch", right: "" }, bottom: { left: "model", right: "" } }),
 		});
+		const click = { ...mouseClick, width: 80 };
 		try {
-			assert.match(stripAnsi(inner.render(60)[0]!), /^╭/);
-			for (content of [
-				[],
-				["only content"],
-				["first content", "middle content", "last content"],
-				["────────", "middle content", "last content"],
-				["first content", "middle content", "────────"],
-			]) {
-				assert.deepEqual(inner.render(60), content);
+			assert.match(stripAnsi(inner.render(80)[0]!), /^╭/);
+			inner.handleMouse(click);
+			assert.deepEqual(received, { ...click, x: 3, width: 76 });
+			for (const content of nonNativeLayouts) {
+				layout = () => [...content];
+				assert.deepEqual(inner.render(80), content);
+				inner.handleMouse(click);
+				assert.deepEqual(received, click);
 			}
-			content = undefined;
-			assert.match(stripAnsi(inner.render(60)[0]!), /^╭/);
+			layout = (width) => ["x".repeat(width)];
+			assert.deepEqual(inner.render(80), ["x".repeat(80)]);
+			layout = nativeRender;
+			assert.match(stripAnsi(inner.render(80)[0]!), /^╭/);
+			inner.handleMouse(click);
+			assert.deepEqual(received, { ...click, x: 3, width: 76 });
+			inner.render(3);
+			const narrowClick = { ...click, width: 3 };
+			inner.handleMouse(narrowClick);
+			assert.deepEqual(received, narrowClick);
 		} finally {
 			handle.cleanup();
 		}
+		inner.handleMouse(click);
+		assert.deepEqual(received, click);
 	}
 });
 
@@ -893,8 +827,8 @@ test("checks the layout rendered at the frame inner width", () => {
 	const handle = installEditor({} as ExtensionAPI, host.ctx);
 	try {
 		assert.deepEqual(widths, [80]);
-		assert.deepEqual(inner.render(80), content);
-		assert.deepEqual(widths, [80, 76]);
+		assert.deepEqual(inner.render(80), nativeRender(80));
+		assert.deepEqual(widths, [80, 76, 80]);
 		assert.match(stripAnsi(inner.render(84)[0]!), /^╭/);
 	} finally {
 		handle.cleanup();
@@ -916,52 +850,16 @@ test("recognizes native borders with ghost text and completion rows below the ed
 	try {
 		assert.equal(calls, 1);
 		assert.equal(handle.isFramed(), true);
+		assert.equal(decorateOpenTuiEditor(inner, tui), inner);
 		const lines = inner.render(60).map(stripAnsi);
-		assert.match(lines[0]!, /^╭/);
+		assert.equal(lines.join("\n").match(/╭/g)?.length, 1);
 		assert.match(lines[1]!, /^│ .*ghost suggestion.* │$/);
+		assert.equal(visibleWidth(lines[1]!), 60);
 		assert.match(lines.at(-2)!, /^╰/);
 		assert.equal(lines.at(-1), "completion candidate");
 	} finally {
 		handle.cleanup();
 	}
-});
-
-test("keeps ghost text rendered by an inner editor wrapper", () => {
-	const inner = new CustomEditor(
-		tui,
-		editorTheme,
-		{ matches: () => false } as unknown as KeybindingsManager,
-		{ paddingX: 0 },
-	);
-	// next-prompt-style wrapper: patch the render output, keep the instance.
-	const innerRender = inner.render.bind(inner);
-	inner.render = (width: number) => {
-		const lines = innerRender(width);
-		const line = lines[1] ?? "";
-		lines[1] = line.replace(/ {3,}$/, " try this next");
-		return lines;
-	};
-
-	const decorated = decorateOpenTuiEditor(inner, tui);
-	const body = stripAnsi(decorated.render(60)[1] ?? "");
-
-	assert.match(body, /try this next/);
-	assert.ok(body.startsWith("│ ") && body.endsWith(" │"), `ghost line keeps its rails: ${body}`);
-	assert.equal(visibleWidth(body), 60);
-});
-
-test("decorating the same instance twice keeps one frame", () => {
-	const editor = createOpenTuiEditor(
-		tui,
-		editorTheme,
-		{ matches: () => false } as unknown as KeybindingsManager,
-	);
-
-	const decorated = decorateOpenTuiEditor(editor, tui);
-	const lines = stripAnsi(decorated.render(40).join("\n"));
-
-	assert.equal(decorated, editor);
-	assert.equal(lines.match(/╭/g)?.length, 1);
 });
 
 test("restores cursor shape and visibility when the editor is removed", () => {

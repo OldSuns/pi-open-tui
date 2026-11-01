@@ -2,9 +2,8 @@ import {
 	CustomEditor,
 	type ExtensionAPI,
 	type ExtensionContext,
-	type KeybindingsManager,
 } from "@earendil-works/pi-coding-agent";
-import type { Component, Container, EditorComponent, EditorTheme, TUI } from "@earendil-works/pi-tui";
+import type { Component, Container, EditorComponent, TUI } from "@earendil-works/pi-tui";
 import { CURSOR_MARKER, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import type { CursorStyle } from "./config.ts";
 import { findBottomBorderIndex, isEditorBorderLine, stripAnsi } from "./utils.ts";
@@ -235,6 +234,7 @@ interface EditorDecoration {
 	inlineFooter: InlineFooterRenderer | undefined;
 	indicator: WorkingStatusIndicator | undefined;
 	baseRender: (width: number) => string[];
+	framedWidth: number | undefined;
 	active: boolean;
 	cleanup(): void;
 }
@@ -285,13 +285,14 @@ function renderWithCursor(decoration: EditorDecoration, width: number): string[]
 }
 
 function renderFrame(decoration: EditorDecoration, width: number): string[] {
+	decoration.framedWidth = undefined;
 	if (width < EDITOR_FRAME_HORIZONTAL_CHROME) return renderWithCursor(decoration, width);
 
 	const innerWidth = Math.max(0, width - EDITOR_FRAME_HORIZONTAL_CHROME);
 	const baseLines = renderWithCursor(decoration, innerWidth);
 	const bottomIdx = findBottomBorderIndex(baseLines);
 	if (bottomIdx <= 1 || !isEditorBorderLine(baseLines[0] ?? "") || !isEditorBorderLine(baseLines[bottomIdx] ?? "")) {
-		return baseLines;
+		return renderWithCursor(decoration, width);
 	}
 	const borderPaint = (text: string) => decoration.editor.borderColor(text);
 	const rail = borderPaint("│");
@@ -317,6 +318,7 @@ function renderFrame(decoration: EditorDecoration, width: number): string[] {
 		result.push(baseLines[i]!);
 	}
 
+	decoration.framedWidth = width;
 	return result.map((line) => truncateToWidth(line, width, ""));
 }
 
@@ -348,6 +350,7 @@ export function decorateOpenTuiEditor<T extends FrameableEditor>(
 		inlineFooter: options.inlineFooter,
 		indicator: undefined,
 		baseRender: editor.render.bind(editor),
+		framedWidth: undefined,
 		active: true,
 		cleanup() {
 			if (!decoration.active) return;
@@ -386,7 +389,7 @@ export function decorateOpenTuiEditor<T extends FrameableEditor>(
 		? renderFrame(decoration, width)
 		: decoration.baseRender(width));
 	patch("handleMouse", (event) => baseHandleMouse(
-		decoration.active && event.width >= EDITOR_FRAME_HORIZONTAL_CHROME
+		decoration.active && event.width === decoration.framedWidth
 			? { ...event, x: event.x - EDITOR_FRAME_LEFT_INSET, width: event.width - EDITOR_FRAME_HORIZONTAL_CHROME }
 			: event,
 	));
@@ -396,21 +399,6 @@ export function decorateOpenTuiEditor<T extends FrameableEditor>(
 	});
 	baseSetPaddingX(0);
 	return editor as T & OpenTuiEditorDecoration;
-}
-
-/** Standalone framed editor, used when no other extension installed one. */
-export function createOpenTuiEditor(
-	tui: TUI,
-	editorTheme: EditorTheme,
-	keybindings: KeybindingsManager,
-	cursorStyle: CursorStyle = "block",
-	inlineFooter?: InlineFooterRenderer,
-) {
-	return decorateOpenTuiEditor(
-		new CustomEditor(tui, editorTheme, keybindings, { paddingX: 0 }),
-		tui,
-		{ cursorStyle, inlineFooter },
-	);
 }
 
 type StreamWrite = (...args: unknown[]) => boolean;
