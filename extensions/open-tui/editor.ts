@@ -335,6 +335,7 @@ export function decorateOpenTuiEditor<T extends FrameableEditor>(
 	const baseHandleMouse = editor.handleMouse.bind(editor);
 	const baseSetPaddingX = editor.setPaddingX.bind(editor);
 	const baseSetWorkingStatus = decorated.setWorkingStatusIndicator?.bind(editor);
+	const baseSetCursorStyle = decorated.setCursorStyle?.bind(editor);
 	let padding = editor.getPaddingX();
 	const decoration: EditorDecoration = {
 		tui,
@@ -376,6 +377,7 @@ export function decorateOpenTuiEditor<T extends FrameableEditor>(
 	});
 	patch("setCursorStyle", (style, hardware = false) => {
 		if (decoration.active) applyCursorStyle(decoration, style, hardware);
+		else baseSetCursorStyle?.(style, hardware);
 	});
 	patch("render", (width) => decoration.active
 		? renderFrame(decoration, width)
@@ -501,9 +503,10 @@ export function installEditor(
 	const ui = ctx.ui;
 	const originalSetEditor = ui.setEditorComponent;
 	const originalGetEditor = ui.getEditorComponent;
-	let inheritedFactory = originalGetEditor?.call(ui);
+	let inheritedFactory = originalGetEditor.call(ui);
 	let mountedEditor: EditorComponent | undefined;
 	let mountedFactory: EditorFactory | undefined;
+	let mountedRender: EditorComponent["render"] | undefined;
 	let restoreEditorMount: (() => void) | undefined;
 	const releaseEditor = (): void => {
 		if (activeEditor) DECORATIONS.get(activeEditor)?.cleanup();
@@ -518,11 +521,13 @@ export function installEditor(
 		releaseEditor();
 		activeTui = tui;
 		mountedEditor = editor;
-		mountedFactory = originalGetEditor?.call(ui);
+		mountedFactory = originalGetEditor.call(ui);
 		resetHiddenThinkingTarget();
-		if (!isFrameableEditor(editor)) return;
-		previousHardwareCursor = tui.getShowHardwareCursor?.();
-		activeEditor = decorateOpenTuiEditor(editor, tui, { cursorStyle: currentCursorStyle, inlineFooter });
+		if (isFrameableEditor(editor)) {
+			previousHardwareCursor = tui.getShowHardwareCursor?.();
+			activeEditor = decorateOpenTuiEditor(editor, tui, { cursorStyle: currentCursorStyle, inlineFooter });
+		}
+		mountedRender = editor.render;
 	};
 	const wrapFactory = (delegate: EditorFactory | undefined): EditorFactory => {
 		const wrapped: EditorFactory = (tui, editorTheme, keybindings) => {
@@ -534,15 +539,15 @@ export function installEditor(
 			}
 			inner ??= new CustomEditor(tui, editorTheme, keybindings, { paddingX: 0 });
 			// A factory captured by another context must keep its original delegate.
-			if (enabled && (!originalGetEditor || originalGetEditor.call(ui) === wrapped)) mountEditor(tui, inner);
+			if (enabled && originalGetEditor.call(ui) === wrapped) mountEditor(tui, inner);
 			return inner;
 		};
 		return wrapped;
 	};
 	let factory = wrapFactory(inheritedFactory);
 	const getEditor: typeof ui.getEditorComponent = () => {
-		const current = originalGetEditor?.call(ui);
-		return enabled && (!originalGetEditor || current === factory) ? inheritedFactory : current;
+		const current = originalGetEditor.call(ui);
+		return enabled && current === factory ? inheritedFactory : current;
 	};
 	const setEditor: typeof ui.setEditorComponent = (next) => {
 		if (!enabled) return originalSetEditor.call(ui, next);
@@ -572,7 +577,9 @@ export function installEditor(
 		const descriptor = Object.getOwnPropertyDescriptor(target, "addChild");
 		const patched: typeof original = function (this: Container, child) {
 			const candidate = child as Partial<EditorComponent>;
-			if (enabled && activeTui && child !== mountedEditor
+			// Reused instances can have a new factory or render; unchanged dialog returns need no remount.
+			if (enabled && activeTui
+				&& (child !== mountedEditor || originalGetEditor.call(ui) !== mountedFactory || child.render !== mountedRender)
 				&& typeof candidate.getText === "function" && typeof candidate.setText === "function"
 				&& typeof candidate.handleInput === "function"
 				&& typeof candidate.onSubmit === "function" && candidate.onSubmit === mountedEditor?.onSubmit
@@ -616,14 +623,11 @@ export function installEditor(
 			resetHiddenThinkingTarget();
 			// 只恢复自己的代理；后来捕获的代理会在停用后透传到原接口。
 			if (ui.setEditorComponent === setEditor) ui.setEditorComponent = originalSetEditor;
-			if (ui.getEditorComponent === getEditor) {
-				if (originalGetEditor) ui.getEditorComponent = originalGetEditor;
-				else Reflect.deleteProperty(ui, "getEditorComponent");
-			}
-			const current = originalGetEditor?.call(ui);
-			if (!originalGetEditor || current === factory || current === mountedFactory) {
+			if (ui.getEditorComponent === getEditor) ui.getEditorComponent = originalGetEditor;
+			const current = originalGetEditor.call(ui);
+			if (current === factory || current === mountedFactory) {
 				try {
-					originalSetEditor.call(ui, current === factory || !originalGetEditor ? inheritedFactory : current);
+					originalSetEditor.call(ui, current === factory ? inheritedFactory : current);
 				} catch {
 					originalSetEditor.call(ui, undefined);
 				}

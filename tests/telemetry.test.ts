@@ -537,6 +537,7 @@ test("open-tui keeps a bounded peek scoped to the current assistant", async () =
 		registerMarkdownTransformer() {},
 		getThinkingLevel: () => "high",
 	} as unknown as ExtensionAPI;
+	let editorFactory: unknown;
 	const ctx = {
 		hasUI: true,
 		mode: "tui",
@@ -547,7 +548,9 @@ test("open-tui keeps a bounded peek scoped to the current assistant", async () =
 			notify() {},
 			setHeader() {},
 			setFooter() {},
+			getEditorComponent: () => editorFactory,
 			setEditorComponent(factory?: unknown) {
+				editorFactory = factory;
 				if (typeof factory === "function") {
 					factory(tui, { borderColor: (text: string) => text }, { matches: () => false });
 				}

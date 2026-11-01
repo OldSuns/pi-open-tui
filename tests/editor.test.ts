@@ -272,17 +272,8 @@ test("does not override Pi's native fullscreen wheel setting", () => {
 		setShowHardwareCursor() {},
 		setWheelScrollLines: () => wheelSettingChanges++,
 	} as unknown as TUI;
-	const ctx = {
-		ui: {
-			setEditorComponent: (factory: unknown) => {
-				if (typeof factory === "function") {
-					factory(fullscreenTui, editorTheme, { matches: () => false });
-				}
-			},
-		},
-	} as unknown as ExtensionContext;
-
-	const editor = installEditor({} as ExtensionAPI, ctx);
+	const host = createEditorHost(undefined, fullscreenTui);
+	const editor = installEditor({} as ExtensionAPI, host.ctx);
 	assert.equal(wheelSettingChanges, 0);
 	assert.equal(editor.getTui(), fullscreenTui);
 	editor.cleanup();
@@ -505,6 +496,80 @@ test("frames replacements from Pi shortcut contexts without rebuilding the edito
 	}
 });
 
+test("keeps reused editors framed and restores working status after fresh-context registrations", async () => {
+	const { InteractiveMode } = await import(new URL(
+		"./modes/interactive/interactive-mode.js",
+		import.meta.resolve("@earendil-works/pi-coding-agent"),
+	).href);
+	for (const resetRender of [false, true]) {
+		const editorContainer = new Container();
+		const hostTui = {
+			...tui,
+			children: [editorContainer],
+			getShowHardwareCursor: () => false,
+			setShowHardwareCursor() {},
+			setFocus(component: CustomEditor) { component.focused = true; },
+		} as unknown as TUI;
+		const keybindings = { matches: () => false } as unknown as KeybindingsManager;
+		const defaultEditor = new CustomEditor(hostTui, editorTheme, keybindings);
+		defaultEditor.onSubmit = () => {};
+		defaultEditor.onChange = () => {};
+		const indicator = { renderInBorder: () => "working", renderSpinnerInBorder: () => "*" };
+		const host = Object.create(InteractiveMode.prototype, Object.fromEntries(Object.entries({
+			ui: hostTui, keybindings, defaultEditor, editor: defaultEditor, editorContainer,
+			statusContainer: new Container(), activeStatusIndicator: indicator,
+			disposeActiveSelector() {},
+		}).map(([key, value]) => [key, { value, writable: true, configurable: true }])));
+		const ui = host.createExtensionUIContext();
+		const handle = installEditor({} as ExtensionAPI, { ui } as ExtensionContext, "block", {
+			enabled: () => true,
+			render: () => ({ top: { left: "branch", right: "" }, bottom: { left: "model", right: "" } }),
+		});
+		try {
+			const inner = new CustomEditor(hostTui, editorTheme, keybindings);
+			const render = inner.render.bind(inner);
+			let calls = 0;
+			const upstream: EditorFactory = () => {
+				calls++;
+				if (resetRender) inner.render = (width) => render(width);
+				return inner;
+			};
+			ui.setEditorComponent(upstream);
+			const freshUi = host.createExtensionUIContext();
+			const latest: EditorFactory = (...args) => upstream(...args);
+			for (const next of [upstream, upstream, latest]) {
+				const before = calls;
+				freshUi.setEditorComponent(next);
+				assert.equal(calls, before + 1, "mounting must not call the factory again");
+				assert.equal(host.editor, inner);
+				assert.equal(handle.isFramed(), true);
+				const lines = stripAnsi(inner.render(60).join("\n"));
+				assert.equal(lines.match(/╭/g)?.length, 1);
+				assert.match(lines, /╭.*working.*branch/);
+				assert.match(lines, /model/);
+			}
+
+			const dialog = new CustomEditor(hostTui, editorTheme, keybindings);
+			editorContainer.clear();
+			editorContainer.addChild(dialog);
+			assert.doesNotMatch(stripAnsi(dialog.render(60)[0]!), /^╭/);
+			editorContainer.clear();
+			editorContainer.addChild(inner);
+			assert.match(stripAnsi(inner.render(60)[0]!), /^╭.*working/);
+
+			handle.cleanup();
+			assert.equal(freshUi.getEditorComponent(), latest);
+			assert.equal(host.editor, inner);
+			assert.equal(inner.embedWorkingStatus, false);
+			assert.equal(host.activeWorkingIndicatorEmbedded, false);
+			assert.deepEqual(host.statusContainer.children, [indicator]);
+			assert.doesNotMatch(stripAnsi(inner.render(60)[0]!), /^╭/);
+		} finally {
+			handle.cleanup();
+		}
+	}
+});
+
 test("keeps factory composition outside the frame without recursion or duplicated borders", () => {
 	const host = createEditorHost();
 	const handle = installEditor({} as ExtensionAPI, host.ctx);
@@ -632,6 +697,26 @@ test("cleanup preserves later method and factory wrappers as passthroughs", () =
 	assert.doesNotMatch(stripAnsi(host.editor.render(40)[0] ?? ""), /^╭/);
 });
 
+test("cleanup forwards captured cursor-style wrappers to the original editor method", () => {
+	const calls: Array<[string, boolean | undefined]> = [];
+	const inner = Object.assign(createInnerEditor(), {
+		setCursorStyle(style: string, hardware?: boolean) { calls.push([style, hardware]); },
+	});
+	const host = createEditorHost(() => inner);
+	const handle = installEditor({} as ExtensionAPI, host.ctx);
+	try {
+		const cursor = inner.setCursorStyle.bind(inner);
+		inner.setCursorStyle = (style, hardware) => cursor(style, hardware);
+		inner.setCursorStyle("block", true);
+		assert.deepEqual(calls, [], "open-tui owns cursor styling while active");
+		handle.cleanup();
+		inner.setCursorStyle("underline", true);
+		assert.deepEqual(calls, [["underline", true]]);
+	} finally {
+		handle.cleanup();
+	}
+});
+
 test("cleanup does not reinstall an editor after another extension resets the slot", () => {
 	const host = createEditorHost(createInnerEditor);
 	const handle = installEditor({} as ExtensionAPI, host.ctx);
@@ -715,17 +800,8 @@ test("restores cursor shape and visibility when the editor is removed", () => {
 		getShowHardwareCursor: () => false,
 		setShowHardwareCursor: (enabled: boolean) => visibility.push(enabled),
 	} as unknown as TUI;
-	const ctx = {
-		ui: {
-			setEditorComponent: (factory: unknown) => {
-				if (typeof factory === "function") {
-					factory(hardwareTui, editorTheme, { matches: () => false });
-				}
-			},
-		},
-	} as unknown as import("@earendil-works/pi-coding-agent").ExtensionContext;
-
-	const editor = installEditor({} as import("@earendil-works/pi-coding-agent").ExtensionAPI, ctx, "bar");
+	const host = createEditorHost(undefined, hardwareTui);
+	const editor = installEditor({} as ExtensionAPI, host.ctx, "bar");
 	editor.cleanup();
 
 	assert.ok(writes.includes("\x1b[0 q"), "cursor shape was reset");

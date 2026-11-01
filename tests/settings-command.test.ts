@@ -143,6 +143,7 @@ test("leaves fullscreen wheel speed to Pi settings", async () => {
 test("previews cursor styles from the Appearance tab", async () => {
 	const writes: string[] = [];
 	let editorInstalls = 0;
+	let editorFactory: unknown;
 	let hardwareCursor = false;
 	const editorTui = {
 		terminal: { rows: 24, write: (data: string) => writes.push(data) },
@@ -154,7 +155,9 @@ test("previews cursor styles from the Appearance tab", async () => {
 	} as unknown as TUI;
 	const editor = installEditor({} as ExtensionAPI, {
 		ui: {
+			getEditorComponent: () => editorFactory,
 			setEditorComponent: (factory: unknown) => {
+				editorFactory = factory;
 				editorInstalls++;
 				if (typeof factory === "function") {
 					factory(editorTui, {
@@ -314,6 +317,7 @@ test("toggles the header without resetting a disabled slot and warns when persis
 		let command: ((args: string, ctx: ExtensionContext) => unknown) | undefined;
 		let settings: SettingsComponent | undefined;
 		const headers: unknown[] = [];
+		let editorFactory: unknown;
 		const notifications: Array<{ message: string; level: string }> = [];
 		const pi = {
 			on: (event: string, handler: (event: unknown, ctx: ExtensionContext) => unknown) => handlers.set(event, handler),
@@ -328,7 +332,8 @@ test("toggles the header without resetting a disabled slot and warns when persis
 			cwd: process.cwd(),
 			ui: {
 				setFooter() {},
-				setEditorComponent() {},
+				getEditorComponent: () => editorFactory,
+				setEditorComponent(factory: unknown) { editorFactory = factory; },
 				setHeader: (factory: unknown) => headers.push(factory),
 				notify: (message: string, level: string) => notifications.push({ message, level }),
 				custom: (factory: (tui: TUI, theme: Theme) => SettingsComponent) =>
