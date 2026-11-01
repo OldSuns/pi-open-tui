@@ -14,7 +14,7 @@ Live terminal screenshot with Pi 1.4.0.
 
 - **Pi header** with model, thinking level, working directory, and useful slash-command hints
 - **Responsive footer** with Git state, detected runtime, context usage, token counts, cost, and extension status
-- **Framed editor** with block, bar, and underline cursor styles
+- **Framed editor** with block, bar, and underline cursor styles; it preserves compatible editors installed by other extensions
 - **Project awareness** for 50+ runtimes and detailed Git states, including ahead/behind, staged, modified, untracked, stashed, and detached HEAD
 - **Turn telemetry** for TPS, time to first token (TTFT), duration, stalls, tokens, and list-price rate
 - **Thinking peek**: an inline ticker replaces Pi's hidden `Thinking...` label with the tail of the model's reasoning while it works
@@ -131,6 +131,10 @@ Footer token and cost totals include assistant responses, tool-reported usage, c
 When the first Footer row is too narrow, the runtime and context bar are hidden first, then Git, the session name, and the host name and timer. The CWD stays longest, shortened to its folder name.
 
 With `inlineFooter` enabled, the two normal Footer rows are rendered inside the editor frame to save vertical space. The top border places the Git branch on the left and CWD first in the right-hand group; the session title appears on the left too when `sessionName` is enabled. The Header and extension status rows remain separate; narrow terminals truncate lower-priority Footer data first, keeping the right-hand statistics and the border corner.
+
+open-tui frames existing editors that retain Pi’s native editor layout and its cursor, mouse, and padding APIs, including `CustomEditor` extensions. It decorates the same instance, preserving ghost text, key handling, completion, and submit callbacks. Editor extensions using the current `ctx.ui.setEditorComponent()` API can register before or after `pi-open-tui`; runtime replacements, including those made from shortcut callbacks with a fresh UI context, are framed too. Replacements are decorated when Pi mounts them, without calling the extension's factory again; temporary dialogs are left alone. Before decorating, open-tui renders the editor once at the terminal width to check for recognizable native top and bottom borders. Each framed render also checks its actual output; layouts without those borders are rendered again at the full requested width without frame mouse offsets, and framing resumes when native borders return. Editors without those capabilities or borders, or whose layout probe throws, remain unchanged, with the footer displayed separately even when `inlineFooter` is enabled. Disabling open-tui removes its decoration, restores the registration methods, and keeps the latest editor factory, including wrappers registered after open-tui.
+
+This ordering guarantee applies to editor registration, not header or footer replacements. Extensions that bypass the current registration API by calling a previously saved setter or replacing the API methods themselves are outside this guarantee.
 
 ## Turn telemetry
 
