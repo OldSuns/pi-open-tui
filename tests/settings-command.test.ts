@@ -270,6 +270,16 @@ test("configures inline footer from General settings", async () => {
 	assert.equal(settings.getConfig().inlineFooter, true);
 });
 
+test("toggles copy buttons from General settings", async () => {
+	const settings = await openSettings();
+	assert.equal(settings.getConfig().copyButtons, true);
+	// Enabled → Header → Language → Thinking peek → Footer in editor border → Copy buttons
+	for (let i = 0; i < 5; i++) settings.component.handleInput("\x1b[B");
+	assert.match(selectedLine(settings.component), /Copy buttons/);
+	settings.component.handleInput(" ");
+	assert.equal(settings.getConfig().copyButtons, false);
+});
+
 test("toggles the header without resetting the slot while disabled", async () => {
 	const agentDir = mkdtempSync(join(tmpdir(), "pi-open-tui-"));
 	const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
@@ -367,6 +377,7 @@ test("normalizes invalid settings values", () => {
 			cursorStyle: "invalid",
 			header: "no",
 			inlineFooter: "yes",
+			copyButtons: "no",
 			thinkingPeek: { lines: 9 },
 			toolView: { mode: "hidden" },
 			fullscreen: { wheelScrollLines: 10 },
@@ -376,6 +387,7 @@ test("normalizes invalid settings values", () => {
 		assert.equal(loaded.cursorStyle, "block");
 		assert.equal(loaded.header, true);
 		assert.equal(loaded.inlineFooter, false);
+		assert.equal(loaded.copyButtons, true);
 		assert.equal(loaded.thinkingPeek.lines, 1);
 		assert.equal(loaded.toolView.mode, "native");
 		assert.equal("fullscreen" in loaded, true);

@@ -30,6 +30,7 @@ const COPY = {
 			enabled: "Enabled",
 			header: "Override header",
 			inlineFooter: "Footer in editor border",
+			copyButtons: "Copy buttons",
 			thinkingPeek: "Thinking peek",
 			toolView: "Tool view",
 			language: "Language",
@@ -72,6 +73,7 @@ const COPY = {
 			enabled: "启用",
 			header: "覆盖顶部信息栏",
 			inlineFooter: "底栏嵌入输入框",
+			copyButtons: "复制按钮",
 			thinkingPeek: "思考预览",
 			toolView: "工具视图",
 			language: "语言",
@@ -170,6 +172,7 @@ function buildFeaturesItems(config: OpenTuiConfig, copy: SettingsCopy): SettingI
 		{ id: "settingsLanguage", label: copy.labels.language, currentValue: copy.values.languages[config.settingsLanguage] },
 		{ id: "thinkingPeek", label: copy.labels.thinkingPeek, currentValue: formatThinkingPeekLines(config.thinkingPeek.lines, copy) },
 		{ id: "inlineFooter", label: copy.labels.inlineFooter, currentValue: flag(config.inlineFooter) },
+		{ id: "copyButtons", label: copy.labels.copyButtons, currentValue: flag(config.copyButtons) },
 		{ id: "toolView", label: copy.labels.toolView, currentValue: copy.values.toolView[config.toolView.mode] },
 	];
 }
@@ -235,6 +238,7 @@ function handleSettingChange(
 		if (itemId === "enabled") return toggleEnabled(config);
 		if (itemId === "header") return { ...config, header: !config.header };
 		if (itemId === "inlineFooter") return { ...config, inlineFooter: !config.inlineFooter };
+		if (itemId === "copyButtons") return { ...config, copyButtons: !config.copyButtons };
 		if (itemId === "settingsLanguage") return toggleLanguage(config);
 		if (itemId === "thinkingPeek") return cycleThinkingPeek(config);
 		if (itemId === "toolView") {

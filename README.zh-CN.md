@@ -62,6 +62,7 @@ pi -e npm:pi-open-tui
   "enabled": true,
   "header": true,
   "inlineFooter": false,
+  "copyButtons": true,
   "settingsLanguage": "zh",
   "cursorStyle": "block",
   "icons": {
@@ -108,6 +109,7 @@ pi -e npm:pi-open-tui
 | `settingsLanguage` | `en`、`zh` | 切换 `/open-tui` 设置界面的语言 |
 | `header` | `true`、`false` | 决定是否用 open-tui 顶部信息栏覆盖 Pi 的 Header；设为 `false` 时把顶部栏位置留给 Pi 或其他扩展 |
 | `inlineFooter` | `true`、`false` | 将两条主要 Footer 信息行移入编辑器上下边框以节省垂直空间，默认关闭；扩展状态行仍显示在编辑器外 |
+| `copyButtons` | `true`、`false` | 全屏模式下给代码块加圆角边框，并在代码块和用户消息上显示可点击的 `[Copy]` 标签，默认开启；见[复制按钮](#复制按钮) |
 | `cursorStyle` | `block`、`bar`、`underline` | `bar` 和 `underline` 需要终端支持光标形状转义序列 |
 | `icons.mode` | `auto`、`nerd`、`unicode`、`ascii` | 控制底栏和遥测通知使用的图标 |
 | `footerSegments` | 布尔开关 | 分别控制底栏中的各项数据 |
@@ -169,6 +171,26 @@ TPS 的计算方式是：将本次运行中服务商报告的全部 Assistant �
 - 点击某行只展开这一行为 Pi 原生卡片，`Ctrl+O` 展开全部行；完整输出、diff 和截断提示保持不变。
 - 只改变显示：工具、参数、结果以及模型看到的内容都不受影响，第三方和 MCP 工具保持各自的渲染。
 - 模式在 Pi 创建某行时确定，因此切换只影响新建的行；执行 `/reload` 或新开会话后整个记录都会应用。
+
+## 复制按钮
+
+全屏模式（Pi 的 `tuiMode: "fullscreen"`）下，每个代码块都会画在圆角边框里，顶边显示语言和始终可见的 `[Copy]` 标签；每条用户消息也有 `[Copy]` 标签。点击即可把原始文本放入剪贴板，Pi 会短暂提示 `Copied!`。
+
+```text
+╭─ sh ─────────────── [Copy] ╮
+│ pi install npm:pi-open-tui │
+╰────────────────────────────╯
+```
+
+- 代码块：边框替代了上下两行围栏，代码块高度不变；过长的行在边框内换行。标签复制不含围栏的代码，保留缩进和制表符。用户消息和助手回复里的代码块都适用。
+- 用户消息：标签位于气泡最后一行，复制你输入的原文。
+- 整条助手回复没有标签，请使用 Pi 的 `/copy`。
+- 回复输出过程中代码块只有边框、没有标签，避免复制到不完整的代码；边框太窄时也不显示标签；思考块保留 Pi 原生的围栏。
+- 普通模式不捕获鼠标，代码块保留 Pi 原生的围栏。
+- 拖动选择经过边框时会包含边框字符和 `[Copy]` 文字。
+- 如果同时安装了 pi-pretty-tui，则保留它自己的代码块边框和复制按钮，不再绘制这些内容。
+
+可在 `/open-tui` 的**常规 → 复制按钮**中切换，或直接修改 `open-tui.json` 中的 `copyButtons`。
 
 ## 本地开发
 

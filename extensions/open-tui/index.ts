@@ -1,5 +1,6 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { type OpenTuiConfig, DEFAULT_CONFIG, ensureConfigExists, loadConfig, saveConfig } from "./config.ts";
+import { installCopyButtons, markCopyScope } from "./copy-buttons.ts";
 import { installEditor } from "./editor.ts";
 import { installFooter } from "./footer.ts";
 import { installHeader } from "./header.ts";
@@ -54,6 +55,7 @@ export default function (pi: ExtensionAPI) {
 	let cleanupHeader: (() => void) | undefined;
 	let cleanupFooter: (() => void) | undefined;
 	let editor: ReturnType<typeof installEditor> | undefined;
+	let copyButtons: ReturnType<typeof installCopyButtons> | undefined;
 	let pendingUiChange: PendingUiChange | undefined;
 
 	// thinking-peek state (rendered by Pi inside its hidden-thinking block)
@@ -143,6 +145,11 @@ export default function (pi: ExtensionAPI) {
 					render: footer.renderInline,
 				},
 			);
+			copyButtons = installCopyButtons({
+				getTui: editor.getTui,
+				getTheme: () => ctx.ui.theme,
+				isEnabled: () => config.copyButtons,
+			});
 			active = true;
 		}
 	};
@@ -152,9 +159,11 @@ export default function (pi: ExtensionAPI) {
 		if (active) {
 			cleanupHeader?.();
 			cleanupFooter?.();
+			copyButtons?.cleanup();
 			editor?.cleanup();
 			cleanupHeader = undefined;
 			cleanupFooter = undefined;
+			copyButtons = undefined;
 			editor = undefined;
 			requestFooterRender = undefined;
 			resetPeek();
@@ -385,11 +394,16 @@ export default function (pi: ExtensionAPI) {
 		);
 	}
 
+	if (typeof pi.registerMarkdownTransformer === "function") {
+		pi.registerMarkdownTransformer(markCopyScope);
+	}
+
 	registerSettingsCommand(pi, {
 		getConfig: () => config,
 		onConfigChanged: (newConfig) => {
 			const cursorStyleChanged = config.cursorStyle !== newConfig.cursorStyle;
 			const headerChanged = config.header !== newConfig.header;
+			const copyButtonsChanged = config.copyButtons !== newConfig.copyButtons;
 			const thinkingPeekLinesChanged = config.thinkingPeek.lines !== newConfig.thinkingPeek.lines;
 			saveConfig(newConfig);
 			config = newConfig;
@@ -406,6 +420,7 @@ export default function (pi: ExtensionAPI) {
 				cleanupHeader?.();
 				cleanupHeader = newConfig.header ? installHeader(pi, lastCtx) : undefined;
 			}
+			if (copyButtonsChanged) copyButtons?.refresh();
 			if (lastCtx) {
 				pendingUiChange = getPendingUiChange(newConfig.enabled, active);
 			}

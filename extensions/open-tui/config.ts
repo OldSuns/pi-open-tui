@@ -46,6 +46,8 @@ export interface OpenTuiConfig {
 	/** Override Pi's header with the open-tui header. When false, the header slot is left to Pi or another extension. */
 	header: boolean;
 	inlineFooter: boolean;
+	/** Clickable `Copy` labels on code blocks and user messages (fullscreen mode only). */
+	copyButtons: boolean;
 	settingsLanguage: SettingsLanguage;
 	cursorStyle: CursorStyle;
 	icons: {
@@ -63,6 +65,7 @@ export const DEFAULT_CONFIG: OpenTuiConfig = {
 	enabled: true,
 	header: true,
 	inlineFooter: false,
+	copyButtons: true,
 	settingsLanguage: "en",
 	cursorStyle: "block",
 	icons: {
@@ -175,6 +178,9 @@ export function loadConfig(notify?: (msg: string, level: "warning" | "info") => 
 		}
 		if (typeof config.inlineFooter !== "boolean") {
 			config.inlineFooter = DEFAULT_CONFIG.inlineFooter;
+		}
+		if (typeof config.copyButtons !== "boolean") {
+			config.copyButtons = DEFAULT_CONFIG.copyButtons;
 		}
 		config.footerSegments = normalizeFlags(config.footerSegments, DEFAULT_CONFIG.footerSegments);
 		config.telemetry = normalizeFlags(config.telemetry, DEFAULT_CONFIG.telemetry);

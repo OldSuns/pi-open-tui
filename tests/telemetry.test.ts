@@ -522,6 +522,7 @@ test("open-tui keeps a bounded peek scoped to the current assistant", async () =
 		children: [{ children: thinkingComponents }],
 		getShowHardwareCursor: () => false,
 		setShowHardwareCursor() {},
+		invalidate() {},
 		requestRender() {},
 	};
 	const pi = {
