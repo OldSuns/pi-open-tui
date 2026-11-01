@@ -128,6 +128,8 @@ Key options:
 
 Footer token and cost totals include assistant responses, tool-reported usage, compaction and branch summaries, and cache warming. The cache-hit percentage describes the most recent assistant response, not the cumulative session.
 
+When the first Footer row is too narrow, the runtime and context bar are hidden first, then Git, the session name, and the host name and timer. The CWD stays longest, shortened to its folder name.
+
 With `inlineFooter` enabled, the two normal Footer rows are rendered inside the editor frame to save vertical space. The top border places the Git branch on the left and CWD first in the right-hand group; the session title appears on the left too when `sessionName` is enabled. The Header and extension status rows remain separate; narrow terminals truncate lower-priority Footer data first, keeping the right-hand statistics and the border corner.
 
 ## Turn telemetry

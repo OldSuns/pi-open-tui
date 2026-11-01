@@ -99,6 +99,7 @@ export async function readGitStatus(
 		else if (x === "R") {
 			status.renamed++;
 			if (y === "M") status.modified++;
+			else if (y === "D") status.deleted++;
 		} else if (x === "D" || y === "D") status.deleted++;
 		else {
 			if (x !== " " && x !== "?") status.staged++;

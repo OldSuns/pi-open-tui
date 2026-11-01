@@ -169,21 +169,24 @@ test("counts Git RM entries as renamed and modified while preserving deletions",
 	const root = mkdtempSync(join(tmpdir(), "open-tui-git-"));
 	try {
 		execFileSync("git", ["init", "-b", "main"], { cwd: root });
-		for (const file of ["original.txt", "staged-delete.txt", "worktree-delete.txt"]) {
+		for (const file of ["original.txt", "moved.txt", "staged-delete.txt", "worktree-delete.txt"]) {
 			writeFileSync(join(root, file), "initial\n");
 		}
 		execFileSync("git", ["add", "."], { cwd: root });
 		execFileSync("git", ["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-m", "init"], { cwd: root });
 		execFileSync("git", ["mv", "original.txt", "renamed.txt"], { cwd: root });
 		writeFileSync(join(root, "renamed.txt"), "modified after rename\n");
+		execFileSync("git", ["mv", "moved.txt", "moved-away.txt"], { cwd: root });
+		rmSync(join(root, "moved-away.txt"));
 		execFileSync("git", ["rm", "staged-delete.txt"], { cwd: root });
 		rmSync(join(root, "worktree-delete.txt"));
 		assert.match(execFileSync("git", ["status", "--porcelain=v1"], { cwd: root, encoding: "utf8" }), /^RM original.txt -> renamed.txt$/m);
+		assert.match(execFileSync("git", ["status", "--porcelain=v1"], { cwd: root, encoding: "utf8" }), /^RD moved.txt -> moved-away.txt$/m);
 
 		const status = await readGitStatus(root);
-		assert.equal(status.renamed, 1);
+		assert.equal(status.renamed, 2);
 		assert.equal(status.modified, 1);
-		assert.equal(status.deleted, 2);
+		assert.equal(status.deleted, 3);
 		assert.equal(status.staged, 0);
 		assert.equal(status.conflicted, 0);
 	} finally {
@@ -664,7 +667,7 @@ test("detects runtime project suffixes and Java versions on either output stream
 			for (const [marker, name] of [
 				["app.csproj", "dotnet"], ["app.fsproj", "dotnet"],
 				["app.nimble", "nim"], ["app.Rproj", "r"],
-				["app.cabal", "haskell"], ["app.opam", "ocaml"],
+				["app.cabal", "haskell"], ["app.opam", "ocaml"], ["main.scala", "scala"],
 				["CMakeLists.txt", "cpp"], ["Makefile", "cpp"],
 			]) {
 				const cwd = join(root, marker);

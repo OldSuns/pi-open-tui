@@ -45,7 +45,7 @@ const RUNTIMES: readonly RuntimeDef[] = [
 	{ name: "zig", files: ["build.zig"], versionCommand: { cmd: "zig", args: ["version"], pattern: /(\d+\.\d+\.\d+)/ } },
 	{ name: "ocaml", files: ["dune", "dune-project"], extensions: [".opam"] },
 	{ name: "clojure", files: ["project.clj", "deps.edn"] },
-	{ name: "scala", files: ["build.sbt", ".scala", ".metals"] },
+	{ name: "scala", files: ["build.sbt", ".metals"], extensions: [".scala"] },
 	{ name: "perl", files: ["Makefile.PL", "cpanfile"] },
 	{ name: "r", files: ["DESCRIPTION"], extensions: [".Rproj"] },
 	{ name: "elm", files: ["elm.json"] },
