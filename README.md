@@ -12,7 +12,7 @@ A polished terminal interface for the [Pi](https://pi.dev) coding agent. It brin
 
 - **Pi header** with model, thinking level, working directory, and useful slash-command hints
 - **Responsive footer** with Git state, detected runtime, context usage, token counts, cost, and extension status
-- **Framed editor** with block, bar, and underline cursor styles; it wraps an editor installed by another extension instead of replacing it
+- **Framed editor** with block, bar, and underline cursor styles; it preserves compatible editors installed by other extensions
 - **Project awareness** for 50+ runtimes and detailed Git states, including ahead/behind, staged, modified, untracked, stashed, and detached HEAD
 - **Turn telemetry** for TPS, time to first token (TTFT), duration, stalls, tokens, and list-price rate
 - **Thinking peek**: an inline ticker replaces Pi's hidden `Thinking...` label with the tail of the model's reasoning while it works
@@ -123,7 +123,9 @@ Key options:
 
 With `inlineFooter` enabled, the two normal Footer rows are rendered inside the editor frame to save vertical space. The top border places the Git branch on the left and CWD first in the right-hand group; the session title appears on the left too when `sessionName` is enabled. The Header and extension status rows remain separate; narrow terminals truncate lower-priority Footer data first, keeping the right-hand statistics and the border corner.
 
-open-tui composes with other editor extensions. Pi's `setEditorComponent()` replaces the previous factory, so open-tui reads the installed factory with `getEditorComponent()`, decorates the editor it returns in place, and hands that factory back on unload. Ghost text, key handling, completion, and submit callbacks therefore stay on the same instance. List editor extensions before `pi-open-tui` in `packages` so they render inside the frame; when open-tui is disabled, they keep working on their own.
+open-tui frames existing editors that retain Pi’s native editor layout and its cursor, mouse, and padding APIs, including `CustomEditor` extensions. It decorates the same instance, preserving ghost text, key handling, completion, and submit callbacks. Editor extensions using the current `ctx.ui.setEditorComponent()` API can register before or after `pi-open-tui`; runtime replacements are framed too. Editors without those capabilities remain unchanged, with the footer displayed separately even when `inlineFooter` is enabled. Disabling open-tui removes its decoration, restores the registration methods, and keeps the latest editor factory, including wrappers registered after open-tui.
+
+This ordering guarantee applies to editor registration, not header or footer replacements. Extensions that bypass the current registration API by calling a previously saved setter or replacing the API methods themselves are outside this guarantee.
 
 ## Turn telemetry
 

@@ -4,7 +4,7 @@ import {
 	type ExtensionContext,
 	type KeybindingsManager,
 } from "@earendil-works/pi-coding-agent";
-import type { EditorComponent, EditorTheme, TuiMouseEvent, TUI } from "@earendil-works/pi-tui";
+import type { EditorComponent, EditorTheme, TUI } from "@earendil-works/pi-tui";
 import { CURSOR_MARKER, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import type { CursorStyle } from "./config.ts";
 import { findBottomBorderIndex, isEditorBorderLine, stripAnsi } from "./utils.ts";
@@ -202,39 +202,45 @@ function inlineBorder(
 	return `${paint(corners[0])}${left}${leftCell}${paint("─".repeat(fill))}${rightCell}${right}${paint("─")}${paint(corners[1])}`;
 }
 
-export interface OpenTuiEditorOptions {
+interface OpenTuiEditorOptions {
 	cursorStyle?: CursorStyle;
 	inlineFooter?: InlineFooterRenderer;
 }
 
 /** Capabilities this decorator adds to the editor instance it wraps. */
-export interface OpenTuiEditorDecoration {
+interface OpenTuiEditorDecoration {
 	embedWorkingStatus?: boolean;
 	setWorkingStatusIndicator(indicator: WorkingStatusIndicator | undefined): void;
 	setCursorStyle(cursorStyle: CursorStyle, blockHardwareCursor?: boolean): void;
 }
 
-export type OpenTuiDecoratedEditor = CustomEditor & OpenTuiEditorDecoration;
-/** Any editor instance this decorator touched: the Pi editor contract plus our additions. */
-export type OpenTuiEditorCapability = EditorComponent & OpenTuiEditorDecoration;
+type FrameableEditor = EditorComponent & Pick<CustomEditor,
+	"focused" | "borderColor" | "handleMouse" | "getPaddingX" | "setPaddingX"
+>;
+
+// 按能力识别，避免跨模块加载时 instanceof 失效；仅支持保留 Pi 原生布局的编辑器。
+function isFrameableEditor(editor: EditorComponent): editor is FrameableEditor {
+	return typeof editor.borderColor === "function"
+		&& typeof editor.handleMouse === "function"
+		&& "getPaddingX" in editor && typeof editor.getPaddingX === "function"
+		&& typeof editor.setPaddingX === "function"
+		&& "focused" in editor && typeof editor.focused === "boolean";
+}
 
 interface EditorDecoration {
 	tui: TUI;
-	editor: EditorComponent;
+	editor: FrameableEditor;
 	cursorStyle: CursorStyle;
 	previewHardwareCursor: boolean;
 	inlineFooter: InlineFooterRenderer | undefined;
 	indicator: WorkingStatusIndicator | undefined;
 	baseRender: (width: number) => string[];
-	baseHandleMouse: ((event: TuiMouseEvent) => unknown) | undefined;
-	baseSetPaddingX: ((padding: number) => void) | undefined;
+	active: boolean;
+	cleanup(): void;
 }
 
 // One decoration per instance: installing twice must not stack two frames.
 const DECORATIONS = new WeakMap<object, EditorDecoration>();
-// Factories registered by a previous install. Restoring one of those on cleanup
-// would leave a stale frame behind instead of handing the slot back.
-const OWN_FACTORIES = new WeakSet<object>();
 
 function applyCursorStyle(
 	decoration: EditorDecoration,
@@ -268,7 +274,7 @@ function renderWithCursor(decoration: EditorDecoration, width: number): string[]
 
 	// A focused overlay suppresses the editor's cursor marker. Preserve its
 	// position only for the live settings preview, then clear it on refocus.
-	const focused = (decoration.editor as { focused?: boolean }).focused === true;
+	const focused = decoration.editor.focused;
 	let cursorMarker = decoration.previewHardwareCursor && !focused ? CURSOR_MARKER : "";
 	if (focused) decoration.previewHardwareCursor = false;
 	return renderedLines.map((line) => {
@@ -278,40 +284,13 @@ function renderWithCursor(decoration: EditorDecoration, width: number): string[]
 	});
 }
 
-/**
- * Route the frame through the instance's `borderColor` so Pi can recolor it via
- * `updateEditorBorderColor()`: bash mode ("! " prefix → green) and thinking-level
- * borders both flow through that one property.
- */
-function paintBorder(editor: EditorComponent, text: string): string {
-	const borderColor = (editor as { borderColor?: unknown }).borderColor;
-	return typeof borderColor === "function" ? (borderColor as (value: string) => string)(text) : text;
-}
-
-/** Pi's own editor renders exactly one top border, content, then one bottom border. */
-function isFrameable(lines: string[]): boolean {
-	if (lines.length < 3) return false;
-	if (!isEditorBorderLine(lines[0] ?? "")) return false;
-	const bottom = findBottomBorderIndex(lines);
-	return bottom >= 1 && bottom < lines.length && isEditorBorderLine(lines[bottom] ?? "");
-}
-
 function renderFrame(decoration: EditorDecoration, width: number): string[] {
 	if (width < EDITOR_FRAME_HORIZONTAL_CHROME) return renderWithCursor(decoration, width);
 
 	const innerWidth = Math.max(0, width - EDITOR_FRAME_HORIZONTAL_CHROME);
 	const baseLines = renderWithCursor(decoration, innerWidth);
-	if (!isFrameable(baseLines)) {
-		// The inner editor does not use Pi's border layout (it draws its own chrome,
-		// or an extension replaced it wholesale). Skip our frame rather than drawing a
-		// second one, and hand the working indicator back to Pi's status container.
-		(decoration.editor as { embedWorkingStatus?: boolean }).embedWorkingStatus = false;
-		return renderWithCursor(decoration, width).map((line) => truncateToWidth(line, width, ""));
-	}
-	(decoration.editor as { embedWorkingStatus?: boolean }).embedWorkingStatus = true;
-
-	const rail = paintBorder(decoration.editor, "│");
-	const borderPaint = (text: string) => paintBorder(decoration.editor, text);
+	const borderPaint = (text: string) => decoration.editor.borderColor(text);
+	const rail = borderPaint("│");
 	const bottomIdx = findBottomBorderIndex(baseLines);
 
 	const result: string[] = [];
@@ -347,20 +326,20 @@ function renderFrame(decoration: EditorDecoration, width: number): string[] {
  * instance. Patching (instead of wrapping) keeps `onSubmit` / `onChange` / `handleInput`
  * on one object, so Pi and every extension that wrapped the factory before us keep working.
  */
-export function decorateOpenTuiEditor<T extends EditorComponent>(
+export function decorateOpenTuiEditor<T extends FrameableEditor>(
 	editor: T,
 	tui: TUI,
 	options: OpenTuiEditorOptions = {},
 ): T & OpenTuiEditorDecoration {
 	const existing = DECORATIONS.get(editor);
-	if (existing) {
-		if (options.cursorStyle !== undefined && options.cursorStyle !== existing.cursorStyle) {
-			applyCursorStyle(existing, options.cursorStyle);
-		}
-		existing.inlineFooter = options.inlineFooter ?? existing.inlineFooter;
-		return editor as T & OpenTuiEditorDecoration;
-	}
+	if (existing) return editor as T & OpenTuiEditorDecoration;
 
+	const decorated = editor as FrameableEditor & OpenTuiEditorDecoration;
+	const restore: (() => void)[] = [];
+	const baseHandleMouse = editor.handleMouse.bind(editor);
+	const baseSetPaddingX = editor.setPaddingX.bind(editor);
+	const baseSetWorkingStatus = decorated.setWorkingStatusIndicator?.bind(editor);
+	let padding = editor.getPaddingX();
 	const decoration: EditorDecoration = {
 		tui,
 		editor,
@@ -369,42 +348,53 @@ export function decorateOpenTuiEditor<T extends EditorComponent>(
 		inlineFooter: options.inlineFooter,
 		indicator: undefined,
 		baseRender: editor.render.bind(editor),
-		baseHandleMouse: typeof (editor as { handleMouse?: unknown }).handleMouse === "function"
-			? (editor as unknown as { handleMouse(event: TuiMouseEvent): unknown }).handleMouse.bind(editor)
-			: undefined,
-		baseSetPaddingX: typeof (editor as { setPaddingX?: unknown }).setPaddingX === "function"
-			? (editor as unknown as { setPaddingX(padding: number): void }).setPaddingX.bind(editor)
-			: undefined,
+		active: true,
+		cleanup() {
+			if (!decoration.active) return;
+			decoration.active = false;
+			for (const undo of restore) undo();
+			baseSetPaddingX(padding);
+			DECORATIONS.delete(editor);
+		},
+	};
+	// 只撤销仍属于自己的属性；后来包装的方法会通过 active=false 调用原实现。
+	const patch = <K extends keyof OpenTuiEditorDecoration | "render" | "handleMouse" | "setPaddingX">(
+		key: K,
+		value: (FrameableEditor & OpenTuiEditorDecoration)[K],
+	): void => {
+		const descriptor = Object.getOwnPropertyDescriptor(editor, key);
+		decorated[key] = value;
+		restore.push(() => {
+			if (decorated[key] !== value) return;
+			if (descriptor) Object.defineProperty(editor, key, descriptor);
+			else Reflect.deleteProperty(editor, key);
+		});
 	};
 	DECORATIONS.set(editor, decoration);
 	configureCursor(tui, decoration.cursorStyle);
-
-	const decorated = editor as T & OpenTuiEditorDecoration;
-	decorated.embedWorkingStatus = true;
-	decorated.setWorkingStatusIndicator = (indicator) => {
+	patch("embedWorkingStatus", true);
+	patch("setWorkingStatusIndicator", (indicator) => {
+		if (!decoration.active) return baseSetWorkingStatus?.(indicator);
 		decoration.indicator = indicator;
 		tui.requestRender();
-	};
-	decorated.setCursorStyle = (nextCursorStyle, blockHardwareCursor = false) => {
-		applyCursorStyle(decoration, nextCursorStyle, blockHardwareCursor);
-	};
-	editor.render = (width: number) => renderFrame(decoration, width);
-	if (decoration.baseHandleMouse) {
-		(editor as unknown as { handleMouse(event: TuiMouseEvent): unknown }).handleMouse = (event: TuiMouseEvent) =>
-			event.width < EDITOR_FRAME_HORIZONTAL_CHROME
-				? decoration.baseHandleMouse?.(event)
-				: decoration.baseHandleMouse?.({
-					...event,
-					x: event.x - EDITOR_FRAME_LEFT_INSET,
-					width: event.width - EDITOR_FRAME_HORIZONTAL_CHROME,
-				});
-	}
-	if (decoration.baseSetPaddingX) {
-		// The custom rail owns the horizontal inset and keeps one stable text gap.
-		(editor as unknown as { setPaddingX(padding: number): void }).setPaddingX = (_padding: number) =>
-			decoration.baseSetPaddingX?.(0);
-	}
-	return decorated;
+	});
+	patch("setCursorStyle", (style, hardware = false) => {
+		if (decoration.active) applyCursorStyle(decoration, style, hardware);
+	});
+	patch("render", (width) => decoration.active
+		? renderFrame(decoration, width)
+		: decoration.baseRender(width));
+	patch("handleMouse", (event) => baseHandleMouse(
+		decoration.active && event.width >= EDITOR_FRAME_HORIZONTAL_CHROME
+			? { ...event, x: event.x - EDITOR_FRAME_LEFT_INSET, width: event.width - EDITOR_FRAME_HORIZONTAL_CHROME }
+			: event,
+	));
+	patch("setPaddingX", (nextPadding) => {
+		padding = nextPadding;
+		baseSetPaddingX(decoration.active ? 0 : nextPadding);
+	});
+	baseSetPaddingX(0);
+	return editor as T & OpenTuiEditorDecoration;
 }
 
 /** Standalone framed editor, used when no other extension installed one. */
@@ -414,7 +404,7 @@ export function createOpenTuiEditor(
 	keybindings: KeybindingsManager,
 	cursorStyle: CursorStyle = "block",
 	inlineFooter?: InlineFooterRenderer,
-): OpenTuiDecoratedEditor {
+) {
 	return decorateOpenTuiEditor(
 		new CustomEditor(tui, editorTheme, keybindings, { paddingX: 0 }),
 		tui,
@@ -465,7 +455,8 @@ export function installEditor(
 	inlineFooter?: InlineFooterRenderer,
 ) {
 	let activeTui: TUI | undefined;
-	let activeEditor: OpenTuiEditorCapability | undefined;
+	let activeEditor: (FrameableEditor & OpenTuiEditorDecoration) | undefined;
+	let enabled = true;
 	let previousHardwareCursor: boolean | undefined;
 	let currentCursorStyle = cursorStyle;
 	let hiddenThinkingTarget: HiddenThinkingLabelComponent | undefined;
@@ -511,39 +502,50 @@ export function installEditor(
 		if (activeTui?.mode === "fullscreen") activeTui.requestRender(true);
 	});
 
-	// Pi's setEditorComponent replaces, so a later install would silently drop an
-	// editor another extension wrapped in. Capture that factory and decorate the
-	// instance it returns instead of replacing it (CHANGELOG #3935).
-	const previousFactory = typeof ctx.ui.getEditorComponent === "function"
-		? ctx.ui.getEditorComponent()
-		: undefined;
-	// A factory left behind by an earlier install of this same extension must not
-	// come back on cleanup, or the frame would survive an uninstall.
-	const inheritedFactory = previousFactory && !OWN_FACTORIES.has(previousFactory)
-		? previousFactory
-		: undefined;
-
+	const ui = ctx.ui;
+	const originalSetEditor = ui.setEditorComponent;
+	const originalGetEditor = ui.getEditorComponent;
+	let inheritedFactory = originalGetEditor?.call(ui);
+	const releaseEditor = (): void => {
+		if (activeEditor) DECORATIONS.get(activeEditor)?.cleanup();
+		activeEditor = undefined;
+		if (activeTui && previousHardwareCursor !== undefined) {
+			if (currentCursorStyle !== "block") activeTui.terminal.write(DEFAULT_CURSOR_STYLE_SEQUENCE);
+			activeTui.setShowHardwareCursor(previousHardwareCursor);
+		}
+		previousHardwareCursor = undefined;
+	};
 	const factory: EditorFactory = (tui, editorTheme, keybindings) => {
-		activeTui = tui;
-		resetHiddenThinkingTarget();
-		previousHardwareCursor = tui.getShowHardwareCursor?.();
+		releaseEditor();
 		let inner: EditorComponent | undefined;
 		try {
 			inner = inheritedFactory?.(tui, editorTheme, keybindings);
 		} catch {
-			// One broken editor extension must not take open-tui down with it.
-			inner = undefined;
+			// 上游工厂不可用时保留默认编辑器。
 		}
-		activeEditor = decorateOpenTuiEditor(
-			inner ?? new CustomEditor(tui, editorTheme, keybindings, { paddingX: 0 }),
-			tui,
-			{ cursorStyle: currentCursorStyle, inlineFooter },
-		);
+		inner ??= new CustomEditor(tui, editorTheme, keybindings, { paddingX: 0 });
+		if (!enabled) return inner;
+		activeTui = tui;
+		resetHiddenThinkingTarget();
+		if (!isFrameableEditor(inner)) return inner;
+		previousHardwareCursor ??= tui.getShowHardwareCursor?.();
+		activeEditor = decorateOpenTuiEditor(inner, tui, { cursorStyle: currentCursorStyle, inlineFooter });
 		return activeEditor;
 	};
-	OWN_FACTORIES.add(factory);
-	ctx.ui.setEditorComponent(factory);
+	// 所有扩展共享此 ui。对外保留原始工厂视图，在注册入口统一加框，避免顺序依赖和自包装。
+	const getEditor: typeof ui.getEditorComponent = () => enabled
+		? inheritedFactory
+		: originalGetEditor?.call(ui);
+	const setEditor: typeof ui.setEditorComponent = (next) => {
+		if (!enabled) return originalSetEditor.call(ui, next);
+		inheritedFactory = next;
+		originalSetEditor.call(ui, factory);
+	};
+	ui.getEditorComponent = getEditor;
+	ui.setEditorComponent = setEditor;
+	originalSetEditor.call(ui, factory);
 	return {
+		isFramed: () => enabled && activeEditor !== undefined,
 		/** `build` receives the hidden-thinking text width and runs again whenever that width changes. */
 		setLatestHiddenThinkingLabel(build: (width: number) => string): void {
 			const tui = getActiveTui();
@@ -561,26 +563,23 @@ export function installEditor(
 			activeEditor?.setCursorStyle(nextCursorStyle, previousHardwareCursor);
 		},
 		cleanup(): void {
+			if (!enabled) return;
+			enabled = false;
+			releaseEditor();
 			restoreStderr();
 			resetHiddenThinkingTarget();
-			if (activeTui) {
-				if (currentCursorStyle !== "block") activeTui.terminal.write(DEFAULT_CURSOR_STYLE_SEQUENCE);
-				if (previousHardwareCursor !== undefined) activeTui.setShowHardwareCursor(previousHardwareCursor);
+			// 只恢复自己的代理；后来捕获的代理会在停用后透传到原接口。
+			if (ui.setEditorComponent === setEditor) ui.setEditorComponent = originalSetEditor;
+			if (ui.getEditorComponent === getEditor) {
+				if (originalGetEditor) ui.getEditorComponent = originalGetEditor;
+				else Reflect.deleteProperty(ui, "getEditorComponent");
 			}
-			// Hand the editor slot back instead of clearing it, so editors wrapped
-			// before us stay installed after open-tui is disabled or unloaded.
-			const currentFactory = typeof ctx.ui.getEditorComponent === "function"
-				? ctx.ui.getEditorComponent()
-				: undefined;
-			// Another extension wrapped us after we installed; replacing the factory
-			// now would silently drop its wrapper.
-			if (currentFactory !== undefined && currentFactory !== factory) return;
-			try {
-				ctx.ui.setEditorComponent(inheritedFactory);
-			} catch {
-				// The inherited factory broke after we took over; fall back to Pi's editor
-				// rather than leaving the slot empty.
-				ctx.ui.setEditorComponent(undefined);
+			if (!originalGetEditor || originalGetEditor.call(ui) === factory) {
+				try {
+					originalSetEditor.call(ui, inheritedFactory);
+				} catch {
+					originalSetEditor.call(ui, undefined);
+				}
 			}
 		},
 	};

@@ -133,6 +133,7 @@ export default function (pi: ExtensionAPI) {
 						void scheduleGitRefresh(ctx);
 					},
 					getLiveTps: () => turnTelemetry.getLiveTps(),
+					canEmbedInEditor: () => editor?.isFramed() ?? false,
 				},
 			);
 			cleanupFooter = footer.cleanup;

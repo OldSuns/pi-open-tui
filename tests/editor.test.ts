@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { CustomEditor, type ExtensionAPI, type ExtensionContext, type KeybindingsManager } from "@earendil-works/pi-coding-agent";
-import { TuiMainScreen, type EditorTheme, type Terminal, type TUI, visibleWidth } from "@earendil-works/pi-tui";
+import { TuiMainScreen, type EditorComponent, type EditorTheme, type Terminal, type TUI, type TuiMouseEvent, visibleWidth } from "@earendil-works/pi-tui";
 import { decorateOpenTuiEditor, installEditor, createOpenTuiEditor, repaintAfterStreamWrites } from "../extensions/open-tui/editor.ts";
 import { stripAnsi } from "../extensions/open-tui/utils.ts";
 
@@ -269,118 +269,264 @@ test("does not override Pi's native fullscreen wheel setting", () => {
 	assert.equal(wheelSettingChanges, 0);
 });
 
-test("decorates the editor installed by another extension instead of replacing it", () => {
-	const inner = new CustomEditor(
-		tui,
-		editorTheme,
-		{ matches: () => false } as unknown as KeybindingsManager,
-		{ paddingX: 0 },
-	);
+type EditorFactory = NonNullable<Parameters<ExtensionContext["ui"]["setEditorComponent"]>[0]>;
+
+function createEditorHost(initialFactory?: EditorFactory, hostTui: TUI = tui) {
+	let factory: EditorFactory | undefined = initialFactory;
+	let editor: EditorComponent | undefined;
+	const ctx = {
+		ui: {
+			getEditorComponent: () => factory,
+			setEditorComponent(next: EditorFactory | undefined) {
+				factory = next;
+				editor = next?.(hostTui, editorTheme, { matches: () => false } as unknown as KeybindingsManager)
+					?? new CustomEditor(hostTui, editorTheme, { matches: () => false } as unknown as KeybindingsManager);
+				editor?.setPaddingX?.(2);
+			},
+		},
+	} as unknown as ExtensionContext;
+	return { ctx, get registeredFactory() { return factory; }, get editor() { assert.ok(editor); return editor; } };
+}
+
+function createInnerEditor() {
+	return new CustomEditor(tui, editorTheme, { matches: () => false } as unknown as KeybindingsManager);
+}
+
+const mouseClick: TuiMouseEvent = {
+	type: "click", button: "left", x: 5, y: 1, screenX: 5, screenY: 1,
+	width: 40, height: 8, shift: false, alt: false, ctrl: false,
+};
+
+test("decorates an existing editor and restores its reused instance on cleanup", () => {
+	const inner = createInnerEditor();
 	let innerTabPresses = 0;
 	const innerHandleInput = inner.handleInput.bind(inner);
 	inner.handleInput = (data: string) => {
 		if (data === "\t") innerTabPresses++;
 		innerHandleInput(data);
 	};
+	const originalRender = inner.render;
+	const originalMouse = inner.handleMouse;
+	const originalPadding = inner.setPaddingX;
+	const originalStatus = inner.setWorkingStatusIndicator;
+	const originalEmbedStatus = inner.embedWorkingStatus;
 	const innerFactory = () => inner;
+	const host = createEditorHost(innerFactory);
+	const handle = installEditor({} as ExtensionAPI, host.ctx);
 
-	let created: unknown;
-	const installs: unknown[] = [];
-	let installedFactory: unknown = innerFactory;
-	const ctx = {
-		ui: {
-			getEditorComponent: () => installedFactory,
-			setEditorComponent: (factory: unknown) => {
-				installedFactory = factory;
-				installs.push(factory);
-				if (typeof factory === "function") {
-					created = (factory as (...args: unknown[]) => unknown)(tui, editorTheme, { matches: () => false });
-				}
-			},
-		},
-	} as unknown as ExtensionContext;
+	assert.equal(host.editor, inner);
+	host.editor.handleInput("\t");
+	assert.equal(innerTabPresses, 1);
+	assert.match(stripAnsi(host.editor.render(40)[0] ?? ""), /^╭/);
+	assert.equal(inner.getPaddingX(), 0);
 
-	const editor = installEditor({} as ExtensionAPI, ctx);
+	handle.cleanup();
+	assert.equal(host.ctx.ui.getEditorComponent(), innerFactory);
+	assert.equal(host.editor, inner);
+	assert.equal(inner.render, originalRender);
+	assert.equal(inner.handleMouse, originalMouse);
+	assert.equal(inner.setPaddingX, originalPadding);
+	assert.equal(inner.setWorkingStatusIndicator, originalStatus);
+	assert.equal(inner.embedWorkingStatus, originalEmbedStatus);
+	assert.equal(inner.getPaddingX(), 2);
+	assert.ok(!Object.hasOwn(inner, "setCursorStyle"));
+	assert.doesNotMatch(stripAnsi(inner.render(40)[0] ?? ""), /^╭/);
 
-	assert.equal(created, inner, "the instance installed by the other extension stays active");
-	assert.equal((created as { embedWorkingStatus?: boolean }).embedWorkingStatus, true);
-	(created as CustomEditor).handleInput("\t");
-	assert.equal(innerTabPresses, 1, "input still reaches the inner wrapper");
-	assert.match(stripAnsi((created as CustomEditor).render(40)[0] ?? ""), /^╭/);
+	const reinstalled = installEditor({} as ExtensionAPI, host.ctx);
+	assert.match(stripAnsi(inner.render(40)[0] ?? ""), /^╭/);
+	reinstalled.cleanup();
+	assert.equal(inner.render, originalRender);
+});
 
-	editor.cleanup();
-	assert.equal(installs.at(-1), innerFactory, "cleanup restores the previous factory");
+test("frames direct editor registrations in either extension order", () => {
+	for (const openTuiFirst of [false, true]) {
+		const host = createEditorHost();
+		const ui = host.ctx.ui;
+		const originalGet = ui.getEditorComponent;
+		const originalSet = ui.setEditorComponent;
+		const inner = createInnerEditor();
+		const upstream = () => inner;
+		let handle: ReturnType<typeof installEditor>;
+		if (openTuiFirst) {
+			handle = installEditor({} as ExtensionAPI, host.ctx);
+			// 独立扩展上下文共享同一个 ui 对象。
+			const otherCtx = { ui };
+			otherCtx.ui.setEditorComponent(upstream);
+		} else {
+			ui.setEditorComponent(upstream);
+			handle = installEditor({} as ExtensionAPI, host.ctx);
+		}
+		assert.equal(ui.getEditorComponent(), upstream);
+		assert.equal(host.editor, inner);
+		assert.equal(stripAnsi(inner.render(40).join("\n")).match(/╭/g)?.length, 1);
+		const mounted = host.registeredFactory!;
+		handle.cleanup();
+		assert.equal(ui.getEditorComponent, originalGet);
+		assert.equal(ui.setEditorComponent, originalSet);
+		assert.equal(ui.getEditorComponent(), upstream);
+		assert.doesNotMatch(stripAnsi(host.editor.render(40)[0]!), /^╭/);
+		assert.doesNotMatch(stripAnsi(mounted(tui, editorTheme, {} as KeybindingsManager).render(40)[0]!), /^╭/);
+	}
+});
+
+test("keeps factory composition outside the frame without recursion or duplicated borders", () => {
+	const host = createEditorHost();
+	const handle = installEditor({} as ExtensionAPI, host.ctx);
+	let calls = 0;
+	const upstream: EditorFactory = () => { calls++; return createInnerEditor(); };
+	host.ctx.ui.setEditorComponent(upstream);
+	const previous = host.ctx.ui.getEditorComponent()!;
+	assert.equal(previous, upstream);
+	let widthSeen = 0;
+	const wrapped: EditorFactory = (...args) => {
+		const editor = previous(...args);
+		const render = editor.render.bind(editor);
+		editor.render = (width) => { widthSeen = width; return render(width); };
+		return editor;
+	};
+	calls = 0;
+	host.ctx.ui.setEditorComponent(wrapped);
+	assert.equal(calls, 1);
+	assert.equal(host.ctx.ui.getEditorComponent(), wrapped);
+	const lines = stripAnsi(host.editor.render(40).join("\n"));
+	assert.equal(lines.match(/╭/g)?.length, 1);
+	assert.equal(widthSeen, 36);
+	handle.cleanup();
+	assert.equal(host.ctx.ui.getEditorComponent(), wrapped);
+	host.editor.render(40);
+	assert.equal(widthSeen, 40);
+});
+
+test("tracks runtime replacement, clearing and unframed editors", () => {
+	let hardware = false;
+	const hostTui = {
+		...tui, terminal: { rows: 24, write() {} },
+		getShowHardwareCursor: () => hardware,
+		setShowHardwareCursor: (value: boolean) => { hardware = value; },
+	} as unknown as TUI;
+	const host = createEditorHost(undefined, hostTui);
+	const handle = installEditor({} as ExtensionAPI, host.ctx, "bar");
+	assert.equal(hardware, true);
+	const first = createInnerEditor();
+	host.ctx.ui.setEditorComponent(() => first);
+	assert.equal(handle.isFramed(), true);
+	const custom: EditorComponent = { render: () => ["custom"], invalidate() {}, getText: () => "", setText() {}, handleInput() {} };
+	host.ctx.ui.setEditorComponent(() => custom);
+	assert.equal(handle.isFramed(), false);
+	assert.equal(host.editor, custom);
+	assert.equal(hardware, false);
+	assert.doesNotMatch(stripAnsi(first.render(40)[0]!), /^╭/);
+
+	host.ctx.ui.setEditorComponent(undefined);
+	assert.equal(host.ctx.ui.getEditorComponent(), undefined);
+	assert.equal(handle.isFramed(), true);
+	assert.equal(hardware, true);
+	assert.match(stripAnsi(host.editor.render(40)[0]!), /^╭/);
+	const latest = () => createInnerEditor();
+	host.ctx.ui.setEditorComponent(latest);
+	handle.cleanup();
+	assert.equal(host.ctx.ui.getEditorComponent(), latest);
+	assert.equal(hardware, false);
+});
+
+test("saved registration proxies pass through after cleanup and later API wrappers survive", () => {
+	const host = createEditorHost(createInnerEditor);
+	const handle = installEditor({} as ExtensionAPI, host.ctx);
+	const get = host.ctx.ui.getEditorComponent;
+	const set = host.ctx.ui.setEditorComponent;
+	const laterGet = () => get();
+	const laterSet: typeof set = (next) => set(next);
+	host.ctx.ui.getEditorComponent = laterGet;
+	host.ctx.ui.setEditorComponent = laterSet;
+	handle.cleanup();
+	assert.equal(host.ctx.ui.getEditorComponent, laterGet);
+	assert.equal(host.ctx.ui.setEditorComponent, laterSet);
+	const next = createInnerEditor;
+	laterSet(next);
+	assert.equal(laterGet(), next);
+	assert.doesNotMatch(stripAnsi(host.editor.render(40)[0]!), /^╭/);
+
+	const reinstalled = installEditor({} as ExtensionAPI, host.ctx);
+	assert.match(stripAnsi(host.editor.render(40)[0]!), /^╭/);
+	reinstalled.cleanup();
+	assert.equal(host.ctx.ui.getEditorComponent, laterGet);
+	assert.equal(host.ctx.ui.setEditorComponent, laterSet);
+	assert.doesNotMatch(stripAnsi(host.editor.render(40)[0]!), /^╭/);
 });
 
 test("falls back to the default editor when the previous factory throws", () => {
-	let created: unknown;
-	let installedFactory: unknown = () => {
-		throw new Error("broken editor");
+	const host = createEditorHost(() => { throw new Error("broken editor"); });
+	const handle = installEditor({} as ExtensionAPI, host.ctx);
+	assert.match(stripAnsi(host.editor.render(40)[0] ?? ""), /^╭/);
+	handle.cleanup();
+	assert.equal(host.ctx.ui.getEditorComponent(), undefined);
+});
+
+test("cleanup preserves later method and factory wrappers as passthroughs", () => {
+	const inner = createInnerEditor();
+	let received: TuiMouseEvent | undefined;
+	inner.handleMouse = (event) => { received = event; return undefined; };
+	const host = createEditorHost(() => inner);
+	const handle = installEditor({} as ExtensionAPI, host.ctx);
+	const inherited = host.ctx.ui.getEditorComponent()!;
+	const render = CustomEditor.prototype.render.bind(inner);
+	const laterFactory: EditorFactory = (...args) => {
+		const editor = inherited(...args);
+		editor.render = (width) => [...render(width), "later wrapper"];
+		return editor;
 	};
-	const ctx = {
-		ui: {
-			getEditorComponent: () => installedFactory,
-			setEditorComponent: (factory: unknown) => {
-				installedFactory = factory;
-				if (typeof factory === "function") {
-					created = (factory as (...args: unknown[]) => unknown)(tui, editorTheme, { matches: () => false });
-				}
-			},
-		},
-	} as unknown as ExtensionContext;
+	host.ctx.ui.setEditorComponent(laterFactory);
+	const mouse = inner.handleMouse.bind(inner);
+	const padding = inner.setPaddingX.bind(inner);
+	inner.handleMouse = (event) => mouse(event);
+	inner.setPaddingX = (value) => padding(value);
 
-	const editor = installEditor({} as ExtensionAPI, ctx);
+	handle.cleanup();
+	handle.cleanup();
+	assert.equal(host.ctx.ui.getEditorComponent(), laterFactory);
+	assert.doesNotMatch(stripAnsi(inner.render(40)[0] ?? ""), /^╭/);
+	assert.equal(inner.render(40).at(-1), "later wrapper");
+	inner.handleMouse(mouseClick);
+	assert.deepEqual(received, mouseClick);
+	inner.setPaddingX(3);
+	assert.equal(inner.getPaddingX(), 3);
 
-	assert.ok(created, "a framed editor was still installed");
-	assert.match(stripAnsi((created as CustomEditor).render(40)[0] ?? ""), /^╭/);
-	editor.cleanup();
+	// 后续扩展再次调用已卸载的工厂，也不会重新启用边框。
+	host.ctx.ui.setEditorComponent(laterFactory);
+	assert.doesNotMatch(stripAnsi(host.editor.render(40)[0] ?? ""), /^╭/);
 });
 
-test("cleanup leaves a factory installed after us alone", () => {
-	const inner = new CustomEditor(
-		tui,
-		editorTheme,
-		{ matches: () => false } as unknown as KeybindingsManager,
-		{ paddingX: 0 },
-	);
-	let installedFactory: unknown = () => inner;
-	const installs: unknown[] = [];
-	const ctx = {
-		ui: {
-			getEditorComponent: () => installedFactory,
-			setEditorComponent: (factory: unknown) => {
-				installedFactory = factory;
-				installs.push(factory);
-				if (typeof factory === "function") {
-					(factory as (...args: unknown[]) => unknown)(tui, editorTheme, { matches: () => false });
-				}
-			},
-		},
-	} as unknown as ExtensionContext;
-
-	const editor = installEditor({} as ExtensionAPI, ctx);
-	// Another editor extension registers after open-tui and now sits on top.
-	installedFactory = () => inner;
-	installs.length = 0;
-
-	editor.cleanup();
-
-	assert.deepEqual(installs, [], "cleanup must not replace the newer factory");
+test("cleanup does not reinstall an editor after another extension resets the slot", () => {
+	const host = createEditorHost(createInnerEditor);
+	const handle = installEditor({} as ExtensionAPI, host.ctx);
+	host.ctx.ui.setEditorComponent(undefined);
+	handle.cleanup();
+	assert.equal(host.ctx.ui.getEditorComponent(), undefined);
 });
 
-test("leaves editors with their own layout unframed", () => {
+test("leaves custom layouts, mouse coordinates, padding and status capabilities intact", () => {
+	const widths: number[] = [];
+	let received: TuiMouseEvent | undefined;
+	let padding = 0;
 	const custom = {
-		render: (width: number) => [`custom ${width}`],
-		invalidate() {},
-		getText: () => "",
-		setText() {},
-		handleInput() {},
+		render: (width: number) => { widths.push(width); return [`custom ${width}`]; },
+		invalidate() {}, getText: () => "", setText() {}, handleInput() {},
+		handleMouse(event: TuiMouseEvent) { received = event; return undefined; },
+		setPaddingX(value: number) { padding = value; },
 	};
-
-	const decorated = decorateOpenTuiEditor(custom, tui);
-
-	assert.deepEqual(decorated.render(40), ["custom 40"]);
-	assert.equal(decorated.embedWorkingStatus, false, "Pi keeps drawing its own status indicator");
+	const render = custom.render;
+	const host = createEditorHost(() => custom);
+	const handle = installEditor({} as ExtensionAPI, host.ctx, "bar");
+	assert.equal(host.editor, custom);
+	assert.equal(handle.isFramed(), false);
+	assert.equal(custom.render, render);
+	assert.equal("embedWorkingStatus" in custom, false);
+	assert.deepEqual(custom.render(40), ["custom 40"]);
+	assert.deepEqual(widths, [40]);
+	custom.handleMouse(mouseClick);
+	assert.deepEqual(received, mouseClick);
+	assert.equal(padding, 2);
+	handle.cleanup();
 });
 
 test("keeps ghost text rendered by an inner editor wrapper", () => {

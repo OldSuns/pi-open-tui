@@ -376,12 +376,13 @@ test("provides inline footer content without duplicating native rows", () => {
 		workingSince: undefined,
 		lastDoneIn: undefined,
 	};
+	let canEmbed = true;
 	const handle = installFooter(
 		ctx,
 		() => state,
 		() => config,
 		() => ({ provider: "OpenAI", model: "gpt-5", effort: "off" }),
-		{ setRequestRender() {}, scheduleGitRefresh() {} },
+		{ setRequestRender() {}, scheduleGitRefresh() {}, canEmbedInEditor: () => canEmbed },
 	);
 	assert.ok(footerFactory);
 	const footerData = {
@@ -412,6 +413,13 @@ test("provides inline footer content without duplicating native rows", () => {
 
 	config.inlineFooter = true;
 	assert.deepEqual(component.render(40), []);
+	canEmbed = false;
+	const fallback = component.render(100).map(stripAnsi);
+	assert.equal(fallback.length, 2);
+	assert.match(fallback[0]!, /main/);
+	assert.match(fallback[1]!, /gpt-5/);
+	canEmbed = true;
+	assert.deepEqual(component.render(100), []);
 });
 
 test("auto gates Nerd icons by TTY and UTF-8 support", () => {
