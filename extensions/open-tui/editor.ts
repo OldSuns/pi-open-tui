@@ -7,7 +7,7 @@ import {
 import type { Component, Container, EditorComponent, EditorTheme, TUI } from "@earendil-works/pi-tui";
 import { CURSOR_MARKER, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import type { CursorStyle } from "./config.ts";
-import { findBottomBorderIndex, stripAnsi } from "./utils.ts";
+import { findBottomBorderIndex, isEditorBorderLine, stripAnsi } from "./utils.ts";
 
 function fillLine(content: string, width: number): string {
 	const truncated = truncateToWidth(content, Math.max(0, width), "");
@@ -524,8 +524,13 @@ export function installEditor(
 		mountedFactory = originalGetEditor.call(ui);
 		resetHiddenThinkingTarget();
 		if (isFrameableEditor(editor)) {
-			previousHardwareCursor = tui.getShowHardwareCursor?.();
-			activeEditor = decorateOpenTuiEditor(editor, tui, { cursorStyle: currentCursorStyle, inlineFooter });
+			const lines = editor.render(tui.terminal.columns);
+			const bottom = findBottomBorderIndex(lines);
+			// Capabilities alone do not guarantee that the first and bottom rows are replaceable borders.
+			if (bottom > 1 && isEditorBorderLine(lines[0] ?? "") && isEditorBorderLine(lines[bottom] ?? "")) {
+				previousHardwareCursor = tui.getShowHardwareCursor?.();
+				activeEditor = decorateOpenTuiEditor(editor, tui, { cursorStyle: currentCursorStyle, inlineFooter });
+			}
 		}
 		mountedRender = editor.render;
 	};

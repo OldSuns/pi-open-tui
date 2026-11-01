@@ -1,13 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { CustomEditor, VERSION, type ExtensionAPI, type ExtensionContext, type KeybindingsManager } from "@earendil-works/pi-coding-agent";
+import { CustomEditor, initTheme, VERSION, type ExtensionAPI, type ExtensionContext, type KeybindingsManager } from "@earendil-works/pi-coding-agent";
 import { Container, TuiMainScreen, type EditorComponent, type EditorTheme, type Terminal, type TUI, type TuiMouseEvent, visibleWidth } from "@earendil-works/pi-tui";
 import { decorateOpenTuiEditor, installEditor, createOpenTuiEditor, repaintAfterStreamWrites } from "../extensions/open-tui/editor.ts";
 import { OpenTuiHeader } from "../extensions/open-tui/header.ts";
 import { stripAnsi } from "../extensions/open-tui/utils.ts";
 
 const tui = {
-	terminal: { rows: 24 },
+	terminal: { columns: 80, rows: 24 },
 	requestRender() {},
 } as TUI;
 
@@ -267,7 +267,7 @@ test("does not override Pi's native fullscreen wheel setting", () => {
 	const fullscreenTui = {
 		...tui,
 		mode: "fullscreen",
-		terminal: { rows: 24, write() {} },
+		terminal: { columns: 80, rows: 24, write() {} },
 		getShowHardwareCursor: () => false,
 		setShowHardwareCursor() {},
 		setWheelScrollLines: () => wheelSettingChanges++,
@@ -381,6 +381,7 @@ test("frames direct editor registrations in either extension order", () => {
 });
 
 test("frames replacements from Pi shortcut contexts without rebuilding the editor", async () => {
+	initTheme();
 	const { InteractiveMode } = await import(new URL(
 		"./modes/interactive/interactive-mode.js",
 		import.meta.resolve("@earendil-works/pi-coding-agent"),
@@ -390,7 +391,7 @@ test("frames replacements from Pi shortcut contexts without rebuilding the edito
 	const hostTui = {
 		...tui,
 		children: [editorContainer],
-		terminal: { rows: 24, write() {} },
+		terminal: { columns: 80, rows: 24, write() {} },
 		getShowHardwareCursor: () => hardware,
 		setShowHardwareCursor: (value: boolean) => { hardware = value; },
 		setFocus(component: CustomEditor) { component.focused = true; },
@@ -497,6 +498,7 @@ test("frames replacements from Pi shortcut contexts without rebuilding the edito
 });
 
 test("keeps reused editors framed and restores working status after fresh-context registrations", async () => {
+	initTheme();
 	const { InteractiveMode } = await import(new URL(
 		"./modes/interactive/interactive-mode.js",
 		import.meta.resolve("@earendil-works/pi-coding-agent"),
@@ -601,7 +603,7 @@ test("keeps factory composition outside the frame without recursion or duplicate
 test("tracks runtime replacement, clearing and unframed editors", () => {
 	let hardware = false;
 	const hostTui = {
-		...tui, terminal: { rows: 24, write() {} },
+		...tui, terminal: { columns: 80, rows: 24, write() {} },
 		getShowHardwareCursor: () => hardware,
 		setShowHardwareCursor: (value: boolean) => { hardware = value; },
 	} as unknown as TUI;
@@ -750,6 +752,79 @@ test("leaves custom layouts, mouse coordinates, padding and status capabilities 
 	handle.cleanup();
 });
 
+test("leaves fully capable custom layouts untouched instead of replacing content with borders", () => {
+	for (const content of [
+		[],
+		["only content"],
+		["first content", "middle content", "last content"],
+		["────────", "middle content", "last content"],
+		["first content", "middle content", "────────"],
+	]) {
+		const inner = createInnerEditor();
+		inner.setPaddingX(2);
+		inner.render = () => [...content];
+		const originalRender = inner.render;
+		const originalMouse = inner.handleMouse;
+		const originalPadding = inner.setPaddingX;
+		const originalStatus = inner.setWorkingStatusIndicator;
+		let hardware = false;
+		const writes: string[] = [];
+		const hostTui = {
+			...tui,
+			terminal: { columns: 80, rows: 24, write: (data: string) => writes.push(data) },
+			getShowHardwareCursor: () => hardware,
+			setShowHardwareCursor: (value: boolean) => { hardware = value; },
+		} as unknown as TUI;
+		let factoryCalls = 0;
+		const host = createEditorHost(() => { factoryCalls++; return inner; }, hostTui);
+		const handle = installEditor({} as ExtensionAPI, host.ctx, "bar", {
+			enabled: () => true,
+			render: () => ({ top: { left: "branch", right: "" }, bottom: { left: "model", right: "" } }),
+		});
+		try {
+			assert.equal(factoryCalls, 1);
+			assert.equal(host.editor, inner);
+			assert.equal(handle.isFramed(), false, "the footer must remain outside this editor");
+			assert.deepEqual(inner.render(40), content);
+			assert.equal(inner.render, originalRender);
+			assert.equal(inner.handleMouse, originalMouse);
+			assert.equal(inner.setPaddingX, originalPadding);
+			assert.equal(inner.getPaddingX(), 2);
+			assert.equal(inner.setWorkingStatusIndicator, originalStatus);
+			assert.equal(inner.embedWorkingStatus, false);
+			assert.equal(hardware, false);
+			assert.deepEqual(writes, []);
+		} finally {
+			handle.cleanup();
+		}
+	}
+});
+
+test("recognizes native borders with ghost text and completion rows below the editor", () => {
+	const inner = createInnerEditor();
+	const render = inner.render.bind(inner);
+	inner.render = (width) => {
+		const lines = render(width);
+		lines[0] = `\x1b[36m${lines[0]}\x1b[0m`;
+		lines[1] = (lines[1] ?? "").replace(/ {3,}$/, " ghost suggestion");
+		return [...lines, "completion candidate"];
+	};
+	let calls = 0;
+	const host = createEditorHost(() => { calls++; return inner; });
+	const handle = installEditor({} as ExtensionAPI, host.ctx);
+	try {
+		assert.equal(calls, 1);
+		assert.equal(handle.isFramed(), true);
+		const lines = inner.render(60).map(stripAnsi);
+		assert.match(lines[0]!, /^╭/);
+		assert.match(lines[1]!, /^│ .*ghost suggestion.* │$/);
+		assert.match(lines.at(-2)!, /^╰/);
+		assert.equal(lines.at(-1), "completion candidate");
+	} finally {
+		handle.cleanup();
+	}
+});
+
 test("keeps ghost text rendered by an inner editor wrapper", () => {
 	const inner = new CustomEditor(
 		tui,
@@ -794,6 +869,7 @@ test("restores cursor shape and visibility when the editor is removed", () => {
 	const hardwareTui = {
 		...tui,
 		terminal: {
+			columns: 80,
 			rows: 24,
 			write: (data: string) => writes.push(data),
 		},

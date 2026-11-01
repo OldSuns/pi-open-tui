@@ -521,7 +521,7 @@ test("open-tui keeps a bounded peek scoped to the current assistant", async () =
 		(component as unknown as { hiddenThinkingLabel: string }).hiddenThinkingLabel;
 	const tui = {
 		mode: "fullscreen",
-		terminal: { columns: terminalWidth, write() {} },
+		terminal: { columns: terminalWidth, rows: 24, write() {} },
 		children: [{ children: thinkingComponents }],
 		getShowHardwareCursor: () => false,
 		setShowHardwareCursor() {},

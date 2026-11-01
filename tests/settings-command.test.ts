@@ -146,7 +146,7 @@ test("previews cursor styles from the Appearance tab", async () => {
 	let editorFactory: unknown;
 	let hardwareCursor = false;
 	const editorTui = {
-		terminal: { rows: 24, write: (data: string) => writes.push(data) },
+		terminal: { columns: 80, rows: 24, write: (data: string) => writes.push(data) },
 		requestRender() {},
 		getShowHardwareCursor: () => hardwareCursor,
 		setShowHardwareCursor: (enabled: boolean) => {
