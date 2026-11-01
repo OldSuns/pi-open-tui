@@ -477,6 +477,25 @@ test("frames replacements from Pi shortcut contexts without rebuilding the edito
 		assert.equal(hardware, false);
 		assert.deepEqual(custom.render(60), ["custom"]);
 		assert.equal(host.statusContainer.children.length, 1);
+
+		const throwing = new CustomEditor(hostTui, editorTheme, keybindings);
+		const render = throwing.render.bind(throwing);
+		let probing = true;
+		throwing.render = (width) => {
+			if (probing) throw new Error("editor not ready during probe");
+			return render(width);
+		};
+		const originalRender = throwing.render;
+		assert.doesNotThrow(() => shortcutUi!.setEditorComponent(() => throwing));
+		probing = false;
+		assert.equal(host.editor, throwing);
+		assert.ok(editorContainer.children.includes(throwing));
+		assert.equal(handle.isFramed(), false);
+		assert.equal(throwing.render, originalRender);
+		assert.doesNotMatch(stripAnsi(throwing.render(60)[0]!), /^╭/);
+		assert.deepEqual(host.statusContainer.children, [indicator]);
+		assert.equal(hardware, false);
+
 		host.defaultEditor.onExtensionShortcut("\x01");
 		assert.equal(handle.isFramed(), true);
 		assert.match(stripAnsi(host.editor.render(60)[0]), /^╭.*working/);
@@ -750,6 +769,37 @@ test("leaves custom layouts, mouse coordinates, padding and status capabilities 
 	assert.deepEqual(received, mouseClick);
 	assert.equal(padding, 2);
 	handle.cleanup();
+});
+
+test("leaves editors unframed when the initial layout probe throws", () => {
+	const inner = createInnerEditor();
+	const render = inner.render.bind(inner);
+	let probing = true;
+	inner.render = (width) => {
+		if (probing) throw new Error("editor not ready during probe");
+		return render(width);
+	};
+	const originalRender = inner.render;
+	let calls = 0;
+	const upstream = () => { calls++; return inner; };
+	const host = createEditorHost(upstream);
+	const handle = installEditor({} as ExtensionAPI, host.ctx);
+	try {
+		assert.equal(host.editor, inner);
+		assert.equal(calls, 1);
+		assert.equal(handle.isFramed(), false);
+		assert.equal(inner.render, originalRender);
+		assert.equal(inner.embedWorkingStatus, false);
+		assert.equal(inner.getPaddingX(), 2);
+		probing = false;
+		assert.doesNotMatch(stripAnsi(inner.render(60)[0]!), /^╭/);
+		probing = true;
+		assert.throws(() => inner.render(60), /editor not ready during probe/);
+	} finally {
+		handle.cleanup();
+	}
+	assert.equal(host.ctx.ui.getEditorComponent(), upstream);
+	assert.equal(inner.render, originalRender);
 });
 
 test("leaves fully capable custom layouts untouched instead of replacing content with borders", () => {

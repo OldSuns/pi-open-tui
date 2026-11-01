@@ -524,7 +524,12 @@ export function installEditor(
 		mountedFactory = originalGetEditor.call(ui);
 		resetHiddenThinkingTarget();
 		if (isFrameableEditor(editor)) {
-			const lines = editor.render(tui.terminal.columns);
+			let lines: string[] = [];
+			try {
+				lines = editor.render(tui.terminal.columns);
+			} catch {
+				// A failed layout probe must not prevent Pi from mounting the editor.
+			}
 			const bottom = findBottomBorderIndex(lines);
 			// Capabilities alone do not guarantee that the first and bottom rows are replaceable borders.
 			if (bottom > 1 && isEditorBorderLine(lines[0] ?? "") && isEditorBorderLine(lines[bottom] ?? "")) {
