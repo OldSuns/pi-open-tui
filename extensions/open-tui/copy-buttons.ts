@@ -37,6 +37,21 @@ interface Press {
 	region: CopyRegion;
 	x: number;
 	y: number;
+	onCopy: (text: string) => void;
+}
+
+interface RawMouseEvent {
+	button: number;
+	x: number;
+	y: number;
+	release: boolean;
+}
+
+interface AltScreenInternals {
+	handleMouseEvent(event: RawMouseEvent): void;
+	createMouseEvent(type: TuiMouseEvent["type"], button: number, x: number, y: number): TuiMouseEvent;
+	resetTextSelection(): void;
+	requestRender(): void;
 }
 
 // Pi's private fields; checked at runtime because they can change between releases.
@@ -110,34 +125,75 @@ export function handleCopyMouse(
 	onCopy: (text: string) => void,
 ): TuiMouseEventResult | undefined {
 	if (event.type === "press") {
-		press = undefined;
+		if (press?.owner === owner) press = undefined;
 		if (event.button !== "left" || event.shift || event.alt || event.ctrl) return undefined;
 		const region = regions.find((r) => event.y === r.row && event.x >= r.col && event.x < r.col + r.width);
-		if (!region) return undefined;
-		press = { owner, region, x: event.x, y: event.y };
-		return { handled: true, render: false };
+		if (region) press = { owner, region, x: event.screenX, y: event.screenY, onCopy };
+		return undefined;
 	}
-	if (press?.owner !== owner) return undefined;
-	if (event.type === "drag") return { handled: true, render: false };
-	if (event.type !== "release") return undefined;
-	const { region, x, y } = press;
+	if (press?.owner !== owner || (event.type !== "drag" && event.type !== "release")) return undefined;
+	const pending = press;
+	const nearby = event.screenY === pending.y && Math.abs(event.screenX - pending.x) <= RELEASE_TOLERANCE;
+	const primary = event.button === "left" || (event.type === "release" && event.button === "none");
+	if (!nearby || !primary || event.shift || event.alt || event.ctrl) {
+		press = undefined;
+		return undefined;
+	}
+	if (event.type === "drag") return undefined;
 	press = undefined;
-	if (event.y === y && Math.abs(event.x - x) <= RELEASE_TOLERANCE) onCopy(region.text);
+	pending.onCopy(pending.region.text);
 	return { handled: true, render: false };
 }
 
 /**
  * Markdown.render normalizes tabs to three spaces before lexing, so token text loses them.
- * Re-lex the raw source and use its matching code block when the shapes agree.
+ * Match the normalized tokens back to source lines: lexing raw lists would expand their tabs first.
  */
 export function restoreTabs(source: string, ordinal: number, rendered: string): string {
 	if (!source.includes("\t")) return rendered;
-	let index = 0;
-	let found: string | undefined;
-	new Marked().walkTokens(new Marked().lexer(source), (token) => {
-		if (token.type === "code" && index++ === ordinal) found = token.text;
+	const sourceLines = source.replace(/\r\n?/g, "\n").split("\n");
+	const normalized = sourceLines.map((line) => line.replace(/\t/g, "   "));
+	const blocks: { raw: string; text: string }[] = [];
+	const parser = new Marked();
+	parser.walkTokens(parser.lexer(normalized.join("\n")), (token) => {
+		if (token.type === "code") blocks.push({ raw: token.raw, text: token.text });
 	});
-	return found !== undefined && found.replace(/\t/g, "   ") === rendered ? found : rendered;
+	const block = blocks[ordinal];
+	if (!block || block.text !== rendered || rendered === "") return rendered;
+	const rawLines = block.raw.replace(/\n+$/, "").split("\n");
+	let marker = "\ue000";
+	while (source.includes(marker)) marker += "\ue000";
+	const expected = rendered.split("\n");
+	expected[0] += marker;
+	for (let start = 0; start < sourceLines.length; start++) {
+		// List/quote parsing removes container prefixes, but leaves the code's raw line suffixes intact.
+		if (!rawLines.every((raw, offset) => normalized[start + offset]?.endsWith(raw))) continue;
+		const body = start + (/^ {0,3}(?:`{3,}|~{3,})/.test(block.raw) ? 1 : 0);
+		const probe = normalized.slice();
+		probe[body] += marker;
+		let index = 0;
+		let matched = false;
+		// Confirm the source row belongs to this token, not identical code in HTML or an earlier block.
+		parser.walkTokens(parser.lexer(probe.join("\n")), (token) => {
+			if (token.type === "code" && index++ === ordinal) matched = token.text === expected.join("\n");
+		});
+		if (!matched) continue;
+		const restored = rendered.split("\n").map((text, offset) => {
+			const line = sourceLines[body + offset];
+			const expanded = normalized[body + offset];
+			if (line === undefined || !expanded?.endsWith(text)) return text;
+			const skip = expanded.length - text.length;
+			let column = 0;
+			for (let char = 0; char < line.length; char++) {
+				if (column === skip) return line.slice(char);
+				column += line[char] === "\t" ? 3 : 1;
+				if (column > skip) return " ".repeat(column - skip) + line.slice(char + 1);
+			}
+			return "";
+		}).join("\n");
+		return restored.replace(/\t/g, "   ") === rendered ? restored : rendered;
+	}
+	return rendered;
 }
 
 function patch<T extends object, K extends keyof T>(target: T, key: K, value: T[K]): () => void {
@@ -159,6 +215,7 @@ export function installCopyButtons(options: {
 }): { cleanup: () => void; refresh: () => void } {
 	const markdownProto = Markdown.prototype as unknown as MarkdownInternals & Record<symbol, unknown>;
 	const userProto = UserMessageComponent.prototype as unknown as UserMessageInternals;
+	const altScreenProto = TuiAltScreen.prototype as unknown as AltScreenInternals;
 
 	const refresh = () => {
 		const tui = options.getTui();
@@ -167,7 +224,11 @@ export function installCopyButtons(options: {
 	};
 	if (markdownProto[PATCH_KEY] || markdownProto[PRETTY_TUI_KEY]) return { cleanup: () => {}, refresh };
 
-	const active = () => options.isEnabled() && options.getTui()?.mode === "fullscreen";
+	if (typeof altScreenProto.handleMouseEvent !== "function" || typeof altScreenProto.createMouseEvent !== "function") {
+		return { cleanup: () => {}, refresh };
+	}
+	let installed = true;
+	const active = () => installed && options.isEnabled() && options.getTui()?.mode === "fullscreen";
 	const copy = (text: string) => {
 		const tui = options.getTui();
 		const flash = (message: string) => {
@@ -182,11 +243,27 @@ export function installCopyButtons(options: {
 	const originalMarkdownMouse = markdownProto.handleMouse;
 	const originalUserRender = userProto.render;
 	const originalUserMouse = userProto.handleMouse;
+	const originalAltScreenMouse = altScreenProto.handleMouseEvent;
 
 	const restores = [
+		patch(altScreenProto, "handleMouseEvent", function (this: AltScreenInternals, raw) {
+			if (!active() || this !== (options.getTui() as unknown)) return originalAltScreenMouse.call(this, raw);
+			const motion = (raw.button & 32) !== 0;
+			if (!raw.release && !motion) press = undefined;
+			// Leave press/drag to Pi's selection; intercept only a qualifying release before copy-on-select runs.
+			if (press && (raw.release || motion)) {
+				const event = this.createMouseEvent(raw.release ? "release" : "drag", raw.button, raw.x, raw.y);
+				if (handleCopyMouse(press.owner, [], event, press.onCopy)) {
+					this.resetTextSelection();
+					this.requestRender();
+					return;
+				}
+			}
+			return originalAltScreenMouse.call(this, raw);
+		}),
 		patch(markdownProto, "renderToken", function (this: MarkdownInternals, token, width, nextTokenType, styleContext) {
 			const scope = renderScope;
-			if (!scope || token.type !== "code") return originalRenderToken.call(this, token, width, nextTokenType, styleContext);
+			if (!installed || !scope || token.type !== "code") return originalRenderToken.call(this, token, width, nextTokenType, styleContext);
 			const ordinal = scope.ordinal++;
 			if (!scope.frame || !active() || width < MIN_FRAME_WIDTH) {
 				return originalRenderToken.call(this, token, width, nextTokenType, styleContext);
@@ -207,6 +284,7 @@ export function installCopyButtons(options: {
 			return lines;
 		}),
 		patch(markdownProto, "render", function (this: MarkdownInternals, width) {
+			if (!installed) return originalRender.call(this, width);
 			const outer = renderScope;
 			const scope = { frame: false, label: false, ordinal: 0, blocks: [] as { text: string; ordinal: number }[] };
 			renderScope = scope;
@@ -240,10 +318,12 @@ export function installCopyButtons(options: {
 			return lines;
 		}),
 		patch(markdownProto, "handleMouse", function (this: MarkdownInternals, event) {
-			const regions = active() ? markdownRegions.get(this)?.regions ?? [] : [];
+			if (!active()) return originalMarkdownMouse?.call(this, event);
+			const regions = markdownRegions.get(this)?.regions ?? [];
 			return handleCopyMouse(this, regions, event, copy) ?? originalMarkdownMouse?.call(this, event);
 		}),
 		patch(userProto, "render", function (this: UserMessageInternals, width) {
+			if (!installed) return originalUserRender.call(this, width);
 			const lines = originalUserRender.call(this, width);
 			userRegions.delete(this);
 			const pad = typeof this.outputPad === "number" ? this.outputPad : 1;
@@ -257,7 +337,8 @@ export function installCopyButtons(options: {
 			return lines;
 		}),
 		patch(userProto, "handleMouse", function (this: UserMessageInternals, event) {
-			const region = active() ? userRegions.get(this) : undefined;
+			if (!active()) return originalUserMouse?.call(this, event);
+			const region = userRegions.get(this);
 			return handleCopyMouse(this, region ? [region] : [], event, copy) ?? originalUserMouse?.call(this, event);
 		}),
 	];
@@ -266,6 +347,8 @@ export function installCopyButtons(options: {
 
 	return {
 		cleanup: () => {
+			if (!installed) return;
+			installed = false;
 			for (const restore of restores) restore();
 			delete markdownProto[PATCH_KEY];
 			press = undefined;

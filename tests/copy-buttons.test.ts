@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { initTheme, UserMessageComponent, type MarkdownTransformContext, type Theme } from "@earendil-works/pi-coding-agent";
-import { Markdown, visibleWidth, type Component, type MarkdownTheme, type TUI, type TuiMouseEvent } from "@earendil-works/pi-tui";
+import { Markdown, TuiAltScreen, visibleWidth, type Component, type MarkdownTheme, type Terminal, type TUI, type TuiMouseEvent } from "@earendil-works/pi-tui";
 import {
 	handleCopyMouse,
 	installCopyButtons,
@@ -85,8 +85,8 @@ test("keeps regions across cached renders and restores prototypes on cleanup", (
 		assert.equal(component.render(30), first);
 		const row = first.findIndex((line) => line.includes("Copy"));
 		const col = first[row]!.indexOf("[Copy]");
-		// Press is handled by the label; a press elsewhere is left to Pi's selection.
-		assert.deepEqual(mouseTarget.handleMouse(mouse("press", col, row)), { handled: true, render: false });
+		// Press stays available to Pi's selection, even over a cached label.
+		assert.equal(mouseTarget.handleMouse(mouse("press", col, row)), undefined);
 		assert.equal(mouseTarget.handleMouse(mouse("press", 0, row)), undefined);
 	} finally {
 		copy.cleanup();
@@ -116,8 +116,8 @@ test("copies on a left press and a release within tolerance only", () => {
 	const copied: string[] = [];
 	const onCopy = (text: string) => copied.push(text);
 
-	assert.ok(handleCopyMouse(owner, regions, mouse("press", 11, 2), onCopy));
-	assert.ok(handleCopyMouse(owner, regions, mouse("drag", 13, 2), onCopy));
+	assert.equal(handleCopyMouse(owner, regions, mouse("press", 11, 2), onCopy), undefined);
+	assert.equal(handleCopyMouse(owner, regions, mouse("drag", 13, 2), onCopy), undefined);
 	assert.ok(handleCopyMouse(owner, regions, mouse("release", 13, 2), onCopy));
 	assert.deepEqual(copied, ["code"]);
 	// The synthesized click after release must not copy twice.
@@ -130,6 +130,22 @@ test("copies on a left press and a release within tolerance only", () => {
 	assert.equal(handleCopyMouse(owner, regions, mouse("press", 11, 2, "right"), onCopy), undefined);
 	assert.equal(handleCopyMouse(owner, regions, mouse("wheel", 11, 2, "none"), onCopy), undefined);
 	assert.equal(handleCopyMouse(owner, regions, mouse("press", 9, 2), onCopy), undefined);
+
+	handleCopyMouse(owner, regions, mouse("press", 11, 2), onCopy);
+	assert.equal(handleCopyMouse(owner, regions, mouse("drag", 35, 2), onCopy), undefined);
+	assert.equal(handleCopyMouse(owner, regions, mouse("release", 11, 2), onCopy), undefined);
+	assert.deepEqual(copied, ["code"], "returning after a long drag must not copy");
+
+	for (const modifier of ["shift", "alt", "ctrl"] as const) {
+		handleCopyMouse(owner, regions, mouse("press", 11, 2), onCopy);
+		assert.equal(handleCopyMouse(owner, regions, { ...mouse("release", 11, 2), [modifier]: true }, onCopy), undefined);
+	}
+	assert.deepEqual(copied, ["code"]);
+
+	handleCopyMouse(owner, regions, mouse("press", 11, 2), onCopy);
+	handleCopyMouse({}, [], mouse("press", 11, 2), onCopy);
+	handleCopyMouse(owner, regions, mouse("release", 11, 2, "none"), onCopy);
+	assert.deepEqual(copied, ["code", "code"], "child dispatch must not discard a parent's label press");
 });
 
 test("restores tabs from the source code block when shapes match", () => {
@@ -138,4 +154,108 @@ test("restores tabs from the source code block when shapes match", () => {
 	assert.equal(restoreTabs(source, 1, "ls"), "ls");
 	assert.equal(restoreTabs(source, 0, "something else"), "something else");
 	assert.equal(restoreTabs("no tabs", 0, "x"), "x");
+});
+
+test("restores code tabs without copying list and quote indentation", () => {
+	for (const source of [
+		"- build\n\n  ```make\n  all:\n  \techo hi\n  ```",
+		"- ```make\n  all:\n  \techo hi\n  ```",
+		"> - build\n>\n>   ~~~make\n>   all:\n>   \techo hi\n>   ~~~",
+		"- outer\n  - inner\n\n    ```make\n    all:\n    \techo hi\n    ```",
+		"  ```make\n  all:\n  \techo hi\n  ```",
+		"- build\n\n\t```make\n\tall:\n\t\techo hi\n\t```",
+	]) {
+		assert.equal(restoreTabs(source, 0, "all:\n   echo hi"), "all:\n\techo hi", source);
+	}
+	const repeated = "```make\nall:\n   echo hi\n```\n\n- build\n\n  ```make\n  all:\n  \techo hi\n  ```";
+	assert.equal(restoreTabs(repeated, 0, "all:\n   echo hi"), "all:\n   echo hi");
+	assert.equal(restoreTabs(repeated, 1, "all:\n   echo hi"), "all:\n\techo hi");
+	assert.equal(restoreTabs("    indented\n\n" + repeated, 2, "all:\n   echo hi"), "all:\n\techo hi");
+	assert.equal(restoreTabs("- build\n\n  ```\n  \t\n  x\ty\n  ```", 0, "   \nx   y"), "\t\nx\ty");
+	const html = "<pre>\n```make\nall:\n   echo hi\n```\n</pre>\n\n";
+	assert.equal(restoreTabs(html + repeated, 1, "all:\n   echo hi"), "all:\n\techo hi");
+	assert.equal(restoreTabs("> ```\n> \n> \tx\n> ```", 0, "\n   x"), "\n\tx");
+	assert.equal(restoreTabs("```\n\ue000\tx\n```", 0, "\ue000   x"), "\ue000\tx");
+});
+
+test("cleanup disables render wrappers retained by other extensions", () => {
+	initTheme();
+	const originalMarkdownRender = Markdown.prototype.render;
+	const originalUserRender = UserMessageComponent.prototype.render;
+	const copy = setup();
+	const patchedMarkdownRender = Markdown.prototype.render;
+	const patchedUserRender = UserMessageComponent.prototype.render;
+	const markdownWrapper = function (this: Markdown, width: number) { return patchedMarkdownRender.call(this, width); };
+	const userWrapper = function (this: UserMessageComponent, width: number) { return patchedUserRender.call(this, width); };
+	Markdown.prototype.render = markdownWrapper;
+	UserMessageComponent.prototype.render = userWrapper;
+	try {
+		copy.cleanup();
+		assert.equal(Markdown.prototype.render, markdownWrapper, "keep the later extension's wrapper");
+		assert.equal(UserMessageComponent.prototype.render, userWrapper);
+		assert.ok(markdown(md).render(40).every((line) => !line.includes("[Copy]")));
+		assert.ok(new UserMessageComponent("hello").render(40).every((line) => !line.includes("[Copy]")));
+		const next = setup();
+		try {
+			copy.cleanup();
+			assert.equal(new UserMessageComponent("hello").render(40).filter((line) => line.includes("[Copy]")).length, 1);
+		} finally {
+			next.cleanup();
+		}
+	} finally {
+		copy.cleanup();
+		Markdown.prototype.render = originalMarkdownRender;
+		UserMessageComponent.prototype.render = originalUserRender;
+	}
+});
+
+test("fullscreen mouse routing preserves selection and copies only clicks", () => {
+	const terminal = { columns: 40, rows: 10, write() {} } as unknown as Terminal;
+	const tui = new TuiAltScreen(terminal, false, undefined, { copyOnSelect: false });
+	tui.requestRender = () => {};
+	const internals = tui as unknown as {
+		stopped: boolean;
+		altScreenActive: boolean;
+		doRender(): void;
+		handleMouseEvent(event: { button: number; x: number; y: number; release: boolean }): void;
+	};
+	internals.stopped = false;
+	internals.altScreenActive = true;
+	const copied: string[] = [];
+	const regions: CopyRegion[] = [{ row: 0, col: 10, width: 6, text: "code" }];
+	const component: Component = {
+		render: () => ["          [Copy]", "code body"],
+		invalidate() {},
+		handleMouse: (event) => handleCopyMouse(component, regions, event, (text) => copied.push(text)),
+	};
+	const copy = installCopyButtons({ getTui: () => tui, getTheme: () => theme, isEnabled: () => true });
+	const send = (button: number, x: number, y: number, release = false) => internals.handleMouseEvent({ button, x, y, release });
+	try {
+		tui.setLayoutRoot(component);
+		internals.doRender();
+		send(0, 11, 0);
+		send(32, 2, 1);
+		assert.equal(tui.hasActiveSelection(), true, "Pi must receive the drag");
+		send(0, 2, 1, true);
+		assert.deepEqual(copied, []);
+
+		send(0, 11, 0);
+		send(32, 35, 0);
+		send(0, 11, 0, true);
+		assert.deepEqual(copied, [], "a long drag returning to the label is not a click");
+
+		send(0, 11, 0);
+		send(32, 12, 0);
+		send(0, 12, 0, true);
+		assert.deepEqual(copied, ["code"]);
+		assert.equal(tui.hasActiveSelection(), false, "a valid copy click clears its temporary selection");
+
+		send(0, 11, 0);
+		send(0, 0, 1);
+		send(0, 11, 0, true);
+		assert.deepEqual(copied, ["code"], "a new press outside the label cancels a pending copy");
+	} finally {
+		copy.cleanup();
+		tui.resetTextSelection();
+	}
 });
