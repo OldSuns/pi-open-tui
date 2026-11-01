@@ -274,7 +274,7 @@ function fitInlineSegments(
 		parts,
 		Math.max(0, width - separatorReserve),
 		theme.fg("dim", "..."),
-	).join(separator);
+	).filter(Boolean).join(separator);
 }
 
 function renderFooterContent(
@@ -321,7 +321,7 @@ function renderFooterContent(
 		leftParts.push({
 			text: `${cwdPrefix}${accent(truncatePath(cwd, maxCwd))}`,
 			compactText: `${cwdPrefix}${accent(truncatePath(basenamePath(cwd), maxCwd))}`,
-			priority: 0,
+			priority: 4,
 			truncate: (_text, maxWidth, ellipsis) => {
 				const pathWidth = maxWidth - visibleWidth(cwdPrefix);
 				if (pathWidth <= visibleWidth(ellipsis)) {
@@ -337,7 +337,7 @@ function renderFooterContent(
 		if (shortHost) {
 			leftParts.push({
 				text: `${theme.fg("dim", glyphs.host)} ${theme.fg("accent", shortHost)}`,
-				priority: 1,
+				priority: 3,
 			});
 			inlineTopRightParts.push(leftParts.at(-1)!);
 		}
@@ -355,13 +355,13 @@ function renderFooterContent(
 	}
 	const gitSeg = renderGitSegment(theme, state.git, glyphs, segments);
 	if (gitSeg) {
-		leftParts.push({ text: gitSeg, priority: 3 });
+		leftParts.push({ text: gitSeg, priority: 1 });
 		inlineTopLeftParts.push(leftParts.at(-1)!);
 	}
 	if (segments.runtime) {
 		const runtimeSeg = renderRuntimeSegment(theme, state.runtime, config.icons.mode, segments.nerdIconSpacing);
 		if (runtimeSeg) {
-			leftParts.push({ text: runtimeSeg, priority: 4 });
+			leftParts.push({ text: runtimeSeg, priority: 0 });
 			inlineTopRightParts.push(leftParts.at(-1)!);
 		}
 	}
@@ -374,7 +374,7 @@ function renderFooterContent(
 			? timerSeg
 			: `${timerSeg} ${theme.fg("dim", "·")} ${theme.fg(liveTps.stale ? "dim" : "accent", `${glyphs.speed} ~${Math.round(liveTps.tps)} tok/s`)}`;
 		// Narrow widths shed the live TPS before the timer itself.
-		leftParts.push({ text, compactText: liveTps === null ? undefined : timerSeg, priority: 1 });
+		leftParts.push({ text, compactText: liveTps === null ? undefined : timerSeg, priority: 3 });
 		inlineTopRightParts.push(leftParts.at(-1)!);
 	}
 
@@ -391,15 +391,15 @@ function renderFooterContent(
 	}
 	const allParts: PrioritizedSegment[] = [...leftParts];
 	if (contextText) {
-		// ponytail: priority 4 = sheds with runtime, before git/timer/cwd.
-		allParts.push({ text: contextText, compactText: contextCompact, priority: 4 });
+		// Context sheds with runtime, before git/session/host/timer/cwd.
+		allParts.push({ text: contextText, compactText: contextCompact, priority: 0 });
 		// Context stays at the far right; cwd is the first item in this group.
-		inlineTopRightParts.push({ text: contextText, compactText: contextCompact, priority: 4 });
+		inlineTopRightParts.push({ text: contextText, compactText: contextCompact, priority: 0 });
 	}
 
 	const fitted = fitSegmentsByPriority(allParts, width, theme.fg("dim", "..."));
 	const fittedContext = contextText ? fitted.pop() ?? "" : "";
-	const line1 = alignRight(fitted.join(" "), fittedContext, width, theme);
+	const line1 = alignRight(fitted.filter(Boolean).join(" "), fittedContext, width, theme);
 
 	const inlineLeftBudget = Math.floor(width * 0.45);
 	const inlineTopLeft = fitInlineSegments(inlineTopLeftParts, inlineLeftBudget, theme);

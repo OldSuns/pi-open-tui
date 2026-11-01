@@ -135,8 +135,8 @@ export type PrioritizedSegment = {
 
 /**
  * Pack segments into maxWidth: compact segments first, then shrink/drop the
- * lowest-priority segments (higher priority = survives longer). Returns the
- * surviving segment texts in original order, space-joined.
+ * lowest-priority segments (higher priority = survives longer). Returns one
+ * text per input segment, preserving positions with empty strings for dropped items.
  */
 export function fitSegmentsByPriority(
 	segs: readonly PrioritizedSegment[],
@@ -205,7 +205,7 @@ export function fitSegmentsByPriority(
 			break;
 		}
 	}
-	return items.filter((it) => it.text !== "").map((it) => it.text);
+	return items.map((it) => it.text);
 }
 
 export function stressColor(value: number, warn = 70, danger = 90): ThemeColor {

@@ -1,9 +1,10 @@
 import { homedir } from "node:os";
 import { isAbsolute, relative, sep } from "node:path";
 import type { ExtensionAPI, Theme, ThemeColor, ToolRenderers } from "@earendil-works/pi-coding-agent";
-import { Box, type Component, Spacer, stripTerminalSequences, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import { Box, type Component, Spacer, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import type { ToolViewMode } from "./config.ts";
 import type { IconGlyphs } from "./icons.ts";
+import { sanitizeStatus, stripAnsi } from "./utils.ts";
 
 type RenderCall = NonNullable<ToolRenderers["renderCall"]>;
 type RenderResult = NonNullable<ToolRenderers["renderResult"]>;
@@ -45,7 +46,7 @@ function plural(count: number, one: string, many = `${one}s`): string {
  * and keep only the text after a lone `\r` so progress bars show their latest frame.
  */
 function cleanOutput(text: string): string {
-	return stripTerminalSequences(text)
+	return stripAnsi(text)
 		.replace(/\r\n/g, "\n")
 		.split("\n")
 		.map((line) => {
@@ -60,9 +61,26 @@ export function textOutput(result: ToolResult): string {
 	return cleanOutput(result.content.map((block) => (block.type === "text" ? block.text : "")).join("\n"));
 }
 
-/** Drops Pi's trailing `[...]` notice (truncation, limits, continuation hints) and the blank line before it. */
-export function stripNotice(text: string): string {
-	return text.replace(/\n\n\[[^\n]*\]\s*$/, "").replace(/\n+$/, "");
+const NOTICE_SIZE = String.raw`\d+(?:\.\d+)?(?:B|KB|MB)`;
+const BYTE_LIMIT_NOTICE = `${NOTICE_SIZE} limit reached`;
+const GREP_LINES_NOTICE = String.raw`Some lines truncated to \d+ chars\. Use read tool to see full lines`;
+const SHOWN_LINES_NOTICE = String.raw`Showing lines \d+-\d+ of \d+(?: \(${NOTICE_SIZE} limit\))?`;
+// Pi 1.2–1.4 appends these tool-specific notices, not arbitrary bracketed output.
+const TOOL_NOTICES: Record<string, RegExp> = {
+	read: new RegExp(String.raw`^(?:${SHOWN_LINES_NOTICE}\. Use offset=\d+ to continue\.|\d+ more lines in file\. Use offset=\d+ to continue\.)$`),
+	bash: new RegExp(String.raw`^(?:${SHOWN_LINES_NOTICE}|Showing last ${NOTICE_SIZE} of line \d+ \(line is ${NOTICE_SIZE}\))\. Full output: [^\n]+$`),
+	grep: new RegExp(String.raw`^(?:\d+ matches limit reached\. Use limit=\d+ for more, or refine pattern(?:\. ${BYTE_LIMIT_NOTICE})?(?:\. ${GREP_LINES_NOTICE})?|${BYTE_LIMIT_NOTICE}(?:\. ${GREP_LINES_NOTICE})?|${GREP_LINES_NOTICE})$`),
+	find: new RegExp(String.raw`^(?:\d+ results limit reached(?:\. Use limit=\d+ for more, or refine pattern)?(?:\. ${BYTE_LIMIT_NOTICE})?|${BYTE_LIMIT_NOTICE})$`),
+	ls: new RegExp(String.raw`^(?:\d+ entries limit reached\. Use limit=\d+ for more(?:\. ${BYTE_LIMIT_NOTICE})?|${BYTE_LIMIT_NOTICE})$`),
+};
+
+/** Drop only a recognized notice for this tool, preserving bracketed content and errors. */
+export function stripNotice(toolName: string, text: string): string {
+	const notice = /\n\n\[([^\n]+)\]\s*$/.exec(text);
+	if (notice && TOOL_NOTICES[toolName === "powershell" ? "bash" : toolName]?.test(notice[1]!)) {
+		text = text.slice(0, notice.index);
+	}
+	return text.replace(/\n+$/, "");
 }
 
 function countLines(text: string): number {
@@ -154,7 +172,8 @@ function truncation(result: ToolResult): { truncated: boolean; totalLines?: numb
 function incomplete(result: ToolResult): string {
 	const info = details(result);
 	const limit = ["matchLimitReached", "resultLimitReached", "entryLimitReached"].some((key) => info[key] !== undefined);
-	return (limit ? " · limit reached" : "") + (truncation(result).truncated ? " · truncated" : "");
+	return (limit ? " · limit reached" : "")
+		+ (truncation(result).truncated || info.linesTruncated === true ? " · truncated" : "");
 }
 
 /** Line count of shell output plus any incomplete-result hint. */
@@ -167,12 +186,12 @@ function shellLines(output: string, result: ToolResult): string {
 /** One-line result summary for a finished, successful call. */
 export function summarizeResult(toolName: string, result: ToolResult, args: Args): string {
 	const raw = textOutput(result);
-	const text = stripNotice(raw);
+	const text = stripNotice(toolName, raw);
 	switch (toolName) {
 		case "read": {
 			if (result.content.some((block) => block.type === "image")) return "image";
 			// An explicit `limit` that stops early adds this notice without setting details.truncation.
-			const more = /\n\n\[\d+ more lines in file\.[^\n]*\]\s*$/.test(raw) ? " · more" : "";
+			const more = /\n\n\[\d+ more lines in file\. Use offset=\d+ to continue\.\]\s*$/.test(raw) ? " · more" : "";
 			return plural(countLines(text), "line") + incomplete(result) + more;
 		}
 		case "bash":
@@ -217,7 +236,7 @@ export function summarizeError(toolName: string, result: ToolResult, duration = 
 	const status = toolName === "bash" || toolName === "powershell" ? /(?:^|\n\n)Command ([^\n]+)$/.exec(text) : null;
 	if (status) {
 		const reason = status[1]!;
-		const output = stripNotice(text.slice(0, status.index));
+		const output = stripNotice(toolName, text.slice(0, status.index));
 		// The last output line usually names the failure; it goes last so narrow rows cut it first.
 		const last = tailLines(output, 1)[0]?.trim();
 		const tail = last && last !== "(no output)" ? ` · ${last}` : "";
@@ -284,7 +303,7 @@ export function createCompactRenderers(
 				return row.callCard;
 			}
 			const color: ThemeColor = context.isError ? "error" : context.isPartial ? "warning" : "success";
-			const detail = callDetail(toolName, (args ?? {}) as Args, context.cwd);
+			const detail = sanitizeStatus(callDetail(toolName, (args ?? {}) as Args, context.cwd));
 			const pad = " ".repeat(context.outputPad);
 			return lines(() => [
 				pad + theme.fg(color, glyphs().toolCall) + " " + theme.fg("toolTitle", theme.bold(label))
@@ -343,6 +362,7 @@ export function registerToolView(pi: ExtensionAPI, getMode: () => ToolViewMode, 
 	pi.registerToolRenderer((toolName, next) => {
 		const native = next();
 		if (!native || !OWNED_TOOLS.has(toolName) || getMode() !== "compact") return native;
+		if (pi.getAllTools().find((tool) => tool.name === toolName)?.sourceInfo?.source !== "builtin") return native;
 		return createCompactRenderers(toolName, native, glyphs);
 	});
 }

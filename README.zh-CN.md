@@ -8,6 +8,8 @@
 
 ![pi-open-tui 预览](https://raw.githubusercontent.com/OldSuns/pi-open-tui/main/assets/preview_dashboard_1.png)
 
+Pi 1.4.0 的真实终端截图。
+
 ## 功能亮点
 
 - **Pi 顶栏**：显示模型、思考等级、当前目录和常用斜杠命令提示
@@ -20,7 +22,8 @@
 
 ## 环境要求
 
-- Pi 1.2 或更高版本
+- Pi 1.2.0 或更高版本
+- Node.js 22.19.0 或更高版本（Pi 的最低要求）
 - 支持 UTF-8 和彩色输出的终端
 - 使用完整图标集时需要 [Nerd Font](https://www.nerdfonts.com/font-downloads)（可选；内置可移植 Unicode 图标）
 
@@ -55,7 +58,9 @@ pi -e npm:pi-open-tui
 
 ## 配置
 
-运行 `/open-tui` 打开设置窗口，其中包含**常规**、**外观**、**底栏**和**遥测**四个页面。设置保存在 `~/.pi/agent/open-tui.json`：
+运行 `/open-tui` 打开设置窗口，其中包含**常规**、**外观**、**底栏**和**遥测**四个页面，并会适应终端尺寸。设置保存在 Pi 的 agent 目录内的 `open-tui.json` 中；默认目录为 `~/.pi/agent`，可通过 `PI_CODING_AGENT_DIR` 覆盖。保存失败时会提示：修改仅在当前会话生效。
+
+配置示例：
 
 ```json
 {
@@ -121,6 +126,10 @@ pi -e npm:pi-open-tui
 
 `sessionName` 仅在会话有名称时显示；`hostname` 会显示主机名的短名称（主机名的第一个标签，例如从 `mba.example.com` 显示为 `mba`），并使用服务器图标；处于分离 HEAD（detached HEAD）状态时，`gitBranch` 会显示 `HEAD` 和短提交哈希，`gitCommit` 会在其后追加指向该提交的标签，且仅在开启 `gitBranch` 时生效；关闭 `extensionStatuses` 会隐藏整行扩展状态，其中也包括 MCP 状态。每条状态会保留其扩展通过 `ctx.ui.theme.fg()` 设置的颜色；未设置颜色的状态使用 muted 主题色显示。
 
+底栏的 Token 和费用总计包含助手回复、工具报告的用量、压缩与分支摘要以及缓存预热；缓存命中百分比表示最近一条助手回复，而非整个会话的累计比例。
+
+底栏第一行宽度不足时，先隐藏运行环境和上下文条，然后依次隐藏 Git、会话名称、主机名和计时器；当前目录保留到最后，并缩短为文件夹名。
+
 开启 `inlineFooter` 后，两条常规 Footer 信息行会移入编辑器边框，从而节省垂直空间。顶部边框左侧显示 Git 分支，右侧信息组以当前目录开头；开启 `sessionName` 时，会话标题也会显示在左侧。Header 和扩展状态行保持独立显示；终端较窄时优先截断低优先级 Footer 数据，保留右侧统计信息和边框角。
 
 ## 单轮遥测
@@ -169,7 +178,8 @@ TPS 的计算方式是：将本次运行中服务商报告的全部 Assistant �
 - Shell 命令运行中会显示最新 3 行输出和已用时间。
 - 圆点运行中为黄色、完成为绿色、失败为红色；失败的调用同样保持紧凑行，并显示红色摘要；Shell 命令的摘要末尾带上最后一行输出（如 `Exited with code 1 · 12 lines · 1.2s · FAIL tests/a.test.ts`），按 Ctrl+O 查看完整输出。
 - 点击某行只展开这一行为 Pi 原生卡片，`Ctrl+O` 展开全部行；完整输出、diff 和截断提示保持不变。
-- 只改变显示：工具、参数、结果以及模型看到的内容都不受影响，第三方和 MCP 工具保持各自的渲染。
+- 只改变显示：工具、参数、结果以及模型看到的内容都不受影响。仅接管 Pi 确认来源为内置的工具；第三方和 MCP 工具（包括替换内置同名工具的扩展）保持各自的渲染。
+- 紧凑摘要会标记输出截断，包括 grep 的长行截断；方括号正文和失败信息会保留，不会被误当成工具通知删除。
 - 模式在 Pi 创建某行时确定，因此切换只影响新建的行；执行 `/reload` 或新开会话后整个记录都会应用。
 
 ## 复制按钮
@@ -201,16 +211,18 @@ npm run typecheck
 pi -e .
 ```
 
+CI 在 Linux、Windows、macOS 上，使用 Node.js 22.19.0 和 24，检查 Pi 1.2.0 及最新版本。核对兼容性时应让各个 Pi 包保持同一版本。自动化测试不能替代通过 `pi -e .` 检查终端字体、鼠标交互和光标支持。
+
 ## 致谢
 
 本项目基于多个 Pi 社区包的工作：
 
 - **[pi-haiku](https://github.com/nnocte/pi-haiku)** — 双行底栏结构和工作计时器
-- **[pi-claude-code-tui](https://github.com/Phoobobo/pi-claude-code-tui)** — Pi Logo 帧与圆角编辑器边框技术
+- **[pi-claude-code-tui](https://github.com/Phoobobo/pi-claude-code-tui)** — Pi Logo 图案与圆角编辑器边框技术
 - **[pi-zentui](https://github.com/lmilojevicc/pi-zentui)** — Starship 风格底栏、运行环境检测、会话生命周期和设置界面模式
 - **[pi-tps](https://github.com/monotykamary/pi-tps)** — 单轮计时、停顿检测和保守的 TPS 计算方式
 
-Logo 帧源自 Pi 官方安装脚本（`pi.dev/install.sh`）。运行环境检测和 Git porcelain 解析借鉴了 `pi-zentui` 的结构。
+Logo 图案源自 Pi 官方安装脚本（`pi.dev/install.sh`）。运行环境检测和 Git porcelain 解析借鉴了 `pi-zentui` 的结构。
 
 特别感谢 **[LINUX DO](https://linux.do)** 社区的支持。
 

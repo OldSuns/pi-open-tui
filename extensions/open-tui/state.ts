@@ -8,7 +8,6 @@ import { finiteOrZero, formatProviderLabel } from "./utils.ts";
 export interface FooterState {
 	git: GitStatus;
 	runtime: RuntimeInfo | null;
-	sessionStartEpoch: number;
 	workingSince: number | undefined;
 	lastDoneIn: number | undefined;
 }
@@ -22,23 +21,22 @@ export interface UsageTotals {
 	latestCacheHitRate: number | undefined;
 }
 
-let usageCache: { key: string; totals: UsageTotals } | undefined;
-
-function entriesKey(ctx: ExtensionContext): string {
-	const entries = ctx.sessionManager.getEntries();
-	const last = entries.at(-1);
-	return `${entries.length}:${last?.id ?? ""}:${last?.timestamp ?? ""}`;
-}
+let usageCache: {
+	sessionManager: ExtensionContext["sessionManager"];
+	leafId: string | null;
+	totals: UsageTotals;
+} | undefined;
 
 export function getUsageTotals(ctx: ExtensionContext): UsageTotals {
-	const key = entriesKey(ctx);
-	if (usageCache && usageCache.key === key) return usageCache.totals;
+	const { sessionManager } = ctx;
+	const leafId = sessionManager.getLeafId();
+	if (usageCache?.sessionManager === sessionManager && usageCache.leafId === leafId) return usageCache.totals;
 
 	const totals: UsageTotals = {
 		input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0,
 		latestCacheHitRate: undefined,
 	};
-	for (const entry of ctx.sessionManager.getEntries()) {
+	for (const entry of sessionManager.getEntries()) {
 		let u: Usage | undefined;
 		let updateCacheHitRate = false;
 		if (entry.type === "message" && entry.message.role === "assistant") {
@@ -46,7 +44,7 @@ export function getUsageTotals(ctx: ExtensionContext): UsageTotals {
 			updateCacheHitRate = true;
 		} else if (entry.type === "message" && entry.message.role === "toolResult") {
 			u = entry.message.usage;
-		} else if (entry.type === "branch_summary" || entry.type === "compaction") {
+		} else if (entry.type === "usage" || entry.type === "branch_summary" || entry.type === "compaction") {
 			u = entry.usage;
 		}
 		if (!u) continue;
@@ -67,7 +65,7 @@ export function getUsageTotals(ctx: ExtensionContext): UsageTotals {
 				: undefined;
 		}
 	}
-	usageCache = { key, totals };
+	usageCache = { sessionManager, leafId, totals };
 	return totals;
 }
 
@@ -79,7 +77,6 @@ export function createInitialState(): FooterState {
 	return {
 		git: emptyGitStatus(),
 		runtime: null,
-		sessionStartEpoch: Date.now(),
 		workingSince: undefined,
 		lastDoneIn: undefined,
 	};
