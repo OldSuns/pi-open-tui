@@ -4,7 +4,7 @@ import {
 	type ExtensionContext,
 	type KeybindingsManager,
 } from "@earendil-works/pi-coding-agent";
-import type { EditorTheme, TuiMouseEvent, TuiMouseEventResult, TUI } from "@earendil-works/pi-tui";
+import type { EditorComponent, EditorTheme, TuiMouseEvent, TUI } from "@earendil-works/pi-tui";
 import { CURSOR_MARKER, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import type { CursorStyle } from "./config.ts";
 import { findBottomBorderIndex, isEditorBorderLine, stripAnsi } from "./utils.ts";
@@ -22,6 +22,8 @@ const CURSOR_STYLE_SEQUENCES: Partial<Record<CursorStyle, string>> = {
 const DEFAULT_CURSOR_STYLE_SEQUENCE = "\x1b[0 q";
 const EDITOR_FRAME_LEFT_INSET = 2;
 const EDITOR_FRAME_HORIZONTAL_CHROME = EDITOR_FRAME_LEFT_INSET * 2;
+
+type EditorFactory = NonNullable<Parameters<ExtensionContext["ui"]["setEditorComponent"]>[0]>;
 
 interface WorkingStatusIndicator {
 	renderInBorder(width: number): string;
@@ -200,125 +202,224 @@ function inlineBorder(
 	return `${paint(corners[0])}${left}${leftCell}${paint("─".repeat(fill))}${rightCell}${right}${paint("─")}${paint(corners[1])}`;
 }
 
-export class OpenTuiEditor extends CustomEditor {
-	readonly embedWorkingStatus = true;
-	private readonly getRail: () => string;
-	private readonly getBorder: (s: string) => string;
-	private embeddedWorkingStatusIndicator: WorkingStatusIndicator | undefined;
-	private readonly inlineFooter: InlineFooterRenderer | undefined;
-	private cursorStyle: CursorStyle;
-	private previewHardwareCursor = false;
+export interface OpenTuiEditorOptions {
+	cursorStyle?: CursorStyle;
+	inlineFooter?: InlineFooterRenderer;
+}
 
-	constructor(
-		tui: TUI,
-		editorTheme: EditorTheme,
-		keybindings: KeybindingsManager,
-		cursorStyle: CursorStyle = "block",
-		inlineFooter?: InlineFooterRenderer,
-	) {
-		super(tui, editorTheme, keybindings, { paddingX: 0 });
-		this.cursorStyle = cursorStyle;
-		this.inlineFooter = inlineFooter;
-		configureCursor(tui, cursorStyle);
-		// ponytail: route the frame through this.borderColor so Pi can recolor it
-		// via updateEditorBorderColor() — bash mode ("! " prefix → green) and
-		// thinking-level borders both flow through this one property.
-		this.getRail = () => this.borderColor("│");
-		this.getBorder = (s: string) => this.borderColor(s);
+/** Capabilities this decorator adds to the editor instance it wraps. */
+export interface OpenTuiEditorDecoration {
+	embedWorkingStatus?: boolean;
+	setWorkingStatusIndicator(indicator: WorkingStatusIndicator | undefined): void;
+	setCursorStyle(cursorStyle: CursorStyle, blockHardwareCursor?: boolean): void;
+}
+
+export type OpenTuiDecoratedEditor = CustomEditor & OpenTuiEditorDecoration;
+/** Any editor instance this decorator touched: the Pi editor contract plus our additions. */
+export type OpenTuiEditorCapability = EditorComponent & OpenTuiEditorDecoration;
+
+interface EditorDecoration {
+	tui: TUI;
+	editor: EditorComponent;
+	cursorStyle: CursorStyle;
+	previewHardwareCursor: boolean;
+	inlineFooter: InlineFooterRenderer | undefined;
+	indicator: WorkingStatusIndicator | undefined;
+	baseRender: (width: number) => string[];
+	baseHandleMouse: ((event: TuiMouseEvent) => unknown) | undefined;
+	baseSetPaddingX: ((padding: number) => void) | undefined;
+}
+
+// One decoration per instance: installing twice must not stack two frames.
+const DECORATIONS = new WeakMap<object, EditorDecoration>();
+// Factories registered by a previous install. Restoring one of those on cleanup
+// would leave a stale frame behind instead of handing the slot back.
+const OWN_FACTORIES = new WeakSet<object>();
+
+function applyCursorStyle(
+	decoration: EditorDecoration,
+	cursorStyle: CursorStyle,
+	blockHardwareCursor = false,
+): void {
+	const styleChanged = cursorStyle !== decoration.cursorStyle;
+	decoration.previewHardwareCursor = cursorStyle !== "block";
+	decoration.cursorStyle = cursorStyle;
+	if (styleChanged) {
+		const tui = decoration.tui;
+		if (cursorStyle === "block") {
+			tui.terminal.write(DEFAULT_CURSOR_STYLE_SEQUENCE);
+			tui.setShowHardwareCursor(blockHardwareCursor);
+		} else {
+			configureCursor(tui, cursorStyle);
+		}
+	}
+	decoration.tui.requestRender();
+}
+
+function renderWithCursor(decoration: EditorDecoration, width: number): string[] {
+	const renderedLines = decoration.baseRender(width);
+	if (decoration.cursorStyle === "block") return renderedLines;
+
+	const tui = decoration.tui;
+	// Pi re-applies settings.showHardwareCursor after session_start (/reload,
+	// /new, session switches). Non-block styles have no software cursor left to
+	// fall back on, so re-assert the hardware cursor instead of losing it.
+	if (!tui.getShowHardwareCursor()) configureCursor(tui, decoration.cursorStyle);
+
+	// A focused overlay suppresses the editor's cursor marker. Preserve its
+	// position only for the live settings preview, then clear it on refocus.
+	const focused = (decoration.editor as { focused?: boolean }).focused === true;
+	let cursorMarker = decoration.previewHardwareCursor && !focused ? CURSOR_MARKER : "";
+	if (focused) decoration.previewHardwareCursor = false;
+	return renderedLines.map((line) => {
+		const rendered = removeSoftwareCursor(line, cursorMarker);
+		if (rendered !== line) cursorMarker = "";
+		return rendered;
+	});
+}
+
+/**
+ * Route the frame through the instance's `borderColor` so Pi can recolor it via
+ * `updateEditorBorderColor()`: bash mode ("! " prefix → green) and thinking-level
+ * borders both flow through that one property.
+ */
+function paintBorder(editor: EditorComponent, text: string): string {
+	const borderColor = (editor as { borderColor?: unknown }).borderColor;
+	return typeof borderColor === "function" ? (borderColor as (value: string) => string)(text) : text;
+}
+
+/** Pi's own editor renders exactly one top border, content, then one bottom border. */
+function isFrameable(lines: string[]): boolean {
+	if (lines.length < 3) return false;
+	if (!isEditorBorderLine(lines[0] ?? "")) return false;
+	const bottom = findBottomBorderIndex(lines);
+	return bottom >= 1 && bottom < lines.length && isEditorBorderLine(lines[bottom] ?? "");
+}
+
+function renderFrame(decoration: EditorDecoration, width: number): string[] {
+	if (width < EDITOR_FRAME_HORIZONTAL_CHROME) return renderWithCursor(decoration, width);
+
+	const innerWidth = Math.max(0, width - EDITOR_FRAME_HORIZONTAL_CHROME);
+	const baseLines = renderWithCursor(decoration, innerWidth);
+	if (!isFrameable(baseLines)) {
+		// The inner editor does not use Pi's border layout (it draws its own chrome,
+		// or an extension replaced it wholesale). Skip our frame rather than drawing a
+		// second one, and hand the working indicator back to Pi's status container.
+		(decoration.editor as { embedWorkingStatus?: boolean }).embedWorkingStatus = false;
+		return renderWithCursor(decoration, width).map((line) => truncateToWidth(line, width, ""));
+	}
+	(decoration.editor as { embedWorkingStatus?: boolean }).embedWorkingStatus = true;
+
+	const rail = paintBorder(decoration.editor, "│");
+	const borderPaint = (text: string) => paintBorder(decoration.editor, text);
+	const bottomIdx = findBottomBorderIndex(baseLines);
+
+	const result: string[] = [];
+	const inlineFooter = decoration.inlineFooter?.enabled() === true;
+	const renderInlineLine = (kind: "top" | "bottom", budget: number): InlineFooterLine | undefined =>
+		decoration.inlineFooter?.render(budget)?.[kind];
+	result.push(inlineFooter
+		? inlineBorder(width, "top", borderPaint, (budget) => renderInlineLine("top", budget), baseLines[0], decoration.indicator)
+		: roundedBorder(width, "top", borderPaint, baseLines[0], decoration.indicator));
+
+	for (let i = 1; i < bottomIdx; i++) {
+		const line = baseLines[i] ?? "";
+		if (isEditorBorderLine(line)) {
+			result.push(`${rail} ${fillLine("", innerWidth)} ${rail}`);
+		} else {
+			result.push(`${rail} ${fillLine(line, innerWidth)} ${rail}`);
+		}
 	}
 
-	override setPaddingX(_padding: number): void {
+	result.push(inlineFooter
+		? inlineBorder(width, "bottom", borderPaint, (budget) => renderInlineLine("bottom", budget), baseLines[bottomIdx])
+		: roundedBorder(width, "bottom", borderPaint, baseLines[bottomIdx]));
+
+	for (let i = bottomIdx + 1; i < baseLines.length; i++) {
+		result.push(baseLines[i]!);
+	}
+
+	return result.map((line) => truncateToWidth(line, width, ""));
+}
+
+/**
+ * Adds the open-tui frame to an existing editor **in place** and returns that same
+ * instance. Patching (instead of wrapping) keeps `onSubmit` / `onChange` / `handleInput`
+ * on one object, so Pi and every extension that wrapped the factory before us keep working.
+ */
+export function decorateOpenTuiEditor<T extends EditorComponent>(
+	editor: T,
+	tui: TUI,
+	options: OpenTuiEditorOptions = {},
+): T & OpenTuiEditorDecoration {
+	const existing = DECORATIONS.get(editor);
+	if (existing) {
+		if (options.cursorStyle !== undefined && options.cursorStyle !== existing.cursorStyle) {
+			applyCursorStyle(existing, options.cursorStyle);
+		}
+		existing.inlineFooter = options.inlineFooter ?? existing.inlineFooter;
+		return editor as T & OpenTuiEditorDecoration;
+	}
+
+	const decoration: EditorDecoration = {
+		tui,
+		editor,
+		cursorStyle: options.cursorStyle ?? "block",
+		previewHardwareCursor: false,
+		inlineFooter: options.inlineFooter,
+		indicator: undefined,
+		baseRender: editor.render.bind(editor),
+		baseHandleMouse: typeof (editor as { handleMouse?: unknown }).handleMouse === "function"
+			? (editor as unknown as { handleMouse(event: TuiMouseEvent): unknown }).handleMouse.bind(editor)
+			: undefined,
+		baseSetPaddingX: typeof (editor as { setPaddingX?: unknown }).setPaddingX === "function"
+			? (editor as unknown as { setPaddingX(padding: number): void }).setPaddingX.bind(editor)
+			: undefined,
+	};
+	DECORATIONS.set(editor, decoration);
+	configureCursor(tui, decoration.cursorStyle);
+
+	const decorated = editor as T & OpenTuiEditorDecoration;
+	decorated.embedWorkingStatus = true;
+	decorated.setWorkingStatusIndicator = (indicator) => {
+		decoration.indicator = indicator;
+		tui.requestRender();
+	};
+	decorated.setCursorStyle = (nextCursorStyle, blockHardwareCursor = false) => {
+		applyCursorStyle(decoration, nextCursorStyle, blockHardwareCursor);
+	};
+	editor.render = (width: number) => renderFrame(decoration, width);
+	if (decoration.baseHandleMouse) {
+		(editor as unknown as { handleMouse(event: TuiMouseEvent): unknown }).handleMouse = (event: TuiMouseEvent) =>
+			event.width < EDITOR_FRAME_HORIZONTAL_CHROME
+				? decoration.baseHandleMouse?.(event)
+				: decoration.baseHandleMouse?.({
+					...event,
+					x: event.x - EDITOR_FRAME_LEFT_INSET,
+					width: event.width - EDITOR_FRAME_HORIZONTAL_CHROME,
+				});
+	}
+	if (decoration.baseSetPaddingX) {
 		// The custom rail owns the horizontal inset and keeps one stable text gap.
-		super.setPaddingX(0);
+		(editor as unknown as { setPaddingX(padding: number): void }).setPaddingX = (_padding: number) =>
+			decoration.baseSetPaddingX?.(0);
 	}
+	return decorated;
+}
 
-	override handleMouse(event: TuiMouseEvent): TuiMouseEventResult | undefined {
-		if (event.width < EDITOR_FRAME_HORIZONTAL_CHROME) return super.handleMouse(event);
-
-		return super.handleMouse({
-			...event,
-			x: event.x - EDITOR_FRAME_LEFT_INSET,
-			width: event.width - EDITOR_FRAME_HORIZONTAL_CHROME,
-		});
-	}
-
-	setWorkingStatusIndicator(indicator: WorkingStatusIndicator | undefined): void {
-		this.embeddedWorkingStatusIndicator = indicator;
-		this.tui.requestRender();
-	}
-
-	setCursorStyle(cursorStyle: CursorStyle, blockHardwareCursor = false): void {
-		const styleChanged = cursorStyle !== this.cursorStyle;
-		this.previewHardwareCursor = cursorStyle !== "block";
-		this.cursorStyle = cursorStyle;
-		if (styleChanged) {
-			if (cursorStyle === "block") {
-				this.tui.terminal.write(DEFAULT_CURSOR_STYLE_SEQUENCE);
-				this.tui.setShowHardwareCursor(blockHardwareCursor);
-			} else {
-				configureCursor(this.tui, cursorStyle);
-			}
-		}
-		this.tui.requestRender();
-	}
-
-	private renderBase(width: number): string[] {
-		const renderedLines = super.render(width);
-		if (this.cursorStyle === "block") return renderedLines;
-
-		// Pi re-applies settings.showHardwareCursor after session_start (/reload,
-		// /new, session switches). Non-block styles have no software cursor left to
-		// fall back on, so re-assert the hardware cursor instead of losing it.
-		if (!this.tui.getShowHardwareCursor()) configureCursor(this.tui, this.cursorStyle);
-
-		// A focused overlay suppresses the editor's cursor marker. Preserve its
-		// position only for the live settings preview, then clear it on refocus.
-		let cursorMarker = this.previewHardwareCursor && !this.focused ? CURSOR_MARKER : "";
-		if (this.focused) this.previewHardwareCursor = false;
-		return renderedLines.map((line) => {
-			const rendered = removeSoftwareCursor(line, cursorMarker);
-			if (rendered !== line) cursorMarker = "";
-			return rendered;
-		});
-	}
-
-	render(width: number): string[] {
-		if (width < EDITOR_FRAME_HORIZONTAL_CHROME) return this.renderBase(width);
-
-		const rail = this.getRail();
-		const borderPaint = this.getBorder;
-		// ponytail: 1-char rail + 1-char gap on each side = 4 chars of chrome.
-		const innerWidth = Math.max(0, width - EDITOR_FRAME_HORIZONTAL_CHROME);
-		const baseLines = this.renderBase(innerWidth);
-		const bottomIdx = findBottomBorderIndex(baseLines);
-
-		const result: string[] = [];
-		const inlineFooter = this.inlineFooter?.enabled() === true;
-		const renderInlineLine = (kind: "top" | "bottom", budget: number): InlineFooterLine | undefined =>
-			this.inlineFooter?.render(budget)?.[kind];
-		result.push(inlineFooter
-			? inlineBorder(width, "top", borderPaint, (budget) => renderInlineLine("top", budget), baseLines[0], this.embeddedWorkingStatusIndicator)
-			: roundedBorder(width, "top", borderPaint, baseLines[0], this.embeddedWorkingStatusIndicator));
-
-		for (let i = 1; i < bottomIdx; i++) {
-			const line = baseLines[i] ?? "";
-			if (isEditorBorderLine(line)) {
-				result.push(`${rail} ${fillLine("", innerWidth)} ${rail}`);
-			} else {
-				result.push(`${rail} ${fillLine(line, innerWidth)} ${rail}`);
-			}
-		}
-
-		result.push(inlineFooter
-			? inlineBorder(width, "bottom", borderPaint, (budget) => renderInlineLine("bottom", budget), baseLines[bottomIdx])
-			: roundedBorder(width, "bottom", borderPaint, baseLines[bottomIdx]));
-
-		for (let i = bottomIdx + 1; i < baseLines.length; i++) {
-			result.push(baseLines[i]!);
-		}
-
-		return result.map((line) => truncateToWidth(line, width, ""));
-	}
+/** Standalone framed editor, used when no other extension installed one. */
+export function createOpenTuiEditor(
+	tui: TUI,
+	editorTheme: EditorTheme,
+	keybindings: KeybindingsManager,
+	cursorStyle: CursorStyle = "block",
+	inlineFooter?: InlineFooterRenderer,
+): OpenTuiDecoratedEditor {
+	return decorateOpenTuiEditor(
+		new CustomEditor(tui, editorTheme, keybindings, { paddingX: 0 }),
+		tui,
+		{ cursorStyle, inlineFooter },
+	);
 }
 
 type StreamWrite = (...args: unknown[]) => boolean;
@@ -364,7 +465,7 @@ export function installEditor(
 	inlineFooter?: InlineFooterRenderer,
 ) {
 	let activeTui: TUI | undefined;
-	let activeEditor: OpenTuiEditor | undefined;
+	let activeEditor: OpenTuiEditorCapability | undefined;
 	let previousHardwareCursor: boolean | undefined;
 	let currentCursorStyle = cursorStyle;
 	let hiddenThinkingTarget: HiddenThinkingLabelComponent | undefined;
@@ -410,13 +511,38 @@ export function installEditor(
 		if (activeTui?.mode === "fullscreen") activeTui.requestRender(true);
 	});
 
-	ctx.ui.setEditorComponent((tui, editorTheme, keybindings) => {
+	// Pi's setEditorComponent replaces, so a later install would silently drop an
+	// editor another extension wrapped in. Capture that factory and decorate the
+	// instance it returns instead of replacing it (CHANGELOG #3935).
+	const previousFactory = typeof ctx.ui.getEditorComponent === "function"
+		? ctx.ui.getEditorComponent()
+		: undefined;
+	// A factory left behind by an earlier install of this same extension must not
+	// come back on cleanup, or the frame would survive an uninstall.
+	const inheritedFactory = previousFactory && !OWN_FACTORIES.has(previousFactory)
+		? previousFactory
+		: undefined;
+
+	const factory: EditorFactory = (tui, editorTheme, keybindings) => {
 		activeTui = tui;
 		resetHiddenThinkingTarget();
-		previousHardwareCursor = tui.getShowHardwareCursor();
-		activeEditor = new OpenTuiEditor(tui, editorTheme, keybindings, currentCursorStyle, inlineFooter);
+		previousHardwareCursor = tui.getShowHardwareCursor?.();
+		let inner: EditorComponent | undefined;
+		try {
+			inner = inheritedFactory?.(tui, editorTheme, keybindings);
+		} catch {
+			// One broken editor extension must not take open-tui down with it.
+			inner = undefined;
+		}
+		activeEditor = decorateOpenTuiEditor(
+			inner ?? new CustomEditor(tui, editorTheme, keybindings, { paddingX: 0 }),
+			tui,
+			{ cursorStyle: currentCursorStyle, inlineFooter },
+		);
 		return activeEditor;
-	});
+	};
+	OWN_FACTORIES.add(factory);
+	ctx.ui.setEditorComponent(factory);
 	return {
 		/** `build` receives the hidden-thinking text width and runs again whenever that width changes. */
 		setLatestHiddenThinkingLabel(build: (width: number) => string): void {
@@ -437,10 +563,24 @@ export function installEditor(
 		cleanup(): void {
 			restoreStderr();
 			resetHiddenThinkingTarget();
-			ctx.ui.setEditorComponent(undefined);
 			if (activeTui) {
 				if (currentCursorStyle !== "block") activeTui.terminal.write(DEFAULT_CURSOR_STYLE_SEQUENCE);
 				if (previousHardwareCursor !== undefined) activeTui.setShowHardwareCursor(previousHardwareCursor);
+			}
+			// Hand the editor slot back instead of clearing it, so editors wrapped
+			// before us stay installed after open-tui is disabled or unloaded.
+			const currentFactory = typeof ctx.ui.getEditorComponent === "function"
+				? ctx.ui.getEditorComponent()
+				: undefined;
+			// Another extension wrapped us after we installed; replacing the factory
+			// now would silently drop its wrapper.
+			if (currentFactory !== undefined && currentFactory !== factory) return;
+			try {
+				ctx.ui.setEditorComponent(inheritedFactory);
+			} catch {
+				// The inherited factory broke after we took over; fall back to Pi's editor
+				// rather than leaving the slot empty.
+				ctx.ui.setEditorComponent(undefined);
 			}
 		},
 	};

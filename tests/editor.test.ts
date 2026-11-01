@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { ExtensionAPI, ExtensionContext, KeybindingsManager } from "@earendil-works/pi-coding-agent";
+import { CustomEditor, type ExtensionAPI, type ExtensionContext, type KeybindingsManager } from "@earendil-works/pi-coding-agent";
 import { TuiMainScreen, type EditorTheme, type Terminal, type TUI, visibleWidth } from "@earendil-works/pi-tui";
-import { installEditor, OpenTuiEditor, repaintAfterStreamWrites } from "../extensions/open-tui/editor.ts";
+import { decorateOpenTuiEditor, installEditor, createOpenTuiEditor, repaintAfterStreamWrites } from "../extensions/open-tui/editor.ts";
 import { stripAnsi } from "../extensions/open-tui/utils.ts";
 
 const tui = {
@@ -22,7 +22,7 @@ const editorTheme = {
 } as EditorTheme;
 
 test("compensates Pi editor padding for the custom left rail", () => {
-	const editor = new OpenTuiEditor(
+	const editor = createOpenTuiEditor(
 		tui,
 		editorTheme,
 		{ matches: () => false } as unknown as KeybindingsManager,
@@ -37,7 +37,7 @@ test("compensates Pi editor padding for the custom left rail", () => {
 });
 
 test("maps framed editor clicks to the Pi editor coordinate space", () => {
-	const editor = new OpenTuiEditor(
+	const editor = createOpenTuiEditor(
 		tui,
 		editorTheme,
 		{ matches: () => false } as unknown as KeybindingsManager,
@@ -70,7 +70,7 @@ test("maps framed editor clicks to the Pi editor coordinate space", () => {
 });
 
 test("leaves narrow unframed editor mouse coordinates unchanged", () => {
-	const editor = new OpenTuiEditor(
+	const editor = createOpenTuiEditor(
 		tui,
 		editorTheme,
 		{ matches: () => false } as unknown as KeybindingsManager,
@@ -95,7 +95,7 @@ test("leaves narrow unframed editor mouse coordinates unchanged", () => {
 	assert.equal(editor.getCursor().col, 0);
 });
 test("embeds the working indicator in the editor top border", () => {
-	const editor = new OpenTuiEditor(
+	const editor = createOpenTuiEditor(
 		tui,
 		editorTheme,
 		{ matches: () => false } as unknown as KeybindingsManager,
@@ -109,7 +109,7 @@ test("embeds the working indicator in the editor top border", () => {
 });
 
 test("renders inline footer lines in the editor frame", () => {
-	const editor = new OpenTuiEditor(
+	const editor = createOpenTuiEditor(
 		tui,
 		editorTheme,
 		{ matches: () => false } as unknown as KeybindingsManager,
@@ -131,7 +131,7 @@ test("renders inline footer lines in the editor frame", () => {
 });
 
 test("keeps a narrow scrolled working border intact", () => {
-	const editor = new OpenTuiEditor(
+	const editor = createOpenTuiEditor(
 		tui,
 		editorTheme,
 		{ matches: () => false } as unknown as KeybindingsManager,
@@ -173,7 +173,7 @@ test("uses the terminal hardware cursor for non-block styles", () => {
 				hardwareCursor = enabled;
 			},
 		} as unknown as TUI;
-		const editor = new OpenTuiEditor(
+		const editor = createOpenTuiEditor(
 			hardwareTui,
 			editorTheme,
 			{ matches: () => false } as unknown as KeybindingsManager,
@@ -201,7 +201,7 @@ test("shows a hardware cursor while previewing a non-block style under an overla
 		showCursor: () => cursorEvents.push("show"),
 	} as unknown as Terminal;
 	const overlayTui = new TuiMainScreen(terminal, false);
-	const editor = new OpenTuiEditor(
+	const editor = createOpenTuiEditor(
 		overlayTui,
 		editorTheme,
 		{ matches: () => false } as unknown as KeybindingsManager,
@@ -233,7 +233,7 @@ test("preserves block hardware cursor settings", () => {
 		setShowHardwareCursor: () => changes++,
 	} as unknown as TUI;
 
-	new OpenTuiEditor(
+	createOpenTuiEditor(
 		hardwareTui,
 		editorTheme,
 		{ matches: () => false } as unknown as KeybindingsManager,
@@ -267,6 +267,158 @@ test("does not override Pi's native fullscreen wheel setting", () => {
 	assert.equal(wheelSettingChanges, 0);
 	editor.cleanup();
 	assert.equal(wheelSettingChanges, 0);
+});
+
+test("decorates the editor installed by another extension instead of replacing it", () => {
+	const inner = new CustomEditor(
+		tui,
+		editorTheme,
+		{ matches: () => false } as unknown as KeybindingsManager,
+		{ paddingX: 0 },
+	);
+	let innerTabPresses = 0;
+	const innerHandleInput = inner.handleInput.bind(inner);
+	inner.handleInput = (data: string) => {
+		if (data === "\t") innerTabPresses++;
+		innerHandleInput(data);
+	};
+	const innerFactory = () => inner;
+
+	let created: unknown;
+	const installs: unknown[] = [];
+	let installedFactory: unknown = innerFactory;
+	const ctx = {
+		ui: {
+			getEditorComponent: () => installedFactory,
+			setEditorComponent: (factory: unknown) => {
+				installedFactory = factory;
+				installs.push(factory);
+				if (typeof factory === "function") {
+					created = (factory as (...args: unknown[]) => unknown)(tui, editorTheme, { matches: () => false });
+				}
+			},
+		},
+	} as unknown as ExtensionContext;
+
+	const editor = installEditor({} as ExtensionAPI, ctx);
+
+	assert.equal(created, inner, "the instance installed by the other extension stays active");
+	assert.equal((created as { embedWorkingStatus?: boolean }).embedWorkingStatus, true);
+	(created as CustomEditor).handleInput("\t");
+	assert.equal(innerTabPresses, 1, "input still reaches the inner wrapper");
+	assert.match(stripAnsi((created as CustomEditor).render(40)[0] ?? ""), /^╭/);
+
+	editor.cleanup();
+	assert.equal(installs.at(-1), innerFactory, "cleanup restores the previous factory");
+});
+
+test("falls back to the default editor when the previous factory throws", () => {
+	let created: unknown;
+	let installedFactory: unknown = () => {
+		throw new Error("broken editor");
+	};
+	const ctx = {
+		ui: {
+			getEditorComponent: () => installedFactory,
+			setEditorComponent: (factory: unknown) => {
+				installedFactory = factory;
+				if (typeof factory === "function") {
+					created = (factory as (...args: unknown[]) => unknown)(tui, editorTheme, { matches: () => false });
+				}
+			},
+		},
+	} as unknown as ExtensionContext;
+
+	const editor = installEditor({} as ExtensionAPI, ctx);
+
+	assert.ok(created, "a framed editor was still installed");
+	assert.match(stripAnsi((created as CustomEditor).render(40)[0] ?? ""), /^╭/);
+	editor.cleanup();
+});
+
+test("cleanup leaves a factory installed after us alone", () => {
+	const inner = new CustomEditor(
+		tui,
+		editorTheme,
+		{ matches: () => false } as unknown as KeybindingsManager,
+		{ paddingX: 0 },
+	);
+	let installedFactory: unknown = () => inner;
+	const installs: unknown[] = [];
+	const ctx = {
+		ui: {
+			getEditorComponent: () => installedFactory,
+			setEditorComponent: (factory: unknown) => {
+				installedFactory = factory;
+				installs.push(factory);
+				if (typeof factory === "function") {
+					(factory as (...args: unknown[]) => unknown)(tui, editorTheme, { matches: () => false });
+				}
+			},
+		},
+	} as unknown as ExtensionContext;
+
+	const editor = installEditor({} as ExtensionAPI, ctx);
+	// Another editor extension registers after open-tui and now sits on top.
+	installedFactory = () => inner;
+	installs.length = 0;
+
+	editor.cleanup();
+
+	assert.deepEqual(installs, [], "cleanup must not replace the newer factory");
+});
+
+test("leaves editors with their own layout unframed", () => {
+	const custom = {
+		render: (width: number) => [`custom ${width}`],
+		invalidate() {},
+		getText: () => "",
+		setText() {},
+		handleInput() {},
+	};
+
+	const decorated = decorateOpenTuiEditor(custom, tui);
+
+	assert.deepEqual(decorated.render(40), ["custom 40"]);
+	assert.equal(decorated.embedWorkingStatus, false, "Pi keeps drawing its own status indicator");
+});
+
+test("keeps ghost text rendered by an inner editor wrapper", () => {
+	const inner = new CustomEditor(
+		tui,
+		editorTheme,
+		{ matches: () => false } as unknown as KeybindingsManager,
+		{ paddingX: 0 },
+	);
+	// next-prompt-style wrapper: patch the render output, keep the instance.
+	const innerRender = inner.render.bind(inner);
+	inner.render = (width: number) => {
+		const lines = innerRender(width);
+		const line = lines[1] ?? "";
+		lines[1] = line.replace(/ {3,}$/, " try this next");
+		return lines;
+	};
+
+	const decorated = decorateOpenTuiEditor(inner, tui);
+	const body = stripAnsi(decorated.render(60)[1] ?? "");
+
+	assert.match(body, /try this next/);
+	assert.ok(body.startsWith("│ ") && body.endsWith(" │"), `ghost line keeps its rails: ${body}`);
+	assert.equal(visibleWidth(body), 60);
+});
+
+test("decorating the same instance twice keeps one frame", () => {
+	const editor = createOpenTuiEditor(
+		tui,
+		editorTheme,
+		{ matches: () => false } as unknown as KeybindingsManager,
+	);
+
+	const decorated = decorateOpenTuiEditor(editor, tui);
+	const lines = stripAnsi(decorated.render(40).join("\n"));
+
+	assert.equal(decorated, editor);
+	assert.equal(lines.match(/╭/g)?.length, 1);
 });
 
 test("restores cursor shape and visibility when the editor is removed", () => {
@@ -307,7 +459,7 @@ test("frame recolors via borderColor (bash mode / thinking level hook)", () => {
 			return text;
 		},
 	} as EditorTheme;
-	const editor = new OpenTuiEditor(
+	const editor = createOpenTuiEditor(
 		tui,
 		theme,
 		{ matches: () => false } as unknown as KeybindingsManager,
@@ -342,7 +494,7 @@ test("keeps a hardware cursor after Pi re-applies its runtime settings", () => {
 		showCursor: () => cursorEvents.push("show"),
 	} as unknown as Terminal;
 	const hostTui = new TuiMainScreen(terminal, false);
-	const editor = new OpenTuiEditor(
+	const editor = createOpenTuiEditor(
 		hostTui,
 		editorTheme,
 		{ matches: () => false } as unknown as KeybindingsManager,

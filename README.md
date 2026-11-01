@@ -12,7 +12,7 @@ A polished terminal interface for the [Pi](https://pi.dev) coding agent. It brin
 
 - **Pi header** with model, thinking level, working directory, and useful slash-command hints
 - **Responsive footer** with Git state, detected runtime, context usage, token counts, cost, and extension status
-- **Framed editor** with block, bar, and underline cursor styles
+- **Framed editor** with block, bar, and underline cursor styles; it wraps an editor installed by another extension instead of replacing it
 - **Project awareness** for 50+ runtimes and detailed Git states, including ahead/behind, staged, modified, untracked, stashed, and detached HEAD
 - **Turn telemetry** for TPS, time to first token (TTFT), duration, stalls, tokens, and list-price rate
 - **Thinking peek**: an inline ticker replaces Pi's hidden `Thinking...` label with the tail of the model's reasoning while it works
@@ -122,6 +122,8 @@ Key options:
 `sessionName` appears only when the session has a name. `hostname` shows the short host name (first label of the machine's host name, e.g. `mba` from `mba.example.com`) with a server icon. In detached HEAD state, `gitBranch` shows `HEAD` with the short commit hash; `gitCommit` appends the tag pointing at that commit and only takes effect while `gitBranch` is on. Disabling `extensionStatuses` hides the entire extension status line, including MCP status. Each status keeps the colours its extension applied with `ctx.ui.theme.fg()`. A status without colours renders in the muted theme colour.
 
 With `inlineFooter` enabled, the two normal Footer rows are rendered inside the editor frame to save vertical space. The top border places the Git branch on the left and CWD first in the right-hand group; the session title appears on the left too when `sessionName` is enabled. The Header and extension status rows remain separate; narrow terminals truncate lower-priority Footer data first, keeping the right-hand statistics and the border corner.
+
+open-tui composes with other editor extensions. Pi's `setEditorComponent()` replaces the previous factory, so open-tui reads the installed factory with `getEditorComponent()`, decorates the editor it returns in place, and hands that factory back on unload. Ghost text, key handling, completion, and submit callbacks therefore stay on the same instance. List editor extensions before `pi-open-tui` in `packages` so they render inside the frame; when open-tui is disabled, they keep working on their own.
 
 ## Turn telemetry
 
