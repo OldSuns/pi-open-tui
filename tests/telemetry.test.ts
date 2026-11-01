@@ -473,11 +473,14 @@ test("open-tui notifies once after a complete agent run", () => {
 			handlers.set(event, [...(handlers.get(event) ?? []), handler]);
 		},
 		registerCommand() {},
+		registerToolRenderer() {},
+		registerMarkdownTransformer() {},
 		getThinkingLevel: () => "off",
 	} as unknown as ExtensionAPI;
 	const ctx = {
 		hasUI: true,
 		mode: "tui",
+		isIdle: () => false,
 		ui: { theme, notify: (message: string) => notifications.push(message) },
 	} as unknown as ExtensionContext;
 	const emit = (event: string, payload: unknown) => {
@@ -530,11 +533,14 @@ test("open-tui keeps a bounded peek scoped to the current assistant", async () =
 			handlers.set(event, [...(handlers.get(event) ?? []), handler]);
 		},
 		registerCommand() {},
+		registerToolRenderer() {},
+		registerMarkdownTransformer() {},
 		getThinkingLevel: () => "high",
 	} as unknown as ExtensionAPI;
 	const ctx = {
 		hasUI: true,
 		mode: "tui",
+		isIdle: () => false,
 		cwd: process.cwd(),
 		ui: {
 			theme,

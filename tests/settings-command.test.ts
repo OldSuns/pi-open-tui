@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import type { ExtensionAPI, ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
 import { visibleWidth, type Component, type KeybindingsManager, type TUI } from "@earendil-works/pi-tui";
-import { DEFAULT_CONFIG, loadConfig, type OpenTuiConfig } from "../extensions/open-tui/config.ts";
+import { DEFAULT_CONFIG, loadConfig, saveConfig, type OpenTuiConfig } from "../extensions/open-tui/config.ts";
 import { installEditor } from "../extensions/open-tui/editor.ts";
 import openTui, { getPendingUiChange } from "../extensions/open-tui/index.ts";
 import { registerSettingsCommand } from "../extensions/open-tui/settings-command.ts";
@@ -25,6 +25,7 @@ async function openSettings(
 	onChange?: (config: OpenTuiConfig) => void,
 ): Promise<{
 	component: SettingsComponent;
+	terminal: { columns: number; rows: number };
 	getConfig: () => OpenTuiConfig;
 	isClosed: () => boolean;
 	isOverlayClosed: () => boolean;
@@ -53,7 +54,8 @@ async function openSettings(
 		},
 	});
 
-	const tui = { requestRender() {} } as TUI;
+	const terminal = { columns: 80, rows: 24 };
+	const tui = { terminal, requestRender() {} } as TUI;
 	const ctx = {
 		hasUI: true,
 		mode: "tui",
@@ -80,6 +82,7 @@ async function openSettings(
 
 	return {
 		component,
+		terminal,
 		getConfig: () => config,
 		isClosed: () => closed,
 		isOverlayClosed: () => overlayClosed,
@@ -87,9 +90,30 @@ async function openSettings(
 	};
 }
 
-function selectedLine(component: SettingsComponent): string {
-	return component.render(80).find((line) => line.includes("→ ")) ?? "";
+function selectedLine(component: SettingsComponent, width = 80): string {
+	return component.render(width).find((line) => line.includes("→ ")) ?? "";
 }
+
+test("reports whether configuration was saved", () => {
+	const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+	const agentDir = mkdtempSync(join(tmpdir(), "open-tui-save-"));
+	process.env.PI_CODING_AGENT_DIR = agentDir;
+	try {
+		const config = structuredClone(DEFAULT_CONFIG);
+		config.header = false;
+		assert.equal(saveConfig(config), true);
+		assert.equal(loadConfig().header, false);
+
+		const configPath = join(agentDir, "open-tui.json");
+		rmSync(configPath);
+		mkdirSync(configPath);
+		assert.equal(saveConfig(config), false);
+	} finally {
+		if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+		else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+		rmSync(agentDir, { recursive: true, force: true });
+	}
+});
 
 test("closes cleanly after enabling or disabling the UI", async () => {
 	for (const enabled of [true, false]) {
@@ -280,7 +304,7 @@ test("toggles copy buttons from General settings", async () => {
 	assert.equal(settings.getConfig().copyButtons, false);
 });
 
-test("toggles the header without resetting the slot while disabled", async () => {
+test("toggles the header without resetting a disabled slot and warns when persistence fails", async () => {
 	const agentDir = mkdtempSync(join(tmpdir(), "pi-open-tui-"));
 	const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
 	try {
@@ -290,9 +314,12 @@ test("toggles the header without resetting the slot while disabled", async () =>
 		let command: ((args: string, ctx: ExtensionContext) => unknown) | undefined;
 		let settings: SettingsComponent | undefined;
 		const headers: unknown[] = [];
+		const notifications: Array<{ message: string; level: string }> = [];
 		const pi = {
 			on: (event: string, handler: (event: unknown, ctx: ExtensionContext) => unknown) => handlers.set(event, handler),
 			registerCommand: (_name: string, options: { handler: typeof command }) => (command = options.handler),
+			registerToolRenderer() {},
+			registerMarkdownTransformer() {},
 		} as unknown as ExtensionAPI;
 		const ctx = {
 			hasUI: true,
@@ -303,8 +330,9 @@ test("toggles the header without resetting the slot while disabled", async () =>
 				setFooter() {},
 				setEditorComponent() {},
 				setHeader: (factory: unknown) => headers.push(factory),
+				notify: (message: string, level: string) => notifications.push({ message, level }),
 				custom: (factory: (tui: TUI, theme: Theme) => SettingsComponent) =>
-					void (settings = factory({ requestRender() {} } as TUI, theme)),
+					void (settings = factory({ terminal: { columns: 80, rows: 24 }, requestRender() {} } as TUI, theme)),
 			},
 		} as unknown as ExtensionContext;
 
@@ -317,7 +345,13 @@ test("toggles the header without resetting the slot while disabled", async () =>
 		settings.handleInput("\x1b[B");
 		assert.match(selectedLine(settings), /Override header/);
 		settings.handleInput(" ");
+		assert.equal(notifications.length, 0);
+		rmSync(join(agentDir, "open-tui.json"));
+		mkdirSync(join(agentDir, "open-tui.json"));
 		settings.handleInput(" ");
+		assert.equal(notifications.length, 1);
+		assert.equal(notifications[0]?.level, "warning");
+		assert.match(notifications[0]?.message ?? "", /apply for this session but could not be saved/);
 		assert.equal(typeof headers[0], "function");
 		assert.deepEqual(headers.slice(1), [undefined], "disabling restores Pi's built-in header once");
 	} finally {
@@ -364,6 +398,70 @@ test("keeps localized settings and values within narrow widths", async () => {
 		const output = lines.join("\n");
 		assert.match(output, /开启/);
 		assert.match(output, /简体中文/);
+	}
+});
+
+test("keeps every Footer selection visible in short terminals", async () => {
+	for (const language of ["en", "zh"] as const) {
+		for (const width of [24, 36, 48, 80]) {
+			const config = structuredClone(DEFAULT_CONFIG);
+			config.settingsLanguage = language;
+			const settings = await openSettings(config);
+			settings.terminal.columns = width;
+			settings.terminal.rows = 12;
+			settings.component.handleInput("\t");
+			settings.component.handleInput("\t");
+			for (let i = 0; i < 14; i++) {
+				const lines = settings.component.render(width);
+				assert.ok(lines.length <= 12, `${language} ${width}x12: ${lines.length} rows`);
+				assert.ok(lines.slice(0, 12).some((line) => line.includes("→ ")));
+				for (const line of lines) assert.ok(visibleWidth(line) <= width);
+				settings.component.handleInput("\x1b[B");
+			}
+		}
+	}
+});
+
+test("relayouts on height and width changes without losing the selection", async () => {
+	const settings = await openSettings();
+	settings.component.handleInput("\t");
+	settings.component.handleInput("\t");
+	for (let i = 0; i < 12; i++) settings.component.handleInput("\x1b[B");
+	assert.match(selectedLine(settings.component), /Capitalize provider name/);
+
+	for (const [width, rows] of [[80, 12], [80, 24], [48, 12], [24, 12], [36, 12], [80, 24]] as const) {
+		settings.terminal.columns = width;
+		settings.terminal.rows = rows;
+		const lines = settings.component.render(width);
+		assert.ok(lines.length <= rows, `${width}x${rows}: ${lines.length} rows`);
+		assert.match(lines.join("\n"), /→ .*On/);
+	}
+	assert.match(selectedLine(settings.component), /Capitalize provider name/);
+	settings.component.handleInput(" ");
+	assert.equal(settings.getConfig().footerSegments.capitalizeProviderName, false);
+});
+
+test("preserves long Footer labels' current values at narrow widths", async () => {
+	for (const language of ["en", "zh"] as const) {
+		const config = structuredClone(DEFAULT_CONFIG);
+		config.settingsLanguage = language;
+		const settings = await openSettings(config);
+		settings.component.handleInput("\t");
+		settings.component.handleInput("\t");
+		for (let i = 0; i < 11; i++) settings.component.handleInput("\x1b[B");
+		for (const id of ["extensionStatuses", "capitalizeProviderName", "nerdIconSpacing"] as const) {
+			for (const toggle of [false, true]) {
+				if (toggle) settings.component.handleInput(" ");
+				const enabled = settings.getConfig().footerSegments[id];
+				const value = language === "en" ? (enabled ? "On" : "Off") : (enabled ? "开启" : "关闭");
+				for (const width of [24, 36, 48, 60]) {
+					const line = selectedLine(settings.component, width);
+					assert.ok(line.trimEnd().endsWith(`: ${value}`), line);
+					assert.ok(visibleWidth(line) <= width);
+				}
+			}
+			settings.component.handleInput("\x1b[B");
+		}
 	}
 });
 

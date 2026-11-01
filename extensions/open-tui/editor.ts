@@ -7,7 +7,7 @@ import {
 import type { Component, Container, EditorComponent, EditorTheme, TUI } from "@earendil-works/pi-tui";
 import { CURSOR_MARKER, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import type { CursorStyle } from "./config.ts";
-import { findBottomBorderIndex, isEditorBorderLine, stripAnsi } from "./utils.ts";
+import { findBottomBorderIndex, stripAnsi } from "./utils.ts";
 
 function fillLine(content: string, width: number): string {
 	const truncated = truncateToWidth(content, Math.max(0, width), "");
@@ -303,11 +303,7 @@ function renderFrame(decoration: EditorDecoration, width: number): string[] {
 
 	for (let i = 1; i < bottomIdx; i++) {
 		const line = baseLines[i] ?? "";
-		if (isEditorBorderLine(line)) {
-			result.push(`${rail} ${fillLine("", innerWidth)} ${rail}`);
-		} else {
-			result.push(`${rail} ${fillLine(line, innerWidth)} ${rail}`);
-		}
+		result.push(`${rail} ${fillLine(line, innerWidth)} ${rail}`);
 	}
 
 	result.push(inlineFooter

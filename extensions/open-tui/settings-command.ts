@@ -4,10 +4,11 @@ import {
 	Key,
 	matchesKey,
 	SelectList,
-	type Component,
 	type SelectItem,
 	type TUI,
 	Text,
+	truncateToWidth,
+	visibleWidth,
 } from "@earendil-works/pi-tui";
 import type { CursorStyle, IconMode, OpenTuiConfig, SettingsLanguage, ThinkingPeekLines } from "./config.ts";
 
@@ -267,34 +268,30 @@ interface SettingsUiHandle {
 class SettingsUi implements SettingsUiHandle {
 	private tab: Tab = "features";
 	private config: OpenTuiConfig;
-	private selectList: SelectList;
+	private selectList!: SelectList;
 	private readonly selectedItemByTab: Partial<Record<Tab, string>> = {};
 	private readonly container: Box;
+	private readonly tui: TUI;
 	private readonly theme: Theme;
 	private readonly onChange: (config: OpenTuiConfig) => void;
 	private readonly onClose: () => void;
-	private cachedWidth: number | undefined;
+	private layoutWidth: number | undefined;
+	private layoutRows: number | undefined;
 	private cachedLines: string[] | undefined;
-	private compact = false;
 
 	constructor(
+		tui: TUI,
 		theme: Theme,
 		config: OpenTuiConfig,
 		onChange: (config: OpenTuiConfig) => void,
 		onClose: () => void,
 	) {
+		this.tui = tui;
 		this.theme = theme;
 		this.config = config;
 		this.onChange = onChange;
 		this.onClose = onClose;
 		this.container = new Box(1, 1, (s: string) => theme.bg("customMessageBg", s));
-		this.selectList = new SelectList([], 12, {
-			selectedPrefix: (t) => theme.fg("accent", t),
-			selectedText: (t) => theme.fg("accent", t),
-			description: (t) => theme.fg("muted", t),
-			scrollInfo: (t) => theme.fg("dim", t),
-			noMatch: (t) => theme.fg("warning", t),
-		});
 		this.rebuild();
 	}
 
@@ -311,7 +308,13 @@ class SettingsUi implements SettingsUiHandle {
 		this.rebuild();
 	}
 
-	private rebuild(preferredItemId = this.selectedItemByTab[this.tab]): void {
+	private rebuild(
+		preferredItemId = this.selectedItemByTab[this.tab],
+		width = this.layoutWidth ?? Math.min(80, this.tui.terminal.columns),
+	): void {
+		this.layoutWidth = width;
+		this.layoutRows = this.tui.terminal.rows;
+		const compact = width <= 60;
 		const copy = COPY[this.config.settingsLanguage];
 		this.container.clear();
 		this.container.addChild(new Text(this.theme.bold(this.theme.fg("accent", copy.title)), 1, 0));
@@ -324,12 +327,18 @@ class SettingsUi implements SettingsUiHandle {
 		this.container.addChild(new Text(tabBar, 1, 0));
 		this.container.addChild(new Text(this.theme.fg("dim", copy.hint), 1, 0));
 
-		const items = buildItems(this.tab, this.config).map((item) => ({
+		const items = buildItems(this.tab, this.config).map<SelectItem>((item) => ({
 			value: item.id,
-			label: this.compact ? `${item.label}: ${item.currentValue}` : item.label,
-			description: this.compact ? undefined : item.currentValue,
-		} as SelectItem));
-		this.selectList = new SelectList(items, Math.min(items.length, 12), {
+			// Reserve Box padding (2), SelectList prefix/safety (4), and ": " (2).
+			label: compact
+				? `${truncateToWidth(item.label, Math.max(0, width - 8 - visibleWidth(item.currentValue)))}: ${item.currentValue}`
+				: item.label,
+			description: compact ? undefined : item.currentValue,
+		}));
+		const availableRows = this.layoutRows - this.container.render(width).length;
+		// A scrolling SelectList adds one status row below the items.
+		const visibleItems = items.length <= availableRows ? items.length : Math.max(1, availableRows - 1);
+		this.selectList = new SelectList(items, visibleItems, {
 			selectedPrefix: (t) => this.theme.fg("accent", t),
 			selectedText: (t) => this.theme.fg("accent", t),
 			description: (t) => this.theme.fg("muted", t),
@@ -352,7 +361,6 @@ class SettingsUi implements SettingsUiHandle {
 		};
 		this.container.addChild(this.selectList);
 
-		this.cachedWidth = undefined;
 		this.cachedLines = undefined;
 	}
 
@@ -381,19 +389,15 @@ class SettingsUi implements SettingsUiHandle {
 	}
 
 	render(width: number): string[] {
-		const compact = width <= 60;
-		if (compact !== this.compact) {
-			this.compact = compact;
-			this.rebuild();
+		if (width !== this.layoutWidth || this.tui.terminal.rows !== this.layoutRows) {
+			this.rebuild(undefined, width);
 		}
-		if (this.cachedLines && this.cachedWidth === width) return this.cachedLines;
-		this.cachedWidth = width;
+		if (this.cachedLines) return this.cachedLines;
 		this.cachedLines = this.container.render(width);
 		return this.cachedLines;
 	}
 
 	invalidate(): void {
-		this.cachedWidth = undefined;
 		this.cachedLines = undefined;
 		this.container.invalidate();
 	}
@@ -411,26 +415,27 @@ export function registerSettingsCommand(
 		description: "Open the open-tui settings UI",
 		handler: async (_args, ctx: ExtensionContext) => {
 			if (!ctx.hasUI) return;
-		await ctx.ui.custom<void>((tui: TUI, theme, _kb, done) => {
-			const ui = new SettingsUi(
-				theme,
-				hooks.getConfig(),
-				(config) => hooks.onConfigChanged(config),
-				() => done(undefined),
-			);
-			return {
-				render: (w: number) => ui.render(w),
-				invalidate: () => ui.invalidate(),
-				handleInput: (data: string) => {
-					ui.handleInput(data);
-					tui.requestRender();
-				},
-			};
-		}, { overlay: true });
-		// Overlay is closed and focus is back on the editor. Deferred UI changes
-		// (e.g. toggling the extension) run here, so pi core's focus restore
-		// cannot strand the overlay without keyboard input.
-		hooks.onOverlayClosed?.();
+			await ctx.ui.custom<void>((tui: TUI, theme, _kb, done) => {
+				const ui = new SettingsUi(
+					tui,
+					theme,
+					hooks.getConfig(),
+					(config) => hooks.onConfigChanged(config),
+					() => done(undefined),
+				);
+				return {
+					render: (w: number) => ui.render(w),
+					invalidate: () => ui.invalidate(),
+					handleInput: (data: string) => {
+						ui.handleInput(data);
+						tui.requestRender();
+					},
+				};
+			}, { overlay: true });
+			// Overlay is closed and focus is back on the editor. Deferred UI changes
+			// (e.g. toggling the extension) run here, so pi core's focus restore
+			// cannot strand the overlay without keyboard input.
+			hooks.onOverlayClosed?.();
 		},
 	});
 }

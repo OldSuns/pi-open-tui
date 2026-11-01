@@ -209,13 +209,14 @@ export function loadConfig(notify?: (msg: string, level: "warning" | "info") => 
 	}
 }
 
-export function saveConfig(config: OpenTuiConfig): void {
+export function saveConfig(config: OpenTuiConfig): boolean {
 	const path = getConfigPath();
 	try {
 		const agentDir = getAgentDir();
 		if (!existsSync(agentDir)) mkdirSync(agentDir, { recursive: true });
 		writeFileSync(path, JSON.stringify(config, null, 2) + "\n", "utf8");
+		return true;
 	} catch {
-		// ponytail: silent fallback — config save is best-effort
+		return false;
 	}
 }

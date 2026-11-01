@@ -33,12 +33,7 @@ export function getPendingUiChange(enabled: boolean, active: boolean): PendingUi
 }
 
 function isTuiContext(ctx: ExtensionContext): boolean {
-	try {
-		const mode = (ctx as ExtensionContext & { mode?: string }).mode;
-		return ctx.hasUI && (mode === undefined || mode === "tui");
-	} catch {
-		return false;
-	}
+	return ctx.hasUI && ctx.mode === "tui";
 }
 
 export default function (pi: ExtensionAPI) {
@@ -66,15 +61,6 @@ export default function (pi: ExtensionAPI) {
 	let peekLabelActive = false;
 
 	const getThinkingLevel = () => (sessionLifecycle.isCurrent() ? pi.getThinkingLevel() : "off");
-
-	/** True while the agent is running (false during session-restore replay). */
-	const isAgentIdle = (ctx: ExtensionContext): boolean => {
-		try {
-			return (ctx as ExtensionContext & { isIdle?: () => boolean }).isIdle?.() === true;
-		} catch {
-			return false;
-		}
-	};
 
 	/** Pi decides whether this label is visible; our toggle only controls updates. */
 	const isPeekEnabled = () => sessionLifecycle.isCurrent() && config.enabled && config.thinkingPeek.lines > 0 && active;
@@ -234,7 +220,6 @@ export default function (pi: ExtensionAPI) {
 	pi.on("session_start", async (_event, ctx) => {
 		sessionLifecycle.start();
 		lastCtx = ctx;
-		state.sessionStartEpoch = Date.now();
 		state.workingSince = undefined;
 		state.lastDoneIn = undefined;
 		invalidateUsageCache();
@@ -285,7 +270,7 @@ export default function (pi: ExtensionAPI) {
 
 	pi.on("message_start", (event, ctx) => {
 		turnTelemetry.handle(event);
-		if (!sessionLifecycle.isCurrent() || isAgentIdle(ctx)) return;
+		if (!sessionLifecycle.isCurrent() || ctx.isIdle()) return;
 		const role = event.message?.role;
 		if (role === "user") {
 			// Restore Pi's native label until real thinking arrives. The task epoch is
@@ -300,7 +285,7 @@ export default function (pi: ExtensionAPI) {
 
 	pi.on("message_update", (event, ctx) => {
 		turnTelemetry.handle(event);
-		if (!sessionLifecycle.isCurrent() || isAgentIdle(ctx)) return;
+		if (!sessionLifecycle.isCurrent() || ctx.isIdle()) return;
 		if (!isPeekEnabled()) return;
 		const message = event.message;
 		if (!message || message.role !== "assistant") return;
@@ -380,24 +365,20 @@ export default function (pi: ExtensionAPI) {
 		refreshInteractiveState(ctx);
 	});
 
-	if (typeof pi.registerToolRenderer === "function") {
-		registerToolView(
-			pi,
-			() => {
-				// Resumed sessions rebuild their rows before session_start fires, so read the file once here.
-				if (!configLoaded) {
-					config = loadConfig();
-					configLoaded = true;
-				}
-				return config.enabled ? config.toolView.mode : "native";
-			},
-			() => resolveGlyphs(config.icons.mode),
-		);
-	}
+	registerToolView(
+		pi,
+		() => {
+			// Resumed sessions rebuild their rows before session_start fires, so read the file once here.
+			if (!configLoaded) {
+				config = loadConfig();
+				configLoaded = true;
+			}
+			return config.enabled ? config.toolView.mode : "native";
+		},
+		() => resolveGlyphs(config.icons.mode),
+	);
 
-	if (typeof pi.registerMarkdownTransformer === "function") {
-		pi.registerMarkdownTransformer(markCopyScope);
-	}
+	pi.registerMarkdownTransformer(markCopyScope);
 
 	registerSettingsCommand(pi, {
 		getConfig: () => config,
@@ -406,7 +387,11 @@ export default function (pi: ExtensionAPI) {
 			const headerChanged = config.header !== newConfig.header;
 			const copyButtonsChanged = config.copyButtons !== newConfig.copyButtons;
 			const thinkingPeekLinesChanged = config.thinkingPeek.lines !== newConfig.thinkingPeek.lines;
-			saveConfig(newConfig);
+			if (!saveConfig(newConfig)) {
+				lastCtx?.ui.notify(newConfig.settingsLanguage === "zh"
+					? "open-tui 设置本次生效，但未保存到磁盘。请检查配置目录权限和可用空间。"
+					: "open-tui settings apply for this session but could not be saved. Check configuration directory permissions and free space.", "warning");
+			}
 			config = newConfig;
 			if (newConfig.thinkingPeek.lines === 0 || !newConfig.enabled) {
 				resetPeek();
