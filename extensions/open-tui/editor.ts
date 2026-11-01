@@ -4,7 +4,7 @@ import {
 	type ExtensionContext,
 	type KeybindingsManager,
 } from "@earendil-works/pi-coding-agent";
-import type { EditorComponent, EditorTheme, TUI } from "@earendil-works/pi-tui";
+import type { Component, Container, EditorComponent, EditorTheme, TUI } from "@earendil-works/pi-tui";
 import { CURSOR_MARKER, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import type { CursorStyle } from "./config.ts";
 import { findBottomBorderIndex, isEditorBorderLine, stripAnsi } from "./utils.ts";
@@ -506,6 +506,9 @@ export function installEditor(
 	const originalSetEditor = ui.setEditorComponent;
 	const originalGetEditor = ui.getEditorComponent;
 	let inheritedFactory = originalGetEditor?.call(ui);
+	let mountedEditor: EditorComponent | undefined;
+	let mountedFactory: EditorFactory | undefined;
+	let restoreEditorMount: (() => void) | undefined;
 	const releaseEditor = (): void => {
 		if (activeEditor) DECORATIONS.get(activeEditor)?.cleanup();
 		activeEditor = undefined;
@@ -515,35 +518,81 @@ export function installEditor(
 		}
 		previousHardwareCursor = undefined;
 	};
-	const factory: EditorFactory = (tui, editorTheme, keybindings) => {
+	const mountEditor = (tui: TUI, editor: EditorComponent): void => {
 		releaseEditor();
-		let inner: EditorComponent | undefined;
-		try {
-			inner = inheritedFactory?.(tui, editorTheme, keybindings);
-		} catch {
-			// 上游工厂不可用时保留默认编辑器。
-		}
-		inner ??= new CustomEditor(tui, editorTheme, keybindings, { paddingX: 0 });
-		if (!enabled) return inner;
 		activeTui = tui;
+		mountedEditor = editor;
+		mountedFactory = originalGetEditor?.call(ui);
 		resetHiddenThinkingTarget();
-		if (!isFrameableEditor(inner)) return inner;
-		previousHardwareCursor ??= tui.getShowHardwareCursor?.();
-		activeEditor = decorateOpenTuiEditor(inner, tui, { cursorStyle: currentCursorStyle, inlineFooter });
-		return activeEditor;
+		if (!isFrameableEditor(editor)) return;
+		previousHardwareCursor = tui.getShowHardwareCursor?.();
+		activeEditor = decorateOpenTuiEditor(editor, tui, { cursorStyle: currentCursorStyle, inlineFooter });
 	};
-	// 所有扩展共享此 ui。对外保留原始工厂视图，在注册入口统一加框，避免顺序依赖和自包装。
-	const getEditor: typeof ui.getEditorComponent = () => enabled
-		? inheritedFactory
-		: originalGetEditor?.call(ui);
+	const wrapFactory = (delegate: EditorFactory | undefined): EditorFactory => {
+		const wrapped: EditorFactory = (tui, editorTheme, keybindings) => {
+			let inner: EditorComponent | undefined;
+			try {
+				inner = delegate?.(tui, editorTheme, keybindings);
+			} catch {
+				// 上游工厂不可用时保留默认编辑器。
+			}
+			inner ??= new CustomEditor(tui, editorTheme, keybindings, { paddingX: 0 });
+			// A factory captured by another context must keep its original delegate.
+			if (enabled && (!originalGetEditor || originalGetEditor.call(ui) === wrapped)) mountEditor(tui, inner);
+			return inner;
+		};
+		return wrapped;
+	};
+	let factory = wrapFactory(inheritedFactory);
+	const getEditor: typeof ui.getEditorComponent = () => {
+		const current = originalGetEditor?.call(ui);
+		return enabled && (!originalGetEditor || current === factory) ? inheritedFactory : current;
+	};
 	const setEditor: typeof ui.setEditorComponent = (next) => {
 		if (!enabled) return originalSetEditor.call(ui, next);
 		inheritedFactory = next;
+		factory = wrapFactory(next);
 		originalSetEditor.call(ui, factory);
 	};
 	ui.getEditorComponent = getEditor;
 	ui.setEditorComponent = setEditor;
 	originalSetEditor.call(ui, factory);
+
+	// Shortcut contexts have a fresh ui object; intercept their shared mount before status routing.
+	const pending: Component[] = activeTui ? [activeTui] : [];
+	const visited = new Set<Component>();
+	while (pending.length > 0) {
+		const component = pending.pop()!;
+		if (visited.has(component)) continue;
+		visited.add(component);
+		const container = component as Partial<Container>;
+		if (!Array.isArray(container.children)) continue;
+		if (!mountedEditor || !container.children.includes(mountedEditor) || typeof container.addChild !== "function") {
+			pending.push(...container.children);
+			continue;
+		}
+		const target = container as Container;
+		const original = target.addChild;
+		const descriptor = Object.getOwnPropertyDescriptor(target, "addChild");
+		const patched: typeof original = function (this: Container, child) {
+			const candidate = child as Partial<EditorComponent>;
+			if (enabled && activeTui && child !== mountedEditor
+				&& typeof candidate.getText === "function" && typeof candidate.setText === "function"
+				&& typeof candidate.handleInput === "function"
+				&& typeof candidate.onSubmit === "function" && candidate.onSubmit === mountedEditor?.onSubmit
+				&& typeof candidate.onChange === "function" && candidate.onChange === mountedEditor?.onChange) {
+				mountEditor(activeTui, candidate as EditorComponent);
+			}
+			original.call(this, child);
+		};
+		target.addChild = patched;
+		restoreEditorMount = () => {
+			if (target.addChild !== patched) return;
+			if (descriptor) Object.defineProperty(target, "addChild", descriptor);
+			else Reflect.deleteProperty(target, "addChild");
+		};
+		break;
+	}
 	return {
 		isFramed: () => enabled && activeEditor !== undefined,
 		/** `build` receives the hidden-thinking text width and runs again whenever that width changes. */
@@ -565,6 +614,7 @@ export function installEditor(
 		cleanup(): void {
 			if (!enabled) return;
 			enabled = false;
+			restoreEditorMount?.();
 			releaseEditor();
 			restoreStderr();
 			resetHiddenThinkingTarget();
@@ -574,9 +624,10 @@ export function installEditor(
 				if (originalGetEditor) ui.getEditorComponent = originalGetEditor;
 				else Reflect.deleteProperty(ui, "getEditorComponent");
 			}
-			if (!originalGetEditor || originalGetEditor.call(ui) === factory) {
+			const current = originalGetEditor?.call(ui);
+			if (!originalGetEditor || current === factory || current === mountedFactory) {
 				try {
-					originalSetEditor.call(ui, inheritedFactory);
+					originalSetEditor.call(ui, current === factory || !originalGetEditor ? inheritedFactory : current);
 				} catch {
 					originalSetEditor.call(ui, undefined);
 				}

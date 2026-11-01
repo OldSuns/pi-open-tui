@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { CustomEditor, type ExtensionAPI, type ExtensionContext, type KeybindingsManager } from "@earendil-works/pi-coding-agent";
-import { TuiMainScreen, type EditorComponent, type EditorTheme, type Terminal, type TUI, type TuiMouseEvent, visibleWidth } from "@earendil-works/pi-tui";
+import { Container, TuiMainScreen, type EditorComponent, type EditorTheme, type Terminal, type TUI, type TuiMouseEvent, visibleWidth } from "@earendil-works/pi-tui";
 import { decorateOpenTuiEditor, installEditor, createOpenTuiEditor, repaintAfterStreamWrites } from "../extensions/open-tui/editor.ts";
 import { stripAnsi } from "../extensions/open-tui/utils.ts";
 
@@ -366,6 +366,122 @@ test("frames direct editor registrations in either extension order", () => {
 		assert.equal(ui.getEditorComponent(), upstream);
 		assert.doesNotMatch(stripAnsi(host.editor.render(40)[0]!), /^╭/);
 		assert.doesNotMatch(stripAnsi(mounted(tui, editorTheme, {} as KeybindingsManager).render(40)[0]!), /^╭/);
+	}
+});
+
+test("frames replacements from Pi shortcut contexts without rebuilding the editor", async () => {
+	const { InteractiveMode } = await import(new URL(
+		"./modes/interactive/interactive-mode.js",
+		import.meta.resolve("@earendil-works/pi-coding-agent"),
+	).href);
+	let hardware = false;
+	const editorContainer = new Container();
+	const hostTui = {
+		...tui,
+		children: [editorContainer],
+		terminal: { rows: 24, write() {} },
+		getShowHardwareCursor: () => hardware,
+		setShowHardwareCursor: (value: boolean) => { hardware = value; },
+		setFocus(component: CustomEditor) { component.focused = true; },
+	} as unknown as TUI;
+	const keybindings = { matches: () => false, getEffectiveConfig: () => ({}) } as unknown as KeybindingsManager;
+	const defaultEditor = new CustomEditor(hostTui, editorTheme, keybindings);
+	defaultEditor.onSubmit = () => {};
+	defaultEditor.onChange = () => {};
+	const indicator = { renderInBorder: () => "working", renderSpinnerInBorder: () => "*" };
+	const host = Object.create(InteractiveMode.prototype, Object.fromEntries(Object.entries({
+		ui: hostTui,
+		keybindings,
+		defaultEditor,
+		editor: defaultEditor,
+		editorContainer,
+		statusContainer: new Container(),
+		activeStatusIndicator: indicator,
+		disposeActiveSelector() {},
+		sessionManager: { getCwd: () => process.cwd() },
+		session: { agent: { signal: undefined }, scopedModels: [] },
+		settingsManager: { isProjectTrusted: () => true },
+		showError(error: unknown) { throw error; },
+	}).map(([key, value]) => [key, { value, writable: true, configurable: true }])));
+	const ui = host.createExtensionUIContext();
+	const originalAddChild = editorContainer.addChild;
+	const handle = installEditor({} as ExtensionAPI, { ui } as ExtensionContext, "bar", {
+		enabled: () => true,
+		render: () => ({ top: { left: "branch", right: "" }, bottom: { left: "model", right: "" } }),
+	});
+	try {
+		let factoryCalls = 0;
+		let shortcutUi: ExtensionContext["ui"] | undefined;
+		const upstream: EditorFactory = (...args) => { factoryCalls++; return new CustomEditor(...args); };
+		host.setupExtensionShortcuts({
+			getShortcuts: () => new Map([["ctrl+a", { handler(ctx: ExtensionContext) {
+				shortcutUi = ctx.ui;
+				ctx.ui.setEditorComponent(upstream);
+			} }]]),
+			getModelRegistry() {},
+		});
+		host.defaultEditor.onExtensionShortcut("\x01");
+		assert.notEqual(shortcutUi, ui);
+		assert.equal(factoryCalls, 1);
+		assert.equal(handle.isFramed(), true);
+		assert.equal(ui.getEditorComponent(), upstream);
+		assert.match(stripAnsi(host.editor.render(60).join("\n")), /╭.*working.*branch/);
+		assert.match(stripAnsi(host.editor.render(60).join("\n")), /model/);
+		assert.equal(host.editor.getPaddingX(), 0);
+		assert.equal(host.editor.onSubmit, defaultEditor.onSubmit);
+		assert.equal(host.statusContainer.children.length, 0);
+
+		// The same factory can be registered repeatedly from fresh contexts.
+		host.defaultEditor.onExtensionShortcut("\x01");
+		assert.equal(factoryCalls, 2);
+		assert.match(stripAnsi(host.editor.render(60)[0]), /^╭/);
+		const latest = host.editor;
+		const dialog = new CustomEditor(hostTui, editorTheme, keybindings);
+		editorContainer.clear();
+		editorContainer.addChild(dialog);
+		assert.doesNotMatch(stripAnsi(dialog.render(60)[0]!), /^╭/);
+		editorContainer.clear();
+		editorContainer.addChild(latest);
+		assert.equal(handle.isFramed(), true);
+
+		// A fresh getter can capture our factory; later registration must not recurse.
+		ui.setEditorComponent(upstream);
+		const previous = shortcutUi!.getEditorComponent()!;
+		const wrapped: EditorFactory = (...args) => {
+			const editor = previous(...args);
+			const render = editor.render.bind(editor);
+			editor.render = (width) => [...render(width), "shortcut wrapper"];
+			return editor;
+		};
+		shortcutUi!.setEditorComponent(wrapped);
+		ui.setEditorComponent(wrapped);
+		assert.equal(factoryCalls, 5);
+		assert.equal(stripAnsi(host.editor.render(60).join("\n")).match(/╭/g)?.length, 1);
+		assert.equal(host.editor.render(60).at(-1), "shortcut wrapper");
+
+		const custom: EditorComponent = { render: () => ["custom"], invalidate() {}, getText: () => "", setText() {}, handleInput() {} };
+		shortcutUi!.setEditorComponent(() => custom);
+		assert.equal(handle.isFramed(), false);
+		assert.equal(hardware, false);
+		assert.deepEqual(custom.render(60), ["custom"]);
+		assert.equal(host.statusContainer.children.length, 1);
+		host.defaultEditor.onExtensionShortcut("\x01");
+		assert.equal(handle.isFramed(), true);
+		assert.match(stripAnsi(host.editor.render(60)[0]), /^╭.*working/);
+		assert.equal(hardware, true);
+		const mounted = host.editor;
+		handle.cleanup();
+		assert.equal(factoryCalls, 7);
+		assert.equal(ui.getEditorComponent(), upstream);
+		assert.equal(editorContainer.addChild, originalAddChild);
+		assert.doesNotMatch(stripAnsi(mounted.render(60)[0]!), /^╭/);
+		assert.doesNotMatch(stripAnsi(host.editor.render(60)[0]!), /^╭/);
+		assert.equal(host.statusContainer.children.length, 1);
+		assert.equal(hardware, false);
+		shortcutUi!.setEditorComponent(upstream);
+		assert.doesNotMatch(stripAnsi(host.editor.render(60)[0]!), /^╭/);
+	} finally {
+		handle.cleanup();
 	}
 });
 
