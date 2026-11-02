@@ -226,6 +226,7 @@ export interface FooterHooks {
 	setRequestRender: (fn: (() => void) | undefined) => void;
 	scheduleGitRefresh: () => void;
 	getLiveTps?: () => LiveTps | null;
+	canEmbedInEditor?: () => boolean;
 }
 
 interface FooterDataLike {
@@ -468,7 +469,8 @@ export function installFooter(
 			render(width: number): string[] {
 				if (width <= 0) return [""];
 				const { mainLines, extensionLines } = getContent(width);
-				return getConfig().inlineFooter ? extensionLines : [...mainLines, ...extensionLines];
+				const inline = getConfig().inlineFooter && (hooks.canEmbedInEditor?.() ?? true);
+				return inline ? extensionLines : [...mainLines, ...extensionLines];
 			},
 		};
 	});
