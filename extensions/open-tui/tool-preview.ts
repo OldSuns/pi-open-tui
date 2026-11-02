@@ -3,8 +3,7 @@ import { backgroundAnsi, rgbColor, truncateToWidth, visibleWidth } from "@earend
 import { diffWordsWithSpace } from "diff";
 import { stripAnsi } from "./utils.ts";
 
-const FULL_PREVIEW_LINES = 24;
-const SHORT_PREVIEW_LINES = 20;
+const MAX_PREVIEW_LINES = 16;
 const MAX_HIGHLIGHT_CHARS = 16_384;
 const MAX_WORD_CHARS = 4_096;
 const SGR = /\x1b\[([\d;]*)m/g;
@@ -134,7 +133,7 @@ function withBands(code: string, spans: Span[], base: string, word: string): str
 export function prepareToolPreview(kind: "edit" | "write", source: string, path: string, theme: Theme): (width: number, indent: string) => string[] {
 	const rows: PreviewLine[] = kind === "edit" ? parseDiff(source) : codeLines(source)
 		.map((text, index) => ({ kind: " ", number: String(index + 1), text }));
-	const shown = rows.length <= FULL_PREVIEW_LINES ? rows.length : SHORT_PREVIEW_LINES;
+	const shown = Math.min(rows.length, MAX_PREVIEW_LINES);
 	if (kind === "edit") pairChanges(rows, shown);
 	const preview = rows.slice(0, shown);
 	highlight(preview, path, theme);

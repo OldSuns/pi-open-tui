@@ -362,19 +362,19 @@ test("code previews keep blank lines, normalize CRLF and filter controls before 
 	assert.deepEqual(codeLines("\x1b[2~const\x1b]52;c;Y2xpcA==\x07\t值 = 1;\x00\x7f\x9f\uFFF9"), ["const   值 = 1;"]);
 });
 
-test("write preview is neutral, numbered, and uses the 24/20 boundary", () => {
+test("write preview is neutral, numbered, and capped at 16 body rows", () => {
 	initTheme("dark");
-	for (const count of [0, 1, 20, 24, 25, 80]) {
+	for (const count of [0, 1, 15, 16, 17, 24, 25, 80]) {
 		const source = Array.from({ length: count }, (_, i) => `const value${i + 1} = ${i + 1};`).join("\r\n");
 		const render = prepareToolPreview("write", source, "new.ts", piTheme);
 		const rows = render(80, "      ");
-		const shown = count <= 24 ? count : 20;
-		assert.equal(rows.length, shown + (count > 24 ? 1 : 0));
+		const shown = Math.min(count, 16);
+		assert.equal(rows.length, shown + (count > 16 ? 1 : 0));
 		if (count > 0) {
 			assert.match(plain(rows)[0]!, /^ +1 const value1 = 1;/);
 			assert.doesNotMatch(rows.join("\n"), /\x1b\[48[;:]/, "write never adds a background");
 		}
-		if (count > 24) assert.match(plain(rows).at(-1)!, new RegExp(`\\+${count - 20} lines \\(ctrl\\+o to expand\\)`));
+		if (count > 16) assert.match(plain(rows).at(-1)!, new RegExp(`\\+${count - 16} lines \\(ctrl\\+o to expand\\)`));
 	}
 	const unknown = prepareToolPreview("write", "ordinary prose", "file.unknown", piTheme)(80, "")[0]!;
 	assert.ok(unknown.includes(piTheme.fg("toolOutput", "ordinary prose")));
@@ -413,9 +413,10 @@ test("word pairing stays in adjacent runs and falls back for unrelated or oversi
 	const unicode = prepareToolPreview("edit", "-1 const 标签 = '👩‍💻 old';\n+1 const 标签 = '👩‍💻 new';", "a.ts", piTheme)(100, "");
 	assert.match(stripAnsi(unicode[1]!), /👩‍💻 new/);
 	assert.ok(unicode[1]!.includes(`${strong}n`), "word offsets follow source units, not CJK/emoji display columns");
-	for (const count of [24, 25]) {
+	for (const count of [16, 17, 24, 25]) {
 		const rows = prepareToolPreview("edit", Array.from({ length: count }, (_, i) => `+${i + 1} value`).join("\n"), "a.txt", piTheme)(80, "");
-		assert.equal(rows.length, count === 24 ? 24 : 21);
+		assert.equal(rows.length, count === 16 ? 16 : 17);
+		if (count > 16) assert.match(plain(rows).at(-1)!, new RegExp(`\\+${count - 16} lines`));
 	}
 	for (const diff of [
 		"-1 abc\n+1 xyz",
@@ -433,9 +434,9 @@ test("word pairing stays in adjacent runs and falls back for unrelated or oversi
 		...Array.from({ length: 20 }, (_, i) => `+${i + 1} const label${i} = 2;`),
 	].join("\n");
 	const rows = prepareToolPreview("edit", diff, "a.ts", piTheme)(80, "");
-	assert.equal(rows.length, 21);
+	assert.equal(rows.length, 17);
 	assert.ok(rows[0]!.includes(band(124, 42, 48)), "pairing reaches additions beyond the visible cutoff");
-	assert.match(plain(rows).at(-1)!, /\+20 lines/);
+	assert.match(plain(rows).at(-1)!, /\+24 lines/);
 	for (const invalid of ["", "not a diff", "+no number", " 1 only context", "-1 valid\nmalformed"]) {
 		assert.deepEqual(prepareToolPreview("edit", invalid, "a.ts", piTheme)(80, ""), []);
 	}
