@@ -35,8 +35,8 @@
     "image": "https://raw.githubusercontent.com/OldSuns/pi-open-tui/main/assets/preview_dashboard_1.png"
   },
   "peerDependencies": {
-    "@earendil-works/pi-coding-agent": ">=1.2.0",
     "@earendil-works/pi-ai": ">=1.2.0",
+    "@earendil-works/pi-coding-agent": ">=1.2.0",
     "@earendil-works/pi-tui": ">=1.2.0"
   },
   "peerDependenciesMeta": {
@@ -51,10 +51,13 @@
     }
   },
   "devDependencies": {
-    "@earendil-works/pi-coding-agent": "^1.2.0",
     "@earendil-works/pi-ai": "^1.2.0",
+    "@earendil-works/pi-coding-agent": "^1.2.0",
     "@earendil-works/pi-tui": "^1.2.0",
     "@types/node": "^22.0.0",
     "typescript": "^5.5.0"
+  },
+  "dependencies": {
+    "diff": "^9.0.0"
   }
 }

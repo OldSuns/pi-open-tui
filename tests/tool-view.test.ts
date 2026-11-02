@@ -1,7 +1,26 @@
 import assert from "node:assert/strict";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
-import type { ExtensionAPI, Theme, ToolRenderers } from "@earendil-works/pi-coding-agent";
+import {
+	createAgentSession,
+	createEditTool,
+	createEditToolDefinition,
+	createWriteTool,
+	createWriteToolDefinition,
+	DefaultResourceLoader,
+	generateDiffString,
+	initTheme,
+	SessionManager,
+	SettingsManager,
+	type Theme,
+	type ToolRenderers,
+} from "@earendil-works/pi-coding-agent";
+import { theme as piTheme } from "../node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/theme/theme.js";
+import { backgroundAnsi, rgbColor, visibleWidth } from "@earendil-works/pi-tui";
+import { codeLines, prepareToolPreview } from "../extensions/open-tui/tool-preview.ts";
+import { stripAnsi } from "../extensions/open-tui/utils.ts";
 import type { Component } from "@earendil-works/pi-tui";
 import { resolveGlyphs } from "../extensions/open-tui/icons.ts";
 import {
@@ -184,6 +203,10 @@ test("call details are sanitized before coloring without changing native argumen
 			},
 		} as unknown as Theme;
 		const rendered = compact.renderCall!(args, checkedTheme, context()).render(200);
+		if (toolName === "write") {
+			assert.equal(nativeArgs, undefined, "collapsed writes defer native full-content highlighting");
+			compact.renderCall!(args, checkedTheme, context({ expanded: true }));
+		}
 		assert.equal(nativeArgs, args);
 		assert.equal(rendered.length, 1);
 		assert.match(rendered[0]!, toolName === "bash" || toolName === "powershell" ? /first … \(\+1 lines\)/ : /first second/);
@@ -199,36 +222,57 @@ test("call details show the key argument", () => {
 	assert.deepEqual(tailLines("a\r\nb\r\n\r\nc\r\nd\r\n", 3), ["b", "c", "d"]);
 });
 
-test("the resolver only takes over built-in tools in compact mode", () => {
-	let resolver: Parameters<ExtensionAPI["registerToolRenderer"]>[0] | undefined;
-	let sourceInfo: ReturnType<ExtensionAPI["getAllTools"]>[number]["sourceInfo"] | undefined = {
-		path: "builtin:bash",
-		source: "builtin",
-		scope: "temporary",
-		origin: "top-level",
-	};
-	let configured = true;
-	const pi = {
-		registerToolRenderer: (fn: typeof resolver) => { resolver = fn; },
-		getAllTools: () => configured ? [{ name: "bash", sourceInfo }] : [],
-	} as unknown as ExtensionAPI;
+test("real extension registration preserves native and third-party tools and cleans up pulses", async (t) => {
+	const cwd = await mkdtemp(join(tmpdir(), "pi-tool-view-"));
+	t.after(() => rm(cwd, { recursive: true, force: true }));
+	const settingsManager = SettingsManager.inMemory();
 	let mode: "native" | "compact" = "native";
-	registerToolView(pi, () => mode, glyphs);
-	const { renderers } = fakeNative();
-
-	assert.equal(resolver!("bash", () => renderers), renderers, "native mode keeps Pi's renderers");
+	const resourceLoader = new DefaultResourceLoader({
+		cwd, agentDir: cwd, settingsManager,
+		noExtensions: true, noSkills: true, noThemes: true, noPromptTemplates: true, noContextFiles: true,
+		extensionFactories: [(pi) => {
+			registerToolView(pi, () => mode, glyphs);
+			pi.registerTool({ ...createWriteToolDefinition(cwd), name: "write" });
+		}],
+	});
+	await resourceLoader.reload();
+	assert.deepEqual(resourceLoader.getExtensions().errors, []);
+	const { session } = await createAgentSession({
+		cwd, agentDir: cwd, resourceLoader, settingsManager, sessionManager: SessionManager.inMemory(cwd),
+	});
+	t.after(() => session.dispose());
+	const runner = session.extensionRunner;
+	const native = createEditToolDefinition(cwd) as ToolRenderers;
+	assert.equal(runner.resolveToolRenderers("edit", () => native), native);
 	mode = "compact";
-	assert.equal(resolver!("mcp__search", () => renderers), renderers, "unowned tools are untouched");
-	assert.equal(resolver!("bash", () => undefined), undefined);
-	assert.equal(resolver!("bash", () => renderers)?.renderShell, "self");
-	for (const source of ["local", "npm:third-party", "sdk", "unknown"]) {
-		sourceInfo = { ...sourceInfo!, path: "/third-party/tool.ts", source };
-		assert.equal(resolver!("bash", () => renderers), renderers, `same-name ${source} tool is untouched`);
-	}
-	sourceInfo = undefined;
-	assert.equal(resolver!("bash", () => renderers), renderers, "missing source metadata is untouched");
-	configured = false;
-	assert.equal(resolver!("bash", () => renderers), renderers, "unregistered tools are untouched");
+	const thirdParty = session.getToolDefinition("write")!;
+	assert.equal(runner.resolveToolRenderers("write", () => thirdParty), thirdParty);
+	assert.equal(runner.resolveToolRenderers("unregistered", () => native), native);
+	assert.equal(runner.resolveToolRenderers("edit", () => undefined), undefined);
+	const compact = runner.resolveToolRenderers("edit", () => native)!;
+	assert.equal(compact.renderShell, "self");
+	initTheme("dark");
+	let redraws = 0;
+	const ctx = context({ cwd, args: { path: "a.ts" }, isPartial: true, invalidate() { redraws++; } });
+	const render = () => compact.renderCall!(ctx.args, piTheme, ctx).render(80)[0]!;
+	const history = render();
+	await new Promise((resolve) => setTimeout(resolve, 1050));
+	assert.equal(redraws, 0, "export-like partial context has no execution event and no timer");
+	await runner.emit({ type: "tool_execution_start", toolName: "edit", toolCallId: ctx.toolCallId, args: ctx.args });
+	const bright = render();
+	assert.equal(bright, history);
+	await new Promise((resolve) => setTimeout(resolve, 1050));
+	assert.ok(redraws >= 1);
+	assert.notEqual(render(), bright, "only the dot switches to dim on the next tick");
+	await runner.emit({ type: "tool_execution_end", toolName: "edit", toolCallId: ctx.toolCallId, result: {}, isError: false });
+	const stopped = redraws;
+	await new Promise((resolve) => setTimeout(resolve, 1050));
+	assert.equal(redraws, stopped);
+	await runner.emit({ type: "tool_execution_start", toolName: "edit", toolCallId: ctx.toolCallId, args: ctx.args });
+	render();
+	await runner.emit({ type: "session_shutdown", reason: "reload" });
+	await new Promise((resolve) => setTimeout(resolve, 1050));
+	assert.equal(redraws, stopped, "reload stops outstanding timers");
 });
 
 test("collapsed rows are compact while native renderers keep their own state", () => {
@@ -301,4 +345,164 @@ test("expanded rows hand off to Pi's native card", () => {
 	const compact = createCompactRenderers("edit", renderers, glyphs);
 	const ctx = context({ expanded: true });
 	assert.deepEqual(compact.renderCall!({ path: "a.ts" }, theme, ctx).render(40), ["NATIVE CALL"]);
+});
+
+function plain(rows: string[]): string[] {
+	return rows.map(stripAnsi);
+}
+
+function band(r: number, g: number, b: number): string {
+	return backgroundAnsi(rgbColor(r, g, b), piTheme.getColorMode());
+}
+
+test("code previews keep blank lines, normalize CRLF and filter controls before coloring", () => {
+	assert.deepEqual(codeLines(""), []);
+	assert.deepEqual(codeLines("\n"), [""]);
+	assert.deepEqual(codeLines("one\r\n\r\n\ttwo\r\n\r\n"), ["one", "", "   two", ""]);
+	assert.deepEqual(codeLines("\x1b[2~const\x1b]52;c;Y2xpcA==\x07\t值 = 1;\x00\x7f\x9f\uFFF9"), ["const   值 = 1;"]);
+});
+
+test("write preview is neutral, numbered, and uses the 24/20 boundary", () => {
+	initTheme("dark");
+	for (const count of [0, 1, 20, 24, 25, 80]) {
+		const source = Array.from({ length: count }, (_, i) => `const value${i + 1} = ${i + 1};`).join("\r\n");
+		const render = prepareToolPreview("write", source, "new.ts", piTheme);
+		const rows = render(80, "      ");
+		const shown = count <= 24 ? count : 20;
+		assert.equal(rows.length, shown + (count > 24 ? 1 : 0));
+		if (count > 0) {
+			assert.match(plain(rows)[0]!, /^ +1 const value1 = 1;/);
+			assert.doesNotMatch(rows.join("\n"), /\x1b\[48[;:]/, "write never adds a background");
+		}
+		if (count > 24) assert.match(plain(rows).at(-1)!, new RegExp(`\\+${count - 20} lines \\(ctrl\\+o to expand\\)`));
+	}
+	const unknown = prepareToolPreview("write", "ordinary prose", "file.unknown", piTheme)(80, "")[0]!;
+	assert.ok(unknown.includes(piTheme.fg("toolOutput", "ordinary prose")));
+	assert.equal(summarizeResult("write", text("ok"), { content: "a\r\n\r\n" }), "2 lines written");
+});
+
+test("edit preview uses real Pi diffs, separate syntax contexts, and light/dark bands", () => {
+	const diff = generateDiffString("const label = 1;\nreturn label;", "const label = 2;\nreturn label;").diff;
+	for (const appearance of ["dark", "light"]) {
+		initTheme(appearance);
+		assert.equal(piTheme.appearance, appearance);
+		const rows = prepareToolPreview("edit", diff, "a.ts", piTheme)(80, "      ");
+		assert.equal(rows.length, 3);
+		assert.match(plain(rows)[0]!, /-1 const label = 1;/);
+		assert.match(plain(rows)[1]!, /\+1 const label = 2;/);
+		assert.match(plain(rows)[2]!, / 2 return label;/);
+		const removed = appearance === "dark" ? band(70, 30, 32) : band(255, 230, 230);
+		const added = appearance === "dark" ? band(26, 55, 40) : band(229, 245, 232);
+		const removedWord = appearance === "dark" ? band(124, 42, 48) : band(255, 188, 188);
+		const addedWord = appearance === "dark" ? band(32, 96, 59) : band(174, 226, 185);
+		assert.ok(rows[0]!.includes(removed));
+		assert.ok(rows[0]!.includes(removedWord));
+		assert.ok(rows[1]!.includes(added));
+		assert.ok(rows[1]!.includes(addedWord));
+		assert.equal(visibleWidth(rows[0]!), 78, "band ends two columns before right edge");
+		assert.doesNotMatch(rows[2]!, /\x1b\[48[;:]/);
+	}
+	initTheme("dark");
+	const syntax = prepareToolPreview("edit", "-1 /* old comment\n+1 const answer = 42;\n 2 unchanged", "a.ts", piTheme)(80, "");
+	assert.ok(syntax[1]!.includes(piTheme.fg("syntaxKeyword", "const")), "deleted comment does not color the new file");
+});
+
+test("word pairing stays in adjacent runs and falls back for unrelated or oversized lines", () => {
+	initTheme("dark");
+	const strong = band(32, 96, 59);
+	const unicode = prepareToolPreview("edit", "-1 const 标签 = '👩‍💻 old';\n+1 const 标签 = '👩‍💻 new';", "a.ts", piTheme)(100, "");
+	assert.match(stripAnsi(unicode[1]!), /👩‍💻 new/);
+	assert.ok(unicode[1]!.includes(`${strong}n`), "word offsets follow source units, not CJK/emoji display columns");
+	for (const count of [24, 25]) {
+		const rows = prepareToolPreview("edit", Array.from({ length: count }, (_, i) => `+${i + 1} value`).join("\n"), "a.txt", piTheme)(80, "");
+		assert.equal(rows.length, count === 24 ? 24 : 21);
+	}
+	for (const diff of [
+		"-1 abc\n+1 xyz",
+		"-1 const label = 1;\n    ...\n+1 const label = 2;",
+		`-1 ${"a".repeat(5000)}1\n+1 ${"a".repeat(5000)}2`,
+		"+1 only added",
+		"-1 only removed",
+	]) {
+		const rows = prepareToolPreview("edit", diff, "plain.unknown", piTheme)(80, "");
+		assert.ok(rows.length > 0);
+		assert.ok(!rows.join("").includes(strong));
+	}
+	const diff = [
+		...Array.from({ length: 20 }, (_, i) => `-${i + 1} const label${i} = 1;`),
+		...Array.from({ length: 20 }, (_, i) => `+${i + 1} const label${i} = 2;`),
+	].join("\n");
+	const rows = prepareToolPreview("edit", diff, "a.ts", piTheme)(80, "");
+	assert.equal(rows.length, 21);
+	assert.ok(rows[0]!.includes(band(124, 42, 48)), "pairing reaches additions beyond the visible cutoff");
+	assert.match(plain(rows).at(-1)!, /\+20 lines/);
+	for (const invalid of ["", "not a diff", "+no number", " 1 only context", "-1 valid\nmalformed"]) {
+		assert.deepEqual(prepareToolPreview("edit", invalid, "a.ts", piTheme)(80, ""), []);
+	}
+});
+
+test("code rows truncate without wrapping, including ANSI, tabs, wide and combining characters", () => {
+	initTheme("dark");
+	for (const kind of ["write", "edit"] as const) {
+		const code = "\tconst 消息 = '👩‍💻 é 中文 " + "x".repeat(200) + "';";
+		const render = prepareToolPreview(kind, kind === "edit" ? `+1 ${code}` : code, "a.ts", piTheme);
+		for (const width of [0, 1, 2, 6, 8, 12, 24, 48, 80]) {
+			const rows = render(width, "      ");
+			assert.equal(rows.length, 1);
+			assert.doesNotMatch(rows[0]!, /\n|\t/);
+			assert.ok(visibleWidth(rows[0]!) <= width);
+			if (width >= 12) assert.match(stripAnsi(rows[0]!), /…/);
+		}
+	}
+});
+
+test("real write/edit execution supplies previews while native expansion remains intact", async (t) => {
+	initTheme("dark");
+	const cwd = await mkdtemp(join(tmpdir(), "pi-code-preview-"));
+	t.after(() => rm(cwd, { recursive: true, force: true }));
+	const write = createWriteToolDefinition(cwd) as ToolRenderers;
+	const args = { path: "demo.ts", content: "const label = 1;\nreturn label;\n" };
+	const result = await createWriteTool(cwd).execute("write-1", args, undefined);
+	assert.equal(await readFile(join(cwd, args.path), "utf8"), args.content);
+	const compactWrite = createCompactRenderers("write", write, glyphs);
+	const ctx = context({ cwd, args, executionStarted: false });
+	compactWrite.renderCall!(args, piTheme, ctx);
+	const collapsed = compactWrite.renderResult!(result, { expanded: false, isPartial: false }, piTheme, ctx).render(80);
+	assert.equal(collapsed.length, 3);
+	assert.match(plain(collapsed)[0]!, /2 lines written/);
+	assert.doesNotMatch(collapsed.join(""), /\x1b\[48[;:]/);
+	const expanded = compactWrite.renderCall!(args, piTheme, { ...ctx, expanded: true }).render(80);
+	assert.match(plain(expanded).join("\n"), /const label = 1;/);
+	assert.notDeepEqual(plain(expanded), plain(collapsed));
+	const hugeArgs = { path: "long.ts", content: `const value = '${"x".repeat(100_000)}';` };
+	const hugeCtx = context({ cwd, args: hugeArgs, executionStarted: false });
+	assert.equal(compactWrite.renderCall!(hugeArgs, piTheme, hugeCtx).render(40).length, 1);
+	const huge = compactWrite.renderResult!(result, { expanded: false, isPartial: false }, piTheme, hugeCtx).render(40);
+	assert.equal(huge.length, 2);
+	assert.ok(huge.every((line) => visibleWidth(line) <= 40));
+	assert.match(stripAnsi(huge[1]!), /…$/);
+	const overwrittenArgs = { ...args, content: "replacement\n" };
+	const overwritten = await createWriteTool(cwd).execute("write-2", overwrittenArgs, undefined);
+	const overwriteCtx = context({ cwd, args: overwrittenArgs, executionStarted: false });
+	const overwriteRows = compactWrite.renderResult!(overwritten, { expanded: false, isPartial: false }, piTheme, overwriteCtx).render(80);
+	assert.doesNotMatch(overwriteRows.join(""), /\x1b\[48[;:]/);
+	assert.match(plain(overwriteRows)[1]!, /1 replacement/);
+	await createWriteTool(cwd).execute("write-3", args, undefined);
+
+	const edit = createEditToolDefinition(cwd) as ToolRenderers;
+	const editArgs = { path: args.path, edits: [{ oldText: "const label = 1;", newText: "const label = 2;" }] };
+	const edited = await createEditTool(cwd).execute("edit-1", editArgs, undefined);
+	assert.match(await readFile(join(cwd, args.path), "utf8"), /const label = 2;/);
+	const compactEdit = createCompactRenderers("edit", edit, glyphs);
+	const editCtx = context({ cwd, args: editArgs, executionStarted: false });
+	compactEdit.renderCall!(editArgs, piTheme, editCtx);
+	const rows = compactEdit.renderResult!(edited, { expanded: false, isPartial: false }, piTheme, editCtx).render(80);
+	assert.match(plain(rows)[0]!, /\+1 −1/);
+	assert.ok(rows.some((line) => line.includes(band(32, 96, 59))));
+	const failed = compactEdit.renderResult!(text("Cannot edit"), { expanded: false, isPartial: false }, piTheme, { ...editCtx, isError: true }).render(80);
+	assert.equal(failed.length, 1);
+	assert.match(stripAnsi(failed[0]!), /Cannot edit/);
+	const partial = compactEdit.renderResult!(edited, { expanded: false, isPartial: true }, piTheme, { ...editCtx, isPartial: true }).render(80);
+	assert.equal(partial.length, 1);
+	assert.match(stripAnsi(partial[0]!), /Running…/);
 });

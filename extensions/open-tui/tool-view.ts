@@ -4,6 +4,7 @@ import type { ExtensionAPI, Theme, ThemeColor, ToolRenderers } from "@earendil-w
 import { Box, type Component, Spacer, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import type { ToolViewMode } from "./config.ts";
 import type { IconGlyphs } from "./icons.ts";
+import { codeLines, prepareToolPreview } from "./tool-preview.ts";
 import { sanitizeStatus, stripAnsi } from "./utils.ts";
 
 type RenderCall = NonNullable<ToolRenderers["renderCall"]>;
@@ -33,6 +34,14 @@ interface RowState {
 	callCardBottom?: Spacer;
 	resultCard?: Box;
 	startedAt?: number;
+	pulse?: ReturnType<typeof setInterval>;
+	pulseBright?: boolean;
+	preview?: {
+		source: string;
+		path: string;
+		colors: Theme["colors"];
+		render: ReturnType<typeof prepareToolPreview>;
+	};
 }
 
 const str = (value: unknown): string => (typeof value === "string" ? value : "");
@@ -204,7 +213,7 @@ export function summarizeResult(toolName: string, result: ToolResult, args: Args
 			return `+${added} −${removed}`;
 		}
 		case "write":
-			return `${plural(countLines(str(args.content).replace(/\n$/, "")), "line")} written`;
+			return `${plural(codeLines(str(args.content)).length, "line")} written`;
 		case "grep": {
 			if (text === "No matches found") return "No matches";
 			const files = new Set<string>();
@@ -252,7 +261,7 @@ function formatElapsed(ms: number): string {
 /** Lines truncated to the render width; rebuilt on every render call. */
 function lines(build: (width: number) => string[]): Component {
 	return {
-		render: (width) => build(width).map((line) => truncateToWidth(line, Math.max(1, width), "…")),
+		render: (width) => build(width).map((line) => truncateToWidth(line, Math.max(0, width), "…")),
 		invalidate() {},
 	};
 }
@@ -272,10 +281,16 @@ function statusBg(theme: Theme, context: RenderContext): (text: string) => strin
 	return (text) => theme.bg(bg, text);
 }
 
+function stopPulse(row: RowState): void {
+	if (row.pulse) clearInterval(row.pulse);
+	row.pulse = undefined;
+}
+
 export function createCompactRenderers(
 	toolName: string,
 	native: ToolRenderers,
 	glyphs: () => IconGlyphs,
+	running?: Map<string, RowState | undefined>,
 ): ToolRenderers {
 	const label = TOOL_LABELS[toolName] ?? toolName;
 	const isShell = toolName === "bash" || toolName === "powershell";
@@ -286,9 +301,26 @@ export function createCompactRenderers(
 		renderShell: "self",
 		renderCall(args, theme, context) {
 			const row = rowState(context);
-			// Always run the native renderer so its own state (timers, edit preview) stays current.
-			row.nativeCall = native.renderCall?.(args, theme, nativeContext(context, row, row.nativeCall));
+			// Keep native timers/edit state current; write rebuilds its full highlight cache only on expansion.
+			if (toolName !== "write" || context.expanded) {
+				row.nativeCall = native.renderCall?.(args, theme, nativeContext(context, row, row.nativeCall));
+			}
 			if (context.executionStarted) row.startedAt ??= Date.now();
+			const live = context.executionStarted && context.isPartial && !context.isError;
+			// Actual execution events exclude history rebuilding and HTML export's partial call context.
+			if (live && !context.expanded && running?.has(context.toolCallId)) {
+				running.set(context.toolCallId, row);
+				if (!row.pulse) {
+					row.pulseBright = true;
+					row.pulse = setInterval(() => {
+						row.pulseBright = !row.pulseBright;
+						context.invalidate();
+					}, 1000);
+					row.pulse.unref();
+				}
+			} else {
+				stopPulse(row);
+			}
 			if (showNative(context) && row.nativeCall) {
 				if (native.renderShell === "self") return row.nativeCall;
 				// Recreate Pi's default card: top padding, call, then result (or bottom padding while pending).
@@ -302,17 +334,21 @@ export function createCompactRenderers(
 				row.callCard.addChild(row.callCardBottom);
 				return row.callCard;
 			}
-			const color: ThemeColor = context.isError ? "error" : context.isPartial ? "warning" : "success";
+			const color: ThemeColor = context.isError ? "error" : context.isPartial
+				? live && row.pulseBright !== false ? "accent" : "dim"
+				: "success";
+			const titleColor = context.isPartial || context.isError ? "toolTitle" : "dim";
 			const detail = sanitizeStatus(callDetail(toolName, (args ?? {}) as Args, context.cwd));
 			const pad = " ".repeat(context.outputPad);
 			return lines(() => [
-				pad + theme.fg(color, glyphs().toolCall) + " " + theme.fg("toolTitle", theme.bold(label))
-					+ (detail ? theme.fg("muted", `(${detail})`) : ""),
+				pad + theme.fg(color, glyphs().toolCall) + " " + theme.fg(titleColor, titleColor === "dim" ? label : theme.bold(label))
+					+ (detail ? theme.fg(context.isPartial || context.isError ? "muted" : "dim", `(${detail})`) : ""),
 			]);
 		},
 
 		renderResult(result, options, theme, context) {
 			const row = rowState(context);
+			if (!options.isPartial || context.isError) stopPulse(row);
 			row.nativeResult = native.renderResult?.(result, options, theme, nativeContext(context, row, row.nativeResult));
 			if (showNative(context) && row.nativeResult) {
 				if (native.renderShell === "self") return row.nativeResult;
@@ -328,7 +364,14 @@ export function createCompactRenderers(
 			}
 			const pad = " ".repeat(context.outputPad);
 			const args = (context.args ?? {}) as Args;
-			return lines(() => {
+			if (!options.isPartial && !context.isError && (toolName === "edit" || toolName === "write")) {
+				const source = toolName === "edit" ? str(details(result).diff) : str(args.content);
+				const path = str(args.file_path ?? args.path);
+				if (!row.preview || row.preview.source !== source || row.preview.path !== path || row.preview.colors !== theme.colors) {
+					row.preview = { source, path, colors: theme.colors, render: prepareToolPreview(toolName, source, path, theme) };
+				}
+			}
+			return lines((width) => {
 				const { toolResult } = glyphs();
 				const gutter = `${pad}  ${theme.fg("dim", toolResult)}  `;
 				const indent = `${pad}  ${" ".repeat(visibleWidth(toolResult))}  `;
@@ -342,11 +385,7 @@ export function createCompactRenderers(
 				const duration = isShell && context.durationMs !== undefined ? ` · ${formatElapsed(context.durationMs)}` : "";
 				if (context.isError) return [gutter + theme.fg("error", summarizeError(toolName, result, duration))];
 				const summary = summarizeResult(toolName, result, args);
-				if (toolName === "edit" && /^\+\d+ −\d+$/.test(summary)) {
-					const [added, removed] = summary.split(" ");
-					return [gutter + theme.fg("toolDiffAdded", added!) + " " + theme.fg("toolDiffRemoved", removed!)];
-				}
-				return [gutter + theme.fg("muted", summary + duration)];
+				return [gutter + theme.fg("dim", summary + duration), ...(row.preview?.render(width, indent) ?? [])];
 			});
 		},
 	};
@@ -359,10 +398,21 @@ const OWNED_TOOLS = new Set(Object.keys(TOOL_LABELS));
  * when Pi builds a row, so switching it affects new rows only.
  */
 export function registerToolView(pi: ExtensionAPI, getMode: () => ToolViewMode, glyphs: () => IconGlyphs): void {
+	const running = new Map<string, RowState | undefined>();
+	pi.on("tool_execution_start", (event) => { running.set(event.toolCallId, undefined); });
+	pi.on("tool_execution_end", (event) => {
+		const row = running.get(event.toolCallId);
+		if (row) stopPulse(row);
+		running.delete(event.toolCallId);
+	});
+	pi.on("session_shutdown", () => {
+		for (const row of running.values()) if (row) stopPulse(row);
+		running.clear();
+	});
 	pi.registerToolRenderer((toolName, next) => {
 		const native = next();
 		if (!native || !OWNED_TOOLS.has(toolName) || getMode() !== "compact") return native;
 		if (pi.getAllTools().find((tool) => tool.name === toolName)?.sourceInfo?.source !== "builtin") return native;
-		return createCompactRenderers(toolName, native, glyphs);
+		return createCompactRenderers(toolName, native, glyphs, running);
 	});
 }
