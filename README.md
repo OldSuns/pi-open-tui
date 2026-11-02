@@ -122,7 +122,7 @@ Key options:
 | `footerSegments.nerdIconSpacing` | Boolean | Adds an extra blank cell after Nerd Font icons in the footer; defaults to `false` |
 | `telemetry` | Boolean flags | Enables telemetry and its individual measurements |
 | `thinkingPeek.lines` | `0`, `1`, `2` | Off, one-line, or two-line hidden thinking preview |
-| `toolView.mode` | `native`, `compact` | Draws built-in tool calls as Pi's cards or as compact two-line rows; defaults to `native`. Applies to rows created after the change |
+| `toolView.mode` | `native`, `compact` | Pi's native cards (default) or compact call/summary rows with successful edit/write previews. Applies to rows created after the change |
 
 `sessionName` appears only when the session has a name. `hostname` shows the short host name (first label of the machine's host name, e.g. `mba` from `mba.example.com`) with a server icon. In detached HEAD state, `gitBranch` shows `HEAD` with the short commit hash; `gitCommit` appends the tag pointing at that commit and only takes effect while `gitBranch` is on. Disabling `extensionStatuses` hides the entire extension status line, including MCP status. Each status keeps the colours its extension applied with `ctx.ui.theme.fg()`. A status without colours renders in the muted theme colour.
 
@@ -168,7 +168,7 @@ The ticker appears only once the model actually streams reasoning, so non-reason
 
 ## Tool view
 
-With **General → Tool view** set to **Compact** (`toolView.mode: "compact"`), Pi's built-in tools (`read`, `bash`, `powershell`, `edit`, `write`, `grep`, `find`, `ls`) render as one call line and one summary line:
+**Native** remains the default. With **General → Tool view** set to **Compact** (`toolView.mode: "compact"`), Pi's built-in tools (`read`, `bash`, `powershell`, `edit`, `write`, `grep`, `find`, `ls`) render as one call line and one summary line, with previews for successful edits and writes:
 
 ```text
 ● Read(extensions/open-tui/footer.ts:1-120)
@@ -179,9 +179,11 @@ With **General → Tool view** set to **Compact** (`toolView.mode: "compact"`), 
   └  Done · 131 lines · 6.4s
 ```
 
-- While a shell command runs, the newest 3 output lines and the elapsed time are shown.
-- The dot is yellow while running, green when done, and red when failed. Failed calls keep the compact row with a red summary; for shell commands it ends with the last output line, such as `Exited with code 1 · 12 lines · 1.2s · FAIL tests/a.test.ts`. Press Ctrl+O for the full output.
-- Clicking a row expands only that row into Pi's native card, and `Ctrl+O` expands all rows. The full output, diff, and truncation notices are unchanged.
+- Successful calls have dim call/summary text and a green dot. Pending dots are dim; running dots alternate between accent and dim once per second. Errors keep the red dot and summary. Failed shell summaries retain the last output line; while running, shell commands show the newest 3 output lines and elapsed time.
+- Successful `edit` previews parse Pi's actual diff and syntax-highlight old and new code separately. Removed/added rows have red/green background bands ending two columns before the terminal's right edge. Stronger changed-word backgrounds apply only to paired adjacent removed/added lines sharing at least 30% non-whitespace content; exceeding the matching budget falls back to whole-line highlighting. Without a valid diff, the summary stays.
+- Successful `write` previews show syntax-highlighted content with line numbers and no `+` signs on the normal, neutral terminal background. New files and overwrites look the same; no old-file diff is shown. Partial results and errors get no success previews.
+- Preview bodies show at most 16 rows; longer bodies show the first 16 plus a hidden-row count and `Ctrl+O` hint. Edit context and ellipsis rows count toward these limits. In compact mode only, long lines truncate horizontally with `…` instead of wrapping.
+- Clicking a row expands only that row into Pi's native card, and `Ctrl+O` expands all rows. Native expanded rendering, including full output, diffs, and truncation notices, is unchanged. Calls remain separate, with no grouping or extra configuration.
 - Only the display changes. Tools, arguments, results, and what the model sees are untouched. Only tools confirmed by Pi as built-in are wrapped; third-party and MCP tools, including replacements with built-in names, keep their own rendering.
 - Compact summaries flag truncated output, including grep's long-line truncation. Bracketed output and failure messages are preserved rather than mistaken for tool notices.
 - The mode is chosen when Pi creates a row, so switching it affects new rows; `/reload` or a new session applies it to the whole transcript.
