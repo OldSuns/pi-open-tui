@@ -1,8 +1,18 @@
 # Changelog
 
+## [0.4.2] - 2026-11-03
+
+### Changed
+
+- Cache completed compact tool rows and Copy button labels so scrolling reuses rendered lines instead of rebuilding them.
+
+### Fixed
+
+- Cancel an in-progress Copy click when rendering moves, removes, or changes its Copy target, so a stale press cannot copy different content.
+
 ## [0.4.1] - 2026-11-02
 
-### Added
+### New Features
 
 - Add clickable Copy buttons to fenced code blocks and user messages in fullscreen mode, configurable through `/open-tui`.
 - Add syntax-highlighted previews for successful edits and writes in compact tool view, limited to 16 rows with a hint to expand longer output.
