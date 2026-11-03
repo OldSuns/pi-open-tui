@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { initTheme, UserMessageComponent, type MarkdownTransformContext, type Theme } from "@earendil-works/pi-coding-agent";
-import { Markdown, TuiAltScreen, visibleWidth, type Component, type MarkdownTheme, type Terminal, type TUI, type TuiMouseEvent } from "@earendil-works/pi-tui";
+import { Markdown, ProcessTerminal, TuiAltScreen, visibleWidth, type Component, type MarkdownTheme, type Terminal, type TUI, type TuiMouseEvent } from "@earendil-works/pi-tui";
+import { theme as piTheme } from "../node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/theme/theme.js";
 import {
 	handleCopyMouse,
 	installCopyButtons,
@@ -107,6 +108,47 @@ test("labels the last row of a user message inside the bubble", () => {
 		assert.equal(lines.filter((line) => line.includes("Copy")).length, 2);
 	} finally {
 		copy.cleanup();
+	}
+});
+
+test("scroll cache keeps real user-message buttons current across resize, settings, and themes", () => {
+	initTheme("dark", false);
+	const tui = new TuiAltScreen(new ProcessTerminal(), false);
+	let enabled = true;
+	const copy = installCopyButtons({ getTui: () => tui, getTheme: () => piTheme, isEnabled: () => enabled });
+	const message = new UserMessageComponent("hello\n\n```js\nx()\n```", undefined, 1, [markCopyScope]);
+	tui.addChild(message);
+	const render = (width: number) => {
+		const lines = message.render(width);
+		assert.ok(lines.every((line) => visibleWidth(line) <= width));
+		assert.equal(lines.filter((line) => line.includes("[Copy]")).length, 2);
+		assert.match(lines.at(-1)!, /\[Copy\]/);
+		return lines;
+	};
+	try {
+		const dark = render(40);
+		assert.deepEqual(render(40), dark);
+		render(80);
+		assert.deepEqual(render(40), dark);
+		message.setOutputPad(3);
+		assert.notDeepEqual(render(40), dark);
+		message.setOutputPad(1);
+		assert.deepEqual(render(40), dark);
+		initTheme("light", false);
+		tui.invalidate();
+		assert.notDeepEqual(render(40), dark);
+		enabled = false;
+		copy.refresh();
+		assert.ok(message.render(40).every((line) => !line.includes("[Copy]")));
+		enabled = true;
+		copy.refresh();
+		render(40);
+		assert.ok(message.render(6).every((line) => !line.includes("[Copy]")));
+		render(40);
+	} finally {
+		copy.cleanup();
+		assert.ok(message.render(40).every((line) => !line.includes("[Copy]")));
+		initTheme("dark", false);
 	}
 });
 

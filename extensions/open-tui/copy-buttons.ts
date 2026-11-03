@@ -73,7 +73,7 @@ interface UserMessageInternals {
 let renderScope: { frame: boolean; label: boolean; ordinal: number; blocks: { text: string; ordinal: number }[] } | undefined;
 let press: Press | undefined;
 const markdownRegions = new WeakMap<object, { lines: readonly string[]; regions: CopyRegion[] }>();
-const userRegions = new WeakMap<object, CopyRegion>();
+const userRegions = new WeakMap<object, { region: CopyRegion; source: string; label: string; width: number; line: string }>();
 
 /**
  * Markdown transformer that only records the message kind; Pi calls it during Markdown.render.
@@ -325,20 +325,34 @@ export function installCopyButtons(options: {
 		patch(userProto, "render", function (this: UserMessageInternals, width) {
 			if (!installed) return originalUserRender.call(this, width);
 			const lines = originalUserRender.call(this, width);
-			userRegions.delete(this);
 			const pad = typeof this.outputPad === "number" ? this.outputPad : 1;
 			const col = width - pad - LABEL.length;
-			if (!active() || lines.length < 2 || col < 1 || typeof this.text !== "string") return lines;
+			if (!active() || lines.length < 2 || col < 1 || typeof this.text !== "string") {
+				userRegions.delete(this);
+				return lines;
+			}
 			// The last row is the bubble's bottom padding, so the label never shares a row with a code-block label.
 			const row = lines.length - 1;
 			const theme = options.getTheme();
-			lines[row] = compositeTuiLine(lines[row]!, theme.bg("userMessageBg", label()), col, LABEL.length, width);
-			userRegions.set(this, { row, col, width: LABEL.length, text: this.text });
+			const button = theme.bg("userMessageBg", label());
+			const cached = userRegions.get(this);
+			// UserMessage.render returns a fresh array, so compare its undecorated bottom row instead.
+			if (cached && cached.source === lines[row] && cached.label === button && cached.width === width
+				&& cached.region.row === row && cached.region.col === col && cached.region.text === this.text) {
+				lines[row] = cached.line;
+				return lines;
+			}
+			const source = lines[row]!;
+			lines[row] = compositeTuiLine(source, button, col, LABEL.length, width);
+			userRegions.set(this, {
+				region: { row, col, width: LABEL.length, text: this.text },
+				source, label: button, width, line: lines[row]!,
+			});
 			return lines;
 		}),
 		patch(userProto, "handleMouse", function (this: UserMessageInternals, event) {
 			if (!active()) return originalUserMouse?.call(this, event);
-			const region = userRegions.get(this);
+			const region = userRegions.get(this)?.region;
 			return handleCopyMouse(this, region ? [region] : [], event, copy) ?? originalUserMouse?.call(this, event);
 		}),
 	];

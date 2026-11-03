@@ -7,6 +7,8 @@ import {
 	createAgentSession,
 	createEditTool,
 	createEditToolDefinition,
+	createReadTool,
+	createReadToolDefinition,
 	createWriteTool,
 	createWriteToolDefinition,
 	DefaultResourceLoader,
@@ -20,7 +22,8 @@ import {
 	type ToolRenderers,
 } from "@earendil-works/pi-coding-agent";
 import { theme as piTheme } from "../node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/theme/theme.js";
-import { backgroundAnsi, rgbColor, visibleWidth } from "@earendil-works/pi-tui";
+import { ToolExecutionComponent } from "../node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/components/tool-execution.js";
+import { backgroundAnsi, ProcessTerminal, rgbColor, TuiAltScreen, visibleWidth } from "@earendil-works/pi-tui";
 import { codeLines, prepareToolPreview } from "../extensions/open-tui/tool-preview.ts";
 import { stripAnsi } from "../extensions/open-tui/utils.ts";
 import type { Component } from "@earendil-works/pi-tui";
@@ -303,6 +306,67 @@ test("running shell rows show a bounded live tail", () => {
 	assert.equal(rendered.length, 4);
 	assert.deepEqual(rendered.slice(0, 3), ["   └  3", "      4", "      5"]);
 	assert.match(rendered[3]!, /^ {6}Running… \d+ms$/);
+});
+
+test("scroll cache avoids rereading completed output through real Pi tool components", async () => {
+	initTheme("dark", false);
+	const cwd = process.cwd();
+	const args = { path: "extensions/open-tui/footer.ts" };
+	const result = await createReadTool(cwd).execute("scroll-read", args, undefined);
+	const block = result.content.find((block) => block.type === "text");
+	assert.ok(block?.type === "text");
+	const output = block.text;
+	let reads = 0;
+	// Observe access to the real tool output without changing its value or the renderer.
+	Object.defineProperty(block, "text", { enumerable: true, get() { reads++; return output; } });
+	const native = createReadToolDefinition(cwd) as ToolRenderers;
+	let icons = resolveGlyphs("ascii");
+	const compact = createCompactRenderers("read", native, () => icons);
+	const tui = new TuiAltScreen(new ProcessTerminal(), false);
+	const row = new ToolExecutionComponent("read", "scroll-read", args, { showImages: false }, compact, tui, cwd);
+	row.updateResult({ ...result, isError: false });
+	row.render(199);
+	reads = 0;
+	for (const width of [199, 199, 80, 8, 1, 199]) {
+		assert.ok(row.render(width).every((line) => visibleWidth(line) <= width));
+	}
+	icons = resolveGlyphs("unicode");
+	assert.ok(row.render(199).some((line) => line.includes(icons.toolResult)));
+	assert.equal(reads, 0, "scrolling, resizing, and icon changes must not reparse completed output");
+});
+
+test("scroll cache follows real tool updates, expansion, and theme invalidation", async () => {
+	initTheme("dark", false);
+	const cwd = process.cwd();
+	const args = { path: "extensions/open-tui/footer.ts", limit: 3 };
+	const native = createReadToolDefinition(cwd) as ToolRenderers;
+	const compact = createCompactRenderers("read", native, glyphs);
+	const tui = new TuiAltScreen(new ProcessTerminal(), false);
+	const row = new ToolExecutionComponent("read", "scroll-update", args, { showImages: false }, compact, tui, cwd);
+	const result = await createReadTool(cwd).execute("scroll-update", args, undefined);
+	row.updateResult({ ...result, isError: false }, true);
+	assert.match(plain(row.render(80)).join("\n"), /Running…/);
+	row.updateResult({ ...result, isError: false });
+	const dark = row.render(80);
+	assert.match(plain(dark).join("\n"), /3 lines · more/);
+	try {
+		initTheme("light", false);
+		row.invalidate();
+		const light = row.render(80);
+		assert.notDeepEqual(light, dark);
+		assert.deepEqual(plain(light), plain(dark));
+		row.setExpanded(true);
+		assert.match(plain(row.render(80)).join("\n"), /import type/);
+		row.setExpanded(false);
+		assert.deepEqual(plain(row.render(80)), plain(dark));
+		const updatedArgs = { ...args, limit: 5 };
+		row.updateArgs(updatedArgs);
+		const updated = await createReadTool(cwd).execute("scroll-update", updatedArgs, undefined);
+		row.updateResult({ ...updated, isError: false });
+		assert.match(plain(row.render(80)).join("\n"), /5 lines · more/);
+	} finally {
+		initTheme("dark", false);
+	}
 });
 
 test("failed rows stay compact with a red summary", () => {
