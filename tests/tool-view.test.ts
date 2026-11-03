@@ -12,6 +12,8 @@ import {
 	DefaultResourceLoader,
 	generateDiffString,
 	initTheme,
+	keyHint,
+	keyText,
 	SessionManager,
 	SettingsManager,
 	type Theme,
@@ -59,7 +61,9 @@ const glyphs = () => resolveGlyphs("unicode");
 const text = (value: string, details?: unknown): ToolResult => ({ content: [{ type: "text", text: value }], details });
 
 function context(overrides: Partial<RenderContext> = {}): RenderContext {
+	const keybindingHints = { keyText, keyHint };
 	return {
+		...keybindingHints,
 		args: {},
 		toolCallId: "call-1",
 		invalidate() {},

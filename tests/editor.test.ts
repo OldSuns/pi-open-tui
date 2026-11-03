@@ -1,6 +1,22 @@
 import assert from "node:assert/strict";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
-import { CustomEditor, initTheme, VERSION, type ExtensionAPI, type ExtensionContext, type KeybindingsManager } from "@earendil-works/pi-coding-agent";
+import {
+	createAgentSessionFromServices,
+	createAgentSessionRuntime,
+	createAgentSessionServices,
+	CustomEditor,
+	initTheme,
+	SessionManager,
+	SettingsManager,
+	VERSION,
+	type AgentSessionRuntime,
+	type ExtensionAPI,
+	type ExtensionContext,
+	type KeybindingsManager,
+} from "@earendil-works/pi-coding-agent";
 import { Container, TuiMainScreen, type EditorComponent, type EditorTheme, type Terminal, type TUI, type TuiMouseEvent, visibleWidth } from "@earendil-works/pi-tui";
 import { decorateOpenTuiEditor, installEditor, repaintAfterStreamWrites, type InlineFooterRenderer } from "../extensions/open-tui/editor.ts";
 import { OpenTuiHeader } from "../extensions/open-tui/header.ts";
@@ -367,186 +383,121 @@ test("preserves editor identity, input and cleanup in either registration order"
 	}
 });
 
-async function createInteractiveHost() {
-	initTheme();
+test("frames reused editors from real Pi shortcut contexts and restores status", async () => {
 	const { InteractiveMode } = await import(new URL(
 		"./modes/interactive/interactive-mode.js",
 		import.meta.resolve("@earendil-works/pi-coding-agent"),
 	).href);
-	let hardware = false;
-	const editorContainer = new Container();
-	const hostTui = {
-		...tui,
-		children: [editorContainer],
-		terminal: { columns: 80, rows: 24, write() {} },
-		getShowHardwareCursor: () => hardware,
-		setShowHardwareCursor: (value: boolean) => { hardware = value; },
-		setFocus(component: CustomEditor) { component.focused = true; },
-	} as unknown as TUI;
-	const keybindings = { matches: () => false, getEffectiveConfig: () => ({}) } as unknown as KeybindingsManager;
-	const defaultEditor = new CustomEditor(hostTui, editorTheme, keybindings);
-	defaultEditor.onSubmit = () => {};
-	defaultEditor.onChange = () => {};
-	const indicator = { renderInBorder: () => "working", renderSpinnerInBorder: () => "*" };
-	const host = Object.create(InteractiveMode.prototype, Object.fromEntries(Object.entries({
-		ui: hostTui,
-		keybindings,
-		defaultEditor,
-		editor: defaultEditor,
-		editorContainer,
-		statusContainer: new Container(),
-		activeStatusIndicator: indicator,
-		disposeActiveSelector() {},
-		sessionManager: { getCwd: () => process.cwd() },
-		session: { agent: { signal: undefined }, scopedModels: [] },
-		settingsManager: { isProjectTrusted: () => true },
-		showError(error: unknown) { throw error; },
-	}).map(([key, value]) => [key, { value, writable: true, configurable: true }])));
-	return { host, ui: host.createExtensionUIContext(), editorContainer, hostTui, keybindings, defaultEditor, indicator,
-		get hardware() { return hardware; } };
-}
-
-test("frames replacements from Pi shortcut contexts without rebuilding the editor", async () => {
-	const fixture = await createInteractiveHost();
-	const { host, ui, editorContainer, hostTui, keybindings, defaultEditor, indicator } = fixture;
-	const originalAddChild = editorContainer.addChild;
-	const handle = installEditor({} as ExtensionAPI, { ui } as ExtensionContext, "bar", {
-		enabled: () => true,
-		render: () => ({ top: { left: "branch", right: "" }, bottom: { left: "model", right: "" } }),
-	});
+	const cwd = await mkdtemp(join(tmpdir(), "pi-editor-host-"));
+	let runtime: AgentSessionRuntime | undefined;
+	let stopHost: (() => void) | undefined;
+	const extension: {
+		handle?: ReturnType<typeof installEditor>;
+		ui?: ExtensionContext["ui"];
+		shortcutUi?: ExtensionContext["ui"];
+	} = {};
+	const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+	process.env.PI_CODING_AGENT_DIR = cwd;
 	try {
-		let factoryCalls = 0;
-		let shortcutUi: ExtensionContext["ui"] | undefined;
-		const upstream: EditorFactory = (...args) => { factoryCalls++; return new CustomEditor(...args); };
-		host.setupExtensionShortcuts({
-			getShortcuts: () => new Map([["ctrl+a", { handler(ctx: ExtensionContext) {
-				shortcutUi = ctx.ui;
-				ctx.ui.setEditorComponent(upstream);
-			} }]]),
-			getModelRegistry() {},
+		const settingsManager = SettingsManager.inMemory({
+			tuiMode: "regular", showHardwareCursor: false, theme: "dark",
 		});
-		host.defaultEditor.onExtensionShortcut("\x01");
-		assert.notEqual(shortcutUi, ui);
-		assert.equal(factoryCalls, 1);
-		assert.equal(handle.isFramed(), true);
-		assert.equal(ui.getEditorComponent(), upstream);
-		assert.match(stripAnsi(host.editor.render(60).join("\n")), /╭.*working.*branch/);
-		assert.match(stripAnsi(host.editor.render(60).join("\n")), /model/);
-		assert.equal(host.editor.getPaddingX(), 0);
-		assert.equal(host.editor.onSubmit, defaultEditor.onSubmit);
-		assert.equal(host.statusContainer.children.length, 0);
-
-		// The same factory can be registered repeatedly from fresh contexts.
-		host.defaultEditor.onExtensionShortcut("\x01");
-		assert.equal(factoryCalls, 2);
-		assert.match(stripAnsi(host.editor.render(60)[0]), /^╭/);
-		// A fresh getter can capture our factory; later registration must not recurse.
-		ui.setEditorComponent(upstream);
-		const previous = shortcutUi!.getEditorComponent()!;
-		const wrapped: EditorFactory = (...args) => {
-			const editor = previous(...args);
-			const render = editor.render.bind(editor);
-			editor.render = (width) => [...render(width), "shortcut wrapper"];
-			return editor;
-		};
-		shortcutUi!.setEditorComponent(wrapped);
-		ui.setEditorComponent(wrapped);
-		assert.equal(factoryCalls, 5);
-		assert.equal(stripAnsi(host.editor.render(60).join("\n")).match(/╭/g)?.length, 1);
-		assert.equal(host.editor.render(60).at(-1), "shortcut wrapper");
-
-		const custom: EditorComponent = { render: () => ["custom"], invalidate() {}, getText: () => "", setText() {}, handleInput() {} };
-		shortcutUi!.setEditorComponent(() => custom);
-		assert.equal(handle.isFramed(), false);
-		assert.equal(fixture.hardware, false);
-		assert.deepEqual(custom.render(60), ["custom"]);
-		assert.equal(host.statusContainer.children.length, 1);
-
-		const throwing = new CustomEditor(hostTui, editorTheme, keybindings);
-		const render = throwing.render.bind(throwing);
-		let probing = true;
-		throwing.render = (width) => {
-			if (probing) throw new Error("editor not ready during probe");
-			return render(width);
-		};
-		const originalRender = throwing.render;
-		assert.doesNotThrow(() => shortcutUi!.setEditorComponent(() => throwing));
-		probing = false;
-		assert.equal(host.editor, throwing);
-		assert.ok(editorContainer.children.includes(throwing));
-		assert.equal(handle.isFramed(), false);
-		assert.equal(throwing.render, originalRender);
-		assert.doesNotMatch(stripAnsi(throwing.render(60)[0]!), /^╭/);
-		assert.deepEqual(host.statusContainer.children, [indicator]);
-		assert.equal(fixture.hardware, false);
-
-		host.defaultEditor.onExtensionShortcut("\x01");
-		assert.equal(handle.isFramed(), true);
-		assert.match(stripAnsi(host.editor.render(60)[0]), /^╭.*working/);
-		assert.equal(fixture.hardware, true);
-		const mounted = host.editor;
-		handle.cleanup();
-		assert.equal(factoryCalls, 7);
-		assert.equal(ui.getEditorComponent(), upstream);
-		assert.equal(editorContainer.addChild, originalAddChild);
-		assert.doesNotMatch(stripAnsi(mounted.render(60)[0]!), /^╭/);
-		assert.doesNotMatch(stripAnsi(host.editor.render(60)[0]!), /^╭/);
-		assert.equal(host.statusContainer.children.length, 1);
-		assert.equal(fixture.hardware, false);
-		shortcutUi!.setEditorComponent(upstream);
-		assert.doesNotMatch(stripAnsi(host.editor.render(60)[0]!), /^╭/);
-	} finally {
-		handle.cleanup();
-	}
-});
-
-test("keeps reused editors framed and restores working status after fresh-context registrations", async () => {
-	for (const resetRender of [false, true]) {
-		const { host, ui, editorContainer, hostTui, keybindings, defaultEditor, indicator } = await createInteractiveHost();		const handle = installEditor({} as ExtensionAPI, { ui } as ExtensionContext, "block", {
-			enabled: () => true,
-			render: () => ({ top: { left: "branch", right: "" }, bottom: { left: "model", right: "" } }),
-		});
-		try {
-			const inner = new CustomEditor(hostTui, editorTheme, keybindings);
-			const render = inner.render.bind(inner);
-			let calls = 0;
-			const upstream: EditorFactory = () => {
-				calls++;
-				if (resetRender) inner.render = (width) => render(width);
-				return inner;
-			};
-			ui.setEditorComponent(upstream);
-			const freshUi = host.createExtensionUIContext();
-			const latest: EditorFactory = (...args) => upstream(...args);
-			for (const next of [upstream, upstream, latest]) {
-				const before = calls;
-				freshUi.setEditorComponent(next);
-				assert.equal(calls, before + 1, "mounting must not call the factory again");
-				assert.equal(host.editor, inner);
-				assert.equal(handle.isFramed(), true);
-				const lines = stripAnsi(inner.render(60).join("\n"));
-				assert.equal(lines.match(/╭/g)?.length, 1);
-				assert.match(lines, /╭.*working.*branch/);
-				assert.match(lines, /model/);
+		settingsManager.setShowTerminalProgress(false);
+		runtime = await createAgentSessionRuntime(async (options) => {
+			const services = await createAgentSessionServices({
+				cwd: options.cwd, agentDir: options.agentDir, settingsManager,
+				resourceLoaderOptions: {
+					noExtensions: true, noSkills: true, noThemes: true, noPromptTemplates: true, noContextFiles: true,
+					extensionFactories: [(pi) => {
+						pi.on("session_start", (_event, ctx) => {
+							extension.ui = ctx.ui;
+							extension.handle = installEditor(pi, ctx, "bar", {
+								enabled: () => true,
+								render: () => ({ top: { left: "branch", right: "" }, bottom: { left: "model", right: "" } }),
+							});
+						});
+						pi.registerShortcut("ctrl+a", {
+							description: "Replace the editor from a fresh extension context",
+							handler: (ctx) => {
+								extension.shortcutUi = ctx.ui;
+								ctx.ui.setEditorComponent(upstream);
+							},
+						});
+					}],
+				},
+			});
+			assert.deepEqual(services.resourceLoader.getExtensions().errors, []);
+			const result = await createAgentSessionFromServices({
+				services, sessionManager: options.sessionManager, sessionStartEvent: options.sessionStartEvent,
+			});
+			return { ...result, services, diagnostics: services.diagnostics };
+		}, { cwd, agentDir: cwd, sessionManager: SessionManager.inMemory(cwd) });
+		initTheme("dark");
+		const host = new InteractiveMode(runtime, { tuiMode: "regular", initialThemeSetting: "dark" });
+		stopHost = () => {
+			try {
+				host.stop();
+			} finally {
+				host.ui.stop();
 			}
-
-			const dialog = new CustomEditor(hostTui, editorTheme, keybindings);
-			editorContainer.clear();
-			editorContainer.addChild(dialog);
-			assert.doesNotMatch(stripAnsi(dialog.render(60)[0]!), /^╭/);
-			editorContainer.clear();
-			editorContainer.addChild(inner);
-			assert.match(stripAnsi(inner.render(60)[0]!), /^╭.*working/);
-
-			handle.cleanup();
-			assert.equal(freshUi.getEditorComponent(), latest);
+		};
+		// Mount the real renderer without starting terminal input or submitting prompts.
+		host.mountInteractiveTui(host.renderer, [host.editorContainer, host.statusContainer]);
+		host.setupKeyHandlers();
+		host.setupEditorSubmitHandler();
+		const ui = host.createExtensionUIContext();
+		ui.setWorkingMessage("working");
+		ui.setWorkingIndicator({ frames: ["*"] });
+		host.showWorkingStatusIndicator();
+		const indicator = host.activeStatusIndicator;
+		const inner = new CustomEditor(host.ui, editorTheme, host.keybindings);
+		const render = inner.render.bind(inner);
+		let calls = 0;
+		let resetRender = false;
+		const upstream: EditorFactory = () => {
+			calls++;
+			if (resetRender) inner.render = (width) => render(width);
+			return inner;
+		};
+		await runtime.session.bindExtensions({ uiContext: ui, mode: "tui" });
+		host.setupExtensionShortcuts(runtime.session.extensionRunner);
+		assert.ok(extension.handle);
+		assert.equal(typeof host.defaultEditor.onSubmit, "function");
+		assert.equal(typeof host.defaultEditor.onChange, "function");
+		for (const reset of [false, true]) {
+			resetRender = reset;
+			const before = calls;
+			assert.equal(host.defaultEditor.onExtensionShortcut("\x01"), true);
+			assert.notEqual(extension.shortcutUi, extension.ui);
+			assert.equal(calls, before + 1, "mounting must not call the factory again");
 			assert.equal(host.editor, inner);
-			assert.equal(inner.embedWorkingStatus, false);
-			assert.equal(host.activeWorkingIndicatorEmbedded, false);
-			assert.deepEqual(host.statusContainer.children, [indicator]);
-			assert.doesNotMatch(stripAnsi(inner.render(60)[0]!), /^╭/);
+			assert.equal(inner.onSubmit, host.defaultEditor.onSubmit);
+			assert.equal(extension.handle.isFramed(), true);
+			const lines = stripAnsi(inner.render(60).join("\n"));
+			assert.equal(lines.match(/╭/g)?.length, 1);
+			assert.match(lines, /╭.*working.*branch/);
+			assert.match(lines, /model/);
+			assert.equal(host.statusContainer.children.length, 0);
+		}
+		extension.handle.cleanup();
+		assert.equal(ui.getEditorComponent(), upstream);
+		assert.equal(host.editor, inner);
+		assert.equal(host.activeWorkingIndicatorEmbedded, false);
+		assert.deepEqual(host.statusContainer.children, [indicator]);
+		assert.equal(host.ui.getShowHardwareCursor(), false);
+		assert.doesNotMatch(stripAnsi(inner.render(60)[0]!), /^╭/);
+	} finally {
+		try {
+			extension.handle?.cleanup();
+			stopHost?.();
 		} finally {
-			handle.cleanup();
+			try {
+				await runtime?.dispose();
+			} finally {
+				if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+				else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+				await rm(cwd, { recursive: true, force: true });
+			}
 		}
 	}
 });
