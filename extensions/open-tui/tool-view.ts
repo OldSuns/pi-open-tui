@@ -258,11 +258,25 @@ function formatElapsed(ms: number): string {
 	return ms < 1000 ? `${Math.round(ms)}ms` : `${(ms / 1000).toFixed(1)}s`;
 }
 
-/** Lines truncated to the render width; rebuilt on every render call. */
-function lines(build: (width: number) => string[]): Component {
+/** Stable rows reuse their final lines until width, theme, icons, or invalidation changes them. */
+function lines(
+	build: (width: number, icons: IconGlyphs) => string[],
+	theme: Theme,
+	glyphs: () => IconGlyphs,
+	cacheable = true,
+): Component {
+	let cache: { width: number; colors: Theme["colors"]; toolCall: string; toolResult: string; lines: string[] } | undefined;
 	return {
-		render: (width) => build(width).map((line) => truncateToWidth(line, Math.max(0, width), "…")),
-		invalidate() {},
+		render(width) {
+			const icons = glyphs();
+			const colors = theme.colors;
+			if (cacheable && cache && cache.width === width && cache.colors === colors
+				&& cache.toolCall === icons.toolCall && cache.toolResult === icons.toolResult) return cache.lines;
+			const rendered = build(width, icons).map((line) => truncateToWidth(line, Math.max(0, width), "…"));
+			if (cacheable) cache = { width, colors, toolCall: icons.toolCall, toolResult: icons.toolResult, lines: rendered };
+			return rendered;
+		},
+		invalidate() { cache = undefined; },
 	};
 }
 
@@ -340,10 +354,10 @@ export function createCompactRenderers(
 			const titleColor = context.isPartial || context.isError ? "toolTitle" : "dim";
 			const detail = sanitizeStatus(callDetail(toolName, (args ?? {}) as Args, context.cwd));
 			const pad = " ".repeat(context.outputPad);
-			return lines(() => [
-				pad + theme.fg(color, glyphs().toolCall) + " " + theme.fg(titleColor, titleColor === "dim" ? label : theme.bold(label))
+			return lines((_width, icons) => [
+				pad + theme.fg(color, icons.toolCall) + " " + theme.fg(titleColor, titleColor === "dim" ? label : theme.bold(label))
 					+ (detail ? theme.fg(context.isPartial || context.isError ? "muted" : "dim", `(${detail})`) : ""),
-			]);
+			], theme, glyphs, !context.isPartial);
 		},
 
 		renderResult(result, options, theme, context) {
@@ -371,22 +385,23 @@ export function createCompactRenderers(
 					row.preview = { source, path, colors: theme.colors, render: prepareToolPreview(toolName, source, path, theme) };
 				}
 			}
-			return lines((width) => {
-				const { toolResult } = glyphs();
+			const duration = isShell && context.durationMs !== undefined ? ` · ${formatElapsed(context.durationMs)}` : "";
+			const summary = options.isPartial ? "" : context.isError
+				? summarizeError(toolName, result, duration)
+				: summarizeResult(toolName, result, args) + duration;
+			const tail = options.isPartial && isShell ? tailLines(textOutput(result), LIVE_TAIL_LINES) : [];
+			return lines((width, { toolResult }) => {
 				const gutter = `${pad}  ${theme.fg("dim", toolResult)}  `;
 				const indent = `${pad}  ${" ".repeat(visibleWidth(toolResult))}  `;
 				if (options.isPartial) {
 					if (!isShell) return [gutter + theme.fg("warning", "Running…")];
-					const tail = tailLines(textOutput(result), LIVE_TAIL_LINES).map((line) => theme.fg("toolOutput", line));
 					const elapsed = row.startedAt === undefined ? "" : ` ${formatElapsed(Date.now() - row.startedAt)}`;
-					return [...tail, theme.fg("warning", `Running…${elapsed}`)]
+					return [...tail.map((line) => theme.fg("toolOutput", line)), theme.fg("warning", `Running…${elapsed}`)]
 						.map((line, index) => (index === 0 ? gutter : indent) + line);
 				}
-				const duration = isShell && context.durationMs !== undefined ? ` · ${formatElapsed(context.durationMs)}` : "";
-				if (context.isError) return [gutter + theme.fg("error", summarizeError(toolName, result, duration))];
-				const summary = summarizeResult(toolName, result, args);
-				return [gutter + theme.fg("dim", summary + duration), ...(row.preview?.render(width, indent) ?? [])];
-			});
+				if (context.isError) return [gutter + theme.fg("error", summary)];
+				return [gutter + theme.fg("dim", summary), ...(row.preview?.render(width, indent) ?? [])];
+			}, theme, glyphs, !options.isPartial);
 		},
 	};
 }
