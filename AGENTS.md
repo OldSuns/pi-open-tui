@@ -36,5 +36,6 @@ Use `npm test` for the full test suite and `npm run typecheck` for the strict Ty
 - Add or update focused `node:test` coverage for behavior changes.
 - Run the relevant tests and `npm run typecheck` before finishing. For a full check, run `npm test && npm run typecheck`.
 - When settings, configuration, or other user-visible behavior changes, update both README files where applicable.
+- Every version bump must include a matching entry in `CHANGELOG.md`. Use simple, clear descriptions covering all changes in that release, grouped under `### Added`, `### Changed`, and `### Fixed` as applicable.
 - Use temporary directories for config and Git checks; do not write to the developer's real agent directory.
 - Do not edit `package-lock.json` unless dependency metadata changes.
