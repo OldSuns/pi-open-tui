@@ -145,6 +145,16 @@ export function handleCopyMouse(
 	return { handled: true, render: false };
 }
 
+/** Cancel a held click when rendering moves, removes, or changes its copy target. */
+function cancelStalePress(owner: object, regions: readonly CopyRegion[]): void {
+	if (press?.owner !== owner) return;
+	const previous = press.region;
+	if (!regions.some((region) => region.row === previous.row && region.col === previous.col
+		&& region.width === previous.width && region.text === previous.text)) {
+		press = undefined;
+	}
+}
+
 /**
  * Markdown.render normalizes tabs to three spaces before lexing, so token text loses them.
  * Match the normalized tokens back to source lines: lexing raw lists would expand their tabs first.
@@ -314,6 +324,7 @@ export function installCopyButtons(options: {
 					text: restoreTabs(source, block.ordinal, block.text),
 				});
 			}
+			cancelStalePress(this, regions);
 			markdownRegions.set(this, { lines, regions });
 			return lines;
 		}),
@@ -328,6 +339,7 @@ export function installCopyButtons(options: {
 			const pad = typeof this.outputPad === "number" ? this.outputPad : 1;
 			const col = width - pad - LABEL.length;
 			if (!active() || lines.length < 2 || col < 1 || typeof this.text !== "string") {
+				cancelStalePress(this, []);
 				userRegions.delete(this);
 				return lines;
 			}
@@ -344,8 +356,10 @@ export function installCopyButtons(options: {
 			}
 			const source = lines[row]!;
 			lines[row] = compositeTuiLine(source, button, col, LABEL.length, width);
+			const region = { row, col, width: LABEL.length, text: this.text };
+			cancelStalePress(this, [region]);
 			userRegions.set(this, {
-				region: { row, col, width: LABEL.length, text: this.text },
+				region,
 				source, label: button, width, line: lines[row]!,
 			});
 			return lines;

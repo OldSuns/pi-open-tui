@@ -325,7 +325,8 @@ test("scroll cache avoids rereading completed output through real Pi tool compon
 	const tui = new TuiAltScreen(new ProcessTerminal(), false);
 	const row = new ToolExecutionComponent("read", "scroll-read", args, { showImages: false }, compact, tui, cwd);
 	row.updateResult({ ...result, isError: false });
-	row.render(199);
+	const first = row.render(199);
+	assert.deepEqual(row.render(199), first);
 	reads = 0;
 	for (const width of [199, 199, 80, 8, 1, 199]) {
 		assert.ok(row.render(width).every((line) => visibleWidth(line) <= width));
@@ -349,12 +350,21 @@ test("scroll cache follows real tool updates, expansion, and theme invalidation"
 	row.updateResult({ ...result, isError: false });
 	const dark = row.render(80);
 	assert.match(plain(dark).join("\n"), /3 lines · more/);
+	assert.deepEqual(row.render(80), dark);
+	row.setOutputPad(3);
+	const padded = row.render(80);
+	assert.notDeepEqual(padded, dark);
+	assert.ok(plain(padded).filter((line) => line.trim()).every((line) => line.startsWith("   ")));
+	row.setOutputPad(1);
+	assert.deepEqual(row.render(80), dark);
 	try {
 		initTheme("light", false);
+		const recolored = row.render(80);
+		assert.notDeepEqual(recolored, dark);
+		assert.deepEqual(plain(recolored), plain(dark));
 		row.invalidate();
 		const light = row.render(80);
-		assert.notDeepEqual(light, dark);
-		assert.deepEqual(plain(light), plain(dark));
+		assert.deepEqual(light, recolored);
 		row.setExpanded(true);
 		assert.match(plain(row.render(80)).join("\n"), /import type/);
 		row.setExpanded(false);

@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { dirname, join } from "node:path";
 import test from "node:test";
 import { initTheme, UserMessageComponent, type MarkdownTransformContext, type Theme } from "@earendil-works/pi-coding-agent";
 import { Markdown, ProcessTerminal, TuiAltScreen, visibleWidth, type Component, type MarkdownTheme, type Terminal, type TUI, type TuiMouseEvent } from "@earendil-works/pi-tui";
@@ -150,6 +152,26 @@ test("scroll cache keeps real user-message buttons current across resize, settin
 		assert.ok(message.render(40).every((line) => !line.includes("[Copy]")));
 		initTheme("dark", false);
 	}
+});
+
+test("scroll cache copies current user messages through real mouse handlers and OSC 52", {
+	skip: process.platform !== "linux" ? "Real clipboard clicks run in headless Linux to preserve the desktop clipboard" : false,
+}, () => {
+	// No display or external clipboard helpers, including WSL's Windows interop: use Pi's real OSC 52 route.
+	const env: NodeJS.ProcessEnv = { ...process.env, PATH: dirname(process.execPath), PI_CLIPBOARD_OSC52: "1" };
+	delete env.DISPLAY;
+	delete env.WAYLAND_DISPLAY;
+	delete env.TERMUX_VERSION;
+	const child = spawnSync(process.execPath, [join(import.meta.dirname, "fixtures", "copy-cache-clicks.ts")], {
+		env, encoding: "utf8", timeout: 15_000,
+	});
+	assert.ifError(child.error);
+	assert.equal(child.status, 0, child.stderr);
+	const expected = /expected-copies:([^\n]+)/.exec(child.stdout);
+	assert.ok(expected, "the real mouse checks must finish");
+	const copied = [...child.stdout.matchAll(/\x1b\]52;c;([^\x07]*)\x07/g)]
+		.map((match) => Buffer.from(match[1]!, "base64").toString("utf8"));
+	assert.deepEqual(copied, JSON.parse(expected[1]!), "only current labels may copy, with the current message text");
 });
 
 test("copies on a left press and a release within tolerance only", () => {
