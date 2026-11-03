@@ -4,7 +4,7 @@
 
 [English](./README.md) | **简体中文**
 
-一个为 [Pi](https://pi.dev) 编程代理打造的终端界面扩展，将 pi-haiku、pi-claude-code-tui 与 pi-zentui 的优秀设计整合为统一、可配置的使用体验。
+一个为 [Pi](https://pi.dev) 编程代理打造的终端界面扩展。
 
 ![pi-open-tui 预览](https://raw.githubusercontent.com/OldSuns/pi-open-tui/main/assets/preview_dashboard_1.png)
 
@@ -227,6 +227,7 @@ CI 在 Linux、Windows、macOS 上，使用 Node.js 22.19.0 和 24，检查 Pi 1
 - **[pi-claude-code-tui](https://github.com/Phoobobo/pi-claude-code-tui)** — Pi Logo 图案与圆角编辑器边框技术
 - **[pi-zentui](https://github.com/lmilojevicc/pi-zentui)** — Starship 风格底栏、运行环境检测、会话生命周期和设置界面模式
 - **[pi-tps](https://github.com/monotykamary/pi-tps)** — 单轮计时、停顿检测和保守的 TPS 计算方式
+- **[pi-polish](https://github.com/Pringled/pi-extensions/blob/main/packages/pi-polish)** — 紧凑的工具调用行和带语法高亮的编辑 diff
 
 Logo 图案源自 Pi 官方安装脚本（`pi.dev/install.sh`）。运行环境检测和 Git porcelain 解析借鉴了 `pi-zentui` 的结构。
 
