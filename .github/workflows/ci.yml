@@ -24,8 +24,8 @@ jobs:
         os: [ubuntu-latest, windows-latest, macos-latest]
         # Pi needs Node 22.19 or later.
         node: ["22.19.0", "24"]
-        # 1.2.0 is the lowest supported Pi; latest catches breaking Pi releases.
-        pi: ["1.2.0", latest]
+        # 1.5.0 is the lowest supported Pi; latest catches breaking Pi releases.
+        pi: ["1.5.0", latest]
     steps:
       - uses: actions/checkout@v7
 

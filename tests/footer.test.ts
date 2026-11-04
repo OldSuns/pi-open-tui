@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { hostname, tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import test from "node:test";
+import test, { type TestContext } from "node:test";
 import type {
 	ExtensionContext,
 	ReadonlyFooterDataProvider,
@@ -26,173 +26,138 @@ import {
 	truncateBranch,
 	truncatePath,
 } from "../extensions/open-tui/utils.ts";
+import { preserveEnvironment, temporaryDirectory } from "./fixtures/test-helpers.ts";
 
 const theme = {
 	fg: (_color: string, text: string) => text,
 } as Theme;
 
-test("reads Git status from a nested repository directory", async () => {
-	const root = mkdtempSync(join(tmpdir(), "open-tui-git-"));
+// Git status: each scenario runs against its own real repository.
+function gitRepository(t: TestContext, branch = "main") {
+	const root = temporaryDirectory(t, "open-tui-git-");
+	const git = (...args: string[]) => execFileSync("git", args, { cwd: root, encoding: "utf8" });
+	const commit = (message: string) => git("-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "--allow-empty", "-m", message);
+	git("init", "-b", branch);
+	return { root, git, commit };
+}
+
+test("reads Git status from a nested repository directory", async (t) => {
+	const { root, commit } = gitRepository(t, "nested-repo-test");
 	const nested = join(root, "packages", "app");
-	try {
-		execFileSync("git", ["init", "-b", "nested-repo-test"], { cwd: root });
-		execFileSync("git", ["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "--allow-empty", "-m", "init"], { cwd: root });
-		mkdirSync(nested, { recursive: true });
-
-		assert.equal((await readGitStatus(nested)).branch, "nested-repo-test");
-	} finally {
-		rmSync(root, { recursive: true, force: true });
-	}
+	commit("init");
+	mkdirSync(nested, { recursive: true });
+	assert.equal((await readGitStatus(nested)).branch, "nested-repo-test");
 });
 
-test("reads both ahead and behind counts for a diverged Git branch", async () => {
-	const root = mkdtempSync(join(tmpdir(), "open-tui-git-"));
-	try {
-		execFileSync("git", ["init", "-b", "main"], { cwd: root });
-		execFileSync("git", ["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "--allow-empty", "-m", "init"], { cwd: root });
-		execFileSync("git", ["checkout", "-b", "upstream"], { cwd: root });
-		execFileSync("git", ["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "--allow-empty", "-m", "upstream"], { cwd: root });
-		execFileSync("git", ["checkout", "main"], { cwd: root });
-		execFileSync("git", ["branch", "--set-upstream-to=upstream"], { cwd: root });
-		execFileSync("git", ["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "--allow-empty", "-m", "local"], { cwd: root });
-		execFileSync("git", ["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "--allow-empty", "-m", "local again"], { cwd: root });
-
-		const status = await readGitStatus(root);
-		assert.equal(status.branch, "main");
-		assert.equal(status.ahead, 2);
-		assert.equal(status.behind, 1);
-	} finally {
-		rmSync(root, { recursive: true, force: true });
-	}
+test("reads both ahead and behind counts for a diverged Git branch", async (t) => {
+	const { root, git, commit } = gitRepository(t);
+	commit("init");
+	git("checkout", "-b", "upstream");
+	commit("upstream");
+	git("checkout", "main");
+	git("branch", "--set-upstream-to=upstream");
+	commit("local");
+	commit("local again");
+	const status = await readGitStatus(root);
+	assert.equal(status.branch, "main");
+	assert.equal(status.ahead, 2);
+	assert.equal(status.behind, 1);
 });
 
-test("keeps the Git branch when its upstream is gone", async () => {
-	const root = mkdtempSync(join(tmpdir(), "open-tui-git-"));
-	try {
-		execFileSync("git", ["init", "-b", "main"], { cwd: root });
-		execFileSync("git", ["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "--allow-empty", "-m", "init"], { cwd: root });
-		execFileSync("git", ["branch", "upstream"], { cwd: root });
-		execFileSync("git", ["branch", "--set-upstream-to=upstream"], { cwd: root });
-		execFileSync("git", ["branch", "-D", "upstream"], { cwd: root });
-
-		const status = await readGitStatus(root);
-		assert.equal(status.branch, "main");
-		assert.equal(status.ahead, 0);
-		assert.equal(status.behind, 0);
-	} finally {
-		rmSync(root, { recursive: true, force: true });
-	}
+test("keeps the Git branch when its upstream is gone", async (t) => {
+	const { root, git, commit } = gitRepository(t);
+	commit("init");
+	git("branch", "upstream");
+	git("branch", "--set-upstream-to=upstream");
+	git("branch", "-D", "upstream");
+	const status = await readGitStatus(root);
+	assert.equal(status.branch, "main");
+	assert.equal(status.ahead, 0);
+	assert.equal(status.behind, 0);
 });
 
-test("counts Git MM entries as staged and modified, not conflicted", async () => {
-	const root = mkdtempSync(join(tmpdir(), "open-tui-git-"));
-	try {
-		execFileSync("git", ["init", "-b", "main"], { cwd: root });
-		writeFileSync(join(root, "file.txt"), "initial\n");
-		execFileSync("git", ["add", "file.txt"], { cwd: root });
-		execFileSync("git", ["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-m", "init"], { cwd: root });
-		writeFileSync(join(root, "file.txt"), "staged\n");
-		execFileSync("git", ["add", "file.txt"], { cwd: root });
-		writeFileSync(join(root, "file.txt"), "modified again\n");
-		assert.equal(execFileSync("git", ["status", "--porcelain=v1"], { cwd: root, encoding: "utf8" }), "MM file.txt\n");
-
-		const status = await readGitStatus(root);
-		assert.equal(status.conflicted, 0);
-		assert.equal(status.staged, 1);
-		assert.equal(status.modified, 1);
-	} finally {
-		rmSync(root, { recursive: true, force: true });
-	}
+test("counts Git MM entries as staged and modified, not conflicted", async (t) => {
+	const { root, git, commit } = gitRepository(t);
+	writeFileSync(join(root, "file.txt"), "initial\n");
+	git("add", "file.txt");
+	commit("init");
+	writeFileSync(join(root, "file.txt"), "staged\n");
+	git("add", "file.txt");
+	writeFileSync(join(root, "file.txt"), "modified again\n");
+	assert.equal(git("status", "--porcelain=v1"), "MM file.txt\n");
+	const status = await readGitStatus(root);
+	assert.equal(status.conflicted, 0);
+	assert.equal(status.staged, 1);
+	assert.equal(status.modified, 1);
 });
 
 for (const [code, stages] of [["AA", [2, 3]], ["DD", [1]], ["UU", [1, 2, 3]]] as const) {
-	test(`counts Git ${code} entries as conflicted, not staged or deleted`, async () => {
-		const root = mkdtempSync(join(tmpdir(), "open-tui-git-"));
-		try {
-			execFileSync("git", ["init", "-b", "main"], { cwd: root });
-			execFileSync("git", ["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "--allow-empty", "-m", "init"], { cwd: root });
-			const oid = execFileSync("git", ["hash-object", "-w", "--stdin"], { cwd: root, input: "conflict\n", encoding: "utf8" }).trim();
-			// Populate unmerged index stages directly to cover these porcelain codes.
-			execFileSync("git", ["update-index", "--index-info"], {
-				cwd: root,
-				input: stages.map((stage) => `100644 ${oid} ${stage}\tconflict.txt\n`).join(""),
-			});
-			assert.equal(execFileSync("git", ["status", "--porcelain=v1"], { cwd: root, encoding: "utf8" }), `${code} conflict.txt\n`);
-
-			const status = await readGitStatus(root);
-			assert.equal(status.conflicted, 1);
-			assert.equal(status.staged, 0);
-			assert.equal(status.deleted, 0);
-		} finally {
-			rmSync(root, { recursive: true, force: true });
-		}
+	test(`counts Git ${code} entries as conflicted, not staged or deleted`, async (t) => {
+		const { root, git, commit } = gitRepository(t);
+		commit("init");
+		const oid = execFileSync("git", ["hash-object", "-w", "--stdin"], { cwd: root, input: "conflict\n", encoding: "utf8" }).trim();
+		// Populate unmerged index stages directly to cover these porcelain codes.
+		execFileSync("git", ["update-index", "--index-info"], {
+			cwd: root,
+			input: stages.map((stage) => `100644 ${oid} ${stage}\tconflict.txt\n`).join(""),
+		});
+		assert.equal(git("status", "--porcelain=v1"), `${code} conflict.txt\n`);
+		const status = await readGitStatus(root);
+		assert.equal(status.conflicted, 1);
+		assert.equal(status.staged, 0);
+		assert.equal(status.deleted, 0);
 	});
 }
 
-test("preserves Git status for unborn branches and detached HEAD", async () => {
-	const root = mkdtempSync(join(tmpdir(), "open-tui-git-"));
-	try {
-		execFileSync("git", ["init", "-b", "main"], { cwd: root });
-		assert.deepEqual(await readGitStatus(root), emptyGitStatus());
-
-		execFileSync("git", ["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "--allow-empty", "-m", "init"], { cwd: root });
-		execFileSync("git", ["checkout", "--detach"], { cwd: root });
-		assert.deepEqual(await readGitStatus(root), {
-			...emptyGitStatus(),
-			commit: { oid: null, detached: true, tag: null },
-		});
-	} finally {
-		rmSync(root, { recursive: true, force: true });
-	}
+test("preserves Git status for unborn branches and detached HEAD", async (t) => {
+	const { root, git, commit } = gitRepository(t);
+	assert.deepEqual(await readGitStatus(root), emptyGitStatus());
+	commit("init");
+	git("checkout", "--detach");
+	assert.deepEqual(await readGitStatus(root), {
+		...emptyGitStatus(),
+		commit: { oid: null, detached: true, tag: null },
+	});
 });
 
-test("counts Git stashes from explicit-format list entries", async () => {
-	const root = mkdtempSync(join(tmpdir(), "open-tui-git-"));
-	try {
-		execFileSync("git", ["init", "-b", "main"], { cwd: root });
-		writeFileSync(join(root, "file.txt"), "initial\n");
-		execFileSync("git", ["add", "file.txt"], { cwd: root });
-		execFileSync("git", ["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-m", "init"], { cwd: root });
-		assert.equal((await readGitStatus(root)).stashed, 0);
-		for (const content of ["first\n", "second\n"]) {
-			writeFileSync(join(root, "file.txt"), content);
-			execFileSync("git", ["stash", "push", "-m", "123 is not the stash count"], { cwd: root });
-		}
-		assert.equal((await readGitStatus(root)).stashed, 2);
-		assert.equal((await readGitStatus(root, { readCounts: false })).stashed, 0);
-	} finally {
-		rmSync(root, { recursive: true, force: true });
+test("counts Git stashes from explicit-format list entries", async (t) => {
+	const { root, git, commit } = gitRepository(t);
+	writeFileSync(join(root, "file.txt"), "initial\n");
+	git("add", "file.txt");
+	commit("init");
+	assert.equal((await readGitStatus(root)).stashed, 0);
+	for (const content of ["first\n", "second\n"]) {
+		writeFileSync(join(root, "file.txt"), content);
+		git("stash", "push", "-m", "123 is not the stash count");
 	}
+	assert.equal((await readGitStatus(root)).stashed, 2);
+	assert.equal((await readGitStatus(root, { readCounts: false })).stashed, 0);
 });
 
-test("counts Git RM entries as renamed and modified while preserving deletions", async () => {
-	const root = mkdtempSync(join(tmpdir(), "open-tui-git-"));
-	try {
-		execFileSync("git", ["init", "-b", "main"], { cwd: root });
-		for (const file of ["original.txt", "moved.txt", "staged-delete.txt", "worktree-delete.txt"]) {
-			writeFileSync(join(root, file), "initial\n");
-		}
-		execFileSync("git", ["add", "."], { cwd: root });
-		execFileSync("git", ["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-m", "init"], { cwd: root });
-		execFileSync("git", ["mv", "original.txt", "renamed.txt"], { cwd: root });
-		writeFileSync(join(root, "renamed.txt"), "modified after rename\n");
-		execFileSync("git", ["mv", "moved.txt", "moved-away.txt"], { cwd: root });
-		rmSync(join(root, "moved-away.txt"));
-		execFileSync("git", ["rm", "staged-delete.txt"], { cwd: root });
-		rmSync(join(root, "worktree-delete.txt"));
-		assert.match(execFileSync("git", ["status", "--porcelain=v1"], { cwd: root, encoding: "utf8" }), /^RM original.txt -> renamed.txt$/m);
-		assert.match(execFileSync("git", ["status", "--porcelain=v1"], { cwd: root, encoding: "utf8" }), /^RD moved.txt -> moved-away.txt$/m);
-
-		const status = await readGitStatus(root);
-		assert.equal(status.renamed, 2);
-		assert.equal(status.modified, 1);
-		assert.equal(status.deleted, 3);
-		assert.equal(status.staged, 0);
-		assert.equal(status.conflicted, 0);
-	} finally {
-		rmSync(root, { recursive: true, force: true });
+test("counts Git RM entries as renamed and modified while preserving deletions", async (t) => {
+	const { root, git, commit } = gitRepository(t);
+	for (const file of ["original.txt", "moved.txt", "staged-delete.txt", "worktree-delete.txt"]) {
+		writeFileSync(join(root, file), "initial\n");
 	}
+	git("add", ".");
+	commit("init");
+	git("mv", "original.txt", "renamed.txt");
+	writeFileSync(join(root, "renamed.txt"), "modified after rename\n");
+	git("mv", "moved.txt", "moved-away.txt");
+	rmSync(join(root, "moved-away.txt"));
+	git("rm", "staged-delete.txt");
+	rmSync(join(root, "worktree-delete.txt"));
+	assert.match(git("status", "--porcelain=v1"), /^RM original.txt -> renamed.txt$/m);
+	assert.match(git("status", "--porcelain=v1"), /^RD moved.txt -> moved-away.txt$/m);
+	const status = await readGitStatus(root);
+	assert.equal(status.renamed, 2);
+	assert.equal(status.modified, 1);
+	assert.equal(status.deleted, 3);
+	assert.equal(status.staged, 0);
+	assert.equal(status.conflicted, 0);
 });
+
+// Footer layout and width fitting.
 
 test("branch truncation preserves the branch prefix", () => {
 	assert.equal(truncateBranch("fix/cwd-footer-truncation", 20), "fix/cwd-footer-tr...");
@@ -291,8 +256,18 @@ test("footer compacts cwd before truncating lower-priority segments", () => {
 	);
 });
 
-test("narrow plain and inline footers keep cwd before runtime and context", () => {
-	let cwd = "/work/projects/pi-open-tui";
+function footerFixture(options: {
+	cwd?: () => string;
+	sessionName?: string | null;
+	mode?: "nerd" | "ascii";
+	contextTokens?: number;
+	entries?: Array<{ id: string }>;
+	effort?: string;
+	state?: Partial<FooterState>;
+	theme?: Theme;
+	statuses?: () => Map<string, string>;
+	hooks?: Partial<Parameters<typeof installFooter>[4]>;
+} = {}) {
 	let footerFactory: NonNullable<Parameters<ExtensionContext["ui"]["setFooter"]>[0]> | undefined;
 	const ctx = {
 		model: { provider: "openai", contextWindow: 1_000 },
@@ -302,38 +277,48 @@ test("narrow plain and inline footers keep cwd before runtime and context", () =
 			},
 		},
 		sessionManager: {
-			getCwd: () => cwd,
-			getLeafId: () => null,
-			getEntries: () => [],
-			getSessionName: () => undefined,
+			getCwd: options.cwd ?? (() => "/work/project"),
+			getLeafId: () => options.entries?.at(-1)?.id ?? null,
+			getEntries: () => options.entries ?? [],
+			getSessionName: () => options.sessionName,
 		},
-		getContextUsage: () => ({ tokens: 0, contextWindow: 1_000, percent: 0 }),
+		getContextUsage: () => ({ tokens: options.contextTokens ?? 0, contextWindow: 1_000, percent: (options.contextTokens ?? 0) / 10 }),
 	} as unknown as ExtensionContext;
 	const config = structuredClone(DEFAULT_CONFIG);
-	config.icons.mode = "ascii";
+	config.icons.mode = options.mode ?? "ascii";
 	const state: FooterState = {
-		git: { ...emptyGitStatus(), branch: "main" },
-		runtime: { name: "nodejs", version: "24.6.0" },
+		git: emptyGitStatus(),
+		runtime: null,
 		workingSince: undefined,
 		lastDoneIn: undefined,
+		...options.state,
 	};
 	const handle = installFooter(
 		ctx,
 		() => state,
 		() => config,
-		() => ({ provider: "OpenAI", model: "gpt-5", effort: "off" }),
-		{ setRequestRender() {}, scheduleGitRefresh() {} },
+		() => ({ provider: "OpenAI", model: "gpt-5", effort: options.effort ?? "off" }),
+		{ setRequestRender() {}, scheduleGitRefresh() {}, ...options.hooks },
 	);
 	assert.ok(footerFactory);
 	const footerData = {
 		onBranchChange: () => () => {},
-		getExtensionStatuses: () => new Map(),
+		getExtensionStatuses: options.statuses ?? (() => new Map()),
 	} as unknown as ReadonlyFooterDataProvider;
 	const component = footerFactory(
 		{ requestRender() {} } as TUI,
-		theme,
+		options.theme ?? theme,
 		footerData,
 	) as Component;
+	return { component, config, state, handle };
+}
+
+test("narrow plain and inline footers keep cwd before runtime and context", () => {
+	let cwd = "/work/projects/pi-open-tui";
+	const { component, handle } = footerFixture({
+		cwd: () => cwd,
+		state: { git: { ...emptyGitStatus(), branch: "main" }, runtime: { name: "nodejs", version: "24.6.0" } },
+	});
 	// Width 59: the full cwd does not fit alongside git+runtime+context bar.
 	// The footer compacts the cwd to its basename before dropping segments.
 	const out = component.render(59).join("\n");
@@ -360,47 +345,10 @@ test("narrow plain and inline footers keep cwd before runtime and context", () =
 });
 
 test("narrow footer sheds the context bar before left segments", () => {
-	let footerFactory: NonNullable<Parameters<ExtensionContext["ui"]["setFooter"]>[0]> | undefined;
-	const ctx = {
-		model: { provider: "openai", contextWindow: 1_000 },
-		ui: {
-			setFooter(factory: typeof footerFactory) {
-				footerFactory = factory;
-			},
-		},
-		sessionManager: {
-			getCwd: () => "/work/project",
-			getLeafId: () => null,
-			getEntries: () => [],
-			getSessionName: () => undefined,
-		},
-		getContextUsage: () => ({ tokens: 250, contextWindow: 1_000, percent: 25 }),
-	} as unknown as ExtensionContext;
-	const config = structuredClone(DEFAULT_CONFIG);
-	config.icons.mode = "ascii";
-	const state: FooterState = {
-		git: { ...emptyGitStatus(), branch: "main" },
-		runtime: null,
-		workingSince: undefined,
-		lastDoneIn: undefined,
-	};
-	installFooter(
-		ctx,
-		() => state,
-		() => config,
-		() => ({ provider: "OpenAI", model: "gpt-5", effort: "off" }),
-		{ setRequestRender() {}, scheduleGitRefresh() {} },
-	);
-	assert.ok(footerFactory);
-	const footerData = {
-		onBranchChange: () => () => {},
-		getExtensionStatuses: () => new Map(),
-	} as unknown as ReadonlyFooterDataProvider;
-	const component = footerFactory(
-		{ requestRender() {} } as TUI,
-		theme,
-		footerData,
-	) as Component;
+	const { component } = footerFixture({
+		contextTokens: 250,
+		state: { git: { ...emptyGitStatus(), branch: "main" } },
+	});
 
 	// Roomy width: full bar with tokens is right-aligned on line 1.
 	const wide = component.render(120).join("\n").split("\n")[0]!;
@@ -419,44 +367,12 @@ test("narrow footer sheds the context bar before left segments", () => {
 });
 
 test("provides inline footer content without duplicating native rows", () => {
-	let footerFactory: NonNullable<Parameters<ExtensionContext["ui"]["setFooter"]>[0]> | undefined;
-	const ctx = {
-		model: { provider: "openai", contextWindow: 1_000 },
-		ui: {
-			setFooter(factory: typeof footerFactory) {
-				footerFactory = factory;
-			},
-		},
-		sessionManager: {
-			getCwd: () => "/work/project",
-			getLeafId: () => null,
-			getEntries: () => [],
-			getSessionName: () => "session-title",
-		},
-		getContextUsage: () => ({ tokens: 0, contextWindow: 1_000, percent: 0 }),
-	} as unknown as ExtensionContext;
-	const config = structuredClone(DEFAULT_CONFIG);
-	config.icons.mode = "ascii";
-	const state: FooterState = {
-		git: { ...emptyGitStatus(), branch: "main" },
-		runtime: null,
-		workingSince: undefined,
-		lastDoneIn: undefined,
-	};
 	let canEmbed = true;
-	const handle = installFooter(
-		ctx,
-		() => state,
-		() => config,
-		() => ({ provider: "OpenAI", model: "gpt-5", effort: "off" }),
-		{ setRequestRender() {}, scheduleGitRefresh() {}, canEmbedInEditor: () => canEmbed },
-	);
-	assert.ok(footerFactory);
-	const footerData = {
-		onBranchChange: () => () => {},
-		getExtensionStatuses: () => new Map(),
-	} as unknown as ReadonlyFooterDataProvider;
-	const component = footerFactory({ requestRender() {} } as TUI, theme, footerData) as Component;
+	const { component, config, handle } = footerFixture({
+		sessionName: "session-title",
+		state: { git: { ...emptyGitStatus(), branch: "main" } },
+		hooks: { canEmbedInEditor: () => canEmbed },
+	});
 
 	config.footerSegments.sessionName = true;
 	const inline = handle.renderInline(100);
@@ -489,9 +405,10 @@ test("provides inline footer content without duplicating native rows", () => {
 	assert.deepEqual(component.render(100), []);
 });
 
-test("auto gates Nerd icons by TTY and UTF-8 support", () => {
+// Icon modes and runtime detection.
+test("auto gates Nerd icons by TTY and UTF-8 support", (t) => {
 	const envKeys = ["TERM_PROGRAM", "LC_TERMINAL", "WT_SESSION", "TERM", "LC_ALL", "LC_CTYPE", "LANG", "SSH_CONNECTION", "SSH_TTY"];
-	const originalEnv = new Map(envKeys.map((key) => [key, process.env[key]]));
+	preserveEnvironment(t, envKeys);
 	const hadOwnIsTTY = Object.hasOwn(process.stdout, "isTTY");
 	const originalIsTTY = process.stdout.isTTY;
 
@@ -523,11 +440,6 @@ test("auto gates Nerd icons by TTY and UTF-8 support", () => {
 		Object.defineProperty(process.stdout, "isTTY", { configurable: true, value: false });
 		assert.equal(resolveIconMode("auto"), "ascii");
 	} finally {
-		for (const key of envKeys) {
-			const value = originalEnv.get(key);
-			if (value === undefined) delete process.env[key];
-			else process.env[key] = value;
-		}
 		if (hadOwnIsTTY) {
 			Object.defineProperty(process.stdout, "isTTY", { configurable: true, value: originalIsTTY });
 		} else {
@@ -563,9 +475,9 @@ test("every icon mode provides every footer semantic", () => {
 	}
 });
 
-test("auto falls back to unicode icons for SSH sessions", () => {
+test("auto falls back to unicode icons for SSH sessions", (t) => {
 	const envKeys = ["SSH_CONNECTION", "SSH_TTY", "TERM", "LC_ALL", "LC_CTYPE", "LANG"];
-	const originalEnv = new Map(envKeys.map((key) => [key, process.env[key]]));
+	preserveEnvironment(t, envKeys);
 	const hadOwnIsTTY = Object.hasOwn(process.stdout, "isTTY");
 	const originalIsTTY = process.stdout.isTTY;
 
@@ -586,11 +498,6 @@ test("auto falls back to unicode icons for SSH sessions", () => {
 		assert.equal(resolveIconMode("unicode"), "unicode");
 		assert.equal(resolveIconMode("ascii"), "ascii");
 	} finally {
-		for (const key of envKeys) {
-			const value = originalEnv.get(key);
-			if (value === undefined) delete process.env[key];
-			else process.env[key] = value;
-		}
 		if (hadOwnIsTTY) Object.defineProperty(process.stdout, "isTTY", { configurable: true, value: originalIsTTY });
 		else Reflect.deleteProperty(process.stdout, "isTTY");
 	}
@@ -705,6 +612,7 @@ test("detects runtime project suffixes and Java versions on either output stream
 	}
 });
 
+// Session usage and footer labels.
 test("normalizes invalid usage totals", () => {
 	const usage = {
 		input: Number.POSITIVE_INFINITY,
@@ -850,7 +758,6 @@ test("usage prewarming is accumulated without changing assistant cache-hit rate 
 });
 
 test("ASCII footer renders icons as semantic labels", () => {
-	let footerFactory: NonNullable<Parameters<ExtensionContext["ui"]["setFooter"]>[0]> | undefined;
 	const entries = [{
 		id: "usage-1",
 		timestamp: Date.now(),
@@ -866,52 +773,19 @@ test("ASCII footer renders icons as semantic labels", () => {
 			},
 		},
 	}];
-	const ctx = {
-		model: { provider: "openai", contextWindow: 1_000 },
-		ui: {
-			setFooter(factory: typeof footerFactory) {
-				footerFactory = factory;
-			},
-		},
-		sessionManager: {
-			getCwd: () => "C:\\work\\project",
-			getLeafId: () => entries.at(-1)?.id ?? null,
-			getEntries: () => entries,
-			getSessionName: () => undefined,
-		},
-		getContextUsage: () => ({ tokens: 250, contextWindow: 1_000, percent: 25 }),
-	} as unknown as ExtensionContext;
-	const config = structuredClone(DEFAULT_CONFIG);
-	config.icons.mode = "ascii";
-	const state: FooterState = {
-		git: { ...emptyGitStatus(), branch: "main", modified: 2 },
-		runtime: { name: "nodejs", version: "24.6.0" },
-		workingSince: Date.now() - 2_000,
-		lastDoneIn: undefined,
-	};
-
-	installFooter(
-		ctx,
-		() => state,
-		() => config,
-		() => ({ provider: "OpenAI", model: "gpt-5", effort: "high" }),
-		{ setRequestRender() {}, scheduleGitRefresh() {} },
-	);
-	assert.ok(footerFactory);
-
 	let extensionStatusReads = 0;
-	const footerData = {
-		onBranchChange: () => () => {},
-		getExtensionStatuses: () => {
+	const { component, config } = footerFixture({
+		cwd: () => "C:\\work\\project", entries, contextTokens: 250, effort: "high",
+		state: {
+			git: { ...emptyGitStatus(), branch: "main", modified: 2 },
+			runtime: { name: "nodejs", version: "24.6.0" },
+			workingSince: Date.now() - 2_000,
+		},
+		statuses: () => {
 			extensionStatusReads++;
 			return new Map([["goal", "goal active"]]);
 		},
-	} as unknown as ReadonlyFooterDataProvider;
-	const component = footerFactory(
-		{ requestRender() {} } as TUI,
-		theme,
-		footerData,
-	) as Component;
+	});
 	const output = component.render(160).join("\n");
 
 	for (const expected of [
@@ -954,50 +828,9 @@ function renderFooterWithSession(opts: {
 		nerdIconSpacing = false,
 		width = 160,
 	} = opts;
-	const name = sessionName === undefined ? "test-session" : sessionName;
-	let footerFactory: NonNullable<Parameters<ExtensionContext["ui"]["setFooter"]>[0]> | undefined;
-	const ctx = {
-		model: { provider: "openai", contextWindow: 1_000 },
-		ui: {
-			setFooter(factory: typeof footerFactory) {
-				footerFactory = factory;
-			},
-		},
-		sessionManager: {
-			getCwd: () => "/work/project",
-			getLeafId: () => null,
-			getEntries: () => [],
-			getSessionName: () => name,
-		},
-		getContextUsage: () => ({ tokens: 0, contextWindow: 1_000, percent: 0 }),
-	} as unknown as ExtensionContext;
-	const config = structuredClone(DEFAULT_CONFIG);
-	config.icons.mode = mode;
+	const { component, config } = footerFixture({ sessionName: sessionName === undefined ? "test-session" : sessionName, mode });
 	config.footerSegments.sessionName = sessionNameEnabled;
 	config.footerSegments.nerdIconSpacing = nerdIconSpacing;
-	const state: FooterState = {
-		git: emptyGitStatus(),
-		runtime: null,
-		workingSince: undefined,
-		lastDoneIn: undefined,
-	};
-	installFooter(
-		ctx,
-		() => state,
-		() => config,
-		() => ({ provider: "OpenAI", model: "gpt-5", effort: "off" }),
-		{ setRequestRender() {}, scheduleGitRefresh() {} },
-	);
-	assert.ok(footerFactory);
-	const footerData = {
-		onBranchChange: () => () => {},
-		getExtensionStatuses: () => new Map(),
-	} as unknown as ReadonlyFooterDataProvider;
-	const component = footerFactory(
-		{ requestRender() {} } as TUI,
-		theme,
-		footerData,
-	) as Component;
 	return component.render(width).join("\n");
 }
 
@@ -1045,48 +878,8 @@ function renderFooterWithHost(opts: {
 	width?: number;
 } = {}): string {
 	const { mode = "ascii", hostnameEnabled = true, width = 160 } = opts;
-	let footerFactory: NonNullable<Parameters<ExtensionContext["ui"]["setFooter"]>[0]> | undefined;
-	const ctx = {
-		model: { provider: "openai", contextWindow: 1_000 },
-		ui: {
-			setFooter(factory: typeof footerFactory) {
-				footerFactory = factory;
-			},
-		},
-		sessionManager: {
-			getCwd: () => "/work/project",
-			getLeafId: () => null,
-			getEntries: () => [],
-			getSessionName: () => undefined,
-		},
-		getContextUsage: () => ({ tokens: 0, contextWindow: 1_000, percent: 0 }),
-	} as unknown as ExtensionContext;
-	const config = structuredClone(DEFAULT_CONFIG);
-	config.icons.mode = mode;
+	const { component, config } = footerFixture({ mode });
 	config.footerSegments.hostname = hostnameEnabled;
-	const state: FooterState = {
-		git: emptyGitStatus(),
-		runtime: null,
-		workingSince: undefined,
-		lastDoneIn: undefined,
-	};
-	installFooter(
-		ctx,
-		() => state,
-		() => config,
-		() => ({ provider: "OpenAI", model: "gpt-5", effort: "off" }),
-		{ setRequestRender() {}, scheduleGitRefresh() {} },
-	);
-	assert.ok(footerFactory);
-	const footerData = {
-		onBranchChange: () => () => {},
-		getExtensionStatuses: () => new Map(),
-	} as unknown as ReadonlyFooterDataProvider;
-	const component = footerFactory(
-		{ requestRender() {} } as TUI,
-		theme,
-		footerData,
-	) as Component;
 	return component.render(width).join("\n");
 }
 
@@ -1123,48 +916,9 @@ const styledTheme = {
 	},
 } as Theme;
 
+// Extension status rows and working telemetry.
 function renderStatusLines(statuses: Map<string, string>, width = 160): string[] {
-	let footerFactory: NonNullable<Parameters<ExtensionContext["ui"]["setFooter"]>[0]> | undefined;
-	const ctx = {
-		model: { provider: "openai", contextWindow: 1_000 },
-		ui: {
-			setFooter(factory: typeof footerFactory) {
-				footerFactory = factory;
-			},
-		},
-		sessionManager: {
-			getCwd: () => "/work/project",
-			getLeafId: () => null,
-			getEntries: () => [],
-			getSessionName: () => undefined,
-		},
-		getContextUsage: () => ({ tokens: 0, contextWindow: 1_000, percent: 0 }),
-	} as unknown as ExtensionContext;
-	const config = structuredClone(DEFAULT_CONFIG);
-	config.icons.mode = "ascii";
-	const state: FooterState = {
-		git: emptyGitStatus(),
-		runtime: null,
-		workingSince: undefined,
-		lastDoneIn: undefined,
-	};
-	installFooter(
-		ctx,
-		() => state,
-		() => config,
-		() => ({ provider: "OpenAI", model: "gpt-5", effort: "off" }),
-		{ setRequestRender() {}, scheduleGitRefresh() {} },
-	);
-	assert.ok(footerFactory);
-	const footerData = {
-		onBranchChange: () => () => {},
-		getExtensionStatuses: () => statuses,
-	} as unknown as ReadonlyFooterDataProvider;
-	const component = footerFactory(
-		{ requestRender() {} } as TUI,
-		styledTheme,
-		footerData,
-	) as Component;
+	const { component } = footerFixture({ statuses: () => statuses, theme: styledTheme });
 	// The two main footer rows come first, status rows follow them.
 	return component.render(width).slice(2);
 }
@@ -1252,47 +1006,13 @@ test("status line wraps coloured text inside the given width", () => {
 });
 
 test("working timer shows live TPS gated by its footer setting and sheds it first", () => {
-	let footerFactory: NonNullable<Parameters<ExtensionContext["ui"]["setFooter"]>[0]> | undefined;
-	const ctx = {
-		model: { provider: "openai", contextWindow: 1_000 },
-		ui: {
-			setFooter(factory: typeof footerFactory) {
-				footerFactory = factory;
-			},
-		},
-		sessionManager: {
-			getCwd: () => "/work/project",
-			getLeafId: () => null,
-			getEntries: () => [],
-			getSessionName: () => undefined,
-		},
-		getContextUsage: () => ({ tokens: 0, contextWindow: 1_000, percent: 0 }),
-	} as unknown as ExtensionContext;
-	const config = structuredClone(DEFAULT_CONFIG);
-	config.icons.mode = "ascii";
-	config.footerSegments.hostname = false;
-	const state: FooterState = {
-		git: emptyGitStatus(),
-		runtime: null,
-		workingSince: Date.now(),
-		lastDoneIn: undefined,
-	};
 	let liveTps: LiveTps | null = { tps: 53.5, stale: false };
-	installFooter(
-		ctx,
-		() => state,
-		() => config,
-		() => ({ provider: "OpenAI", model: "gpt-5", effort: "off" }),
-		{ setRequestRender() {}, scheduleGitRefresh() {}, getLiveTps: () => liveTps },
-	);
-	assert.ok(footerFactory);
-	const footerData = {
-		onBranchChange: () => () => {},
-		getExtensionStatuses: () => new Map(),
-	} as unknown as ReadonlyFooterDataProvider;
 	// Tag the color of the TPS part so the stale (dim) state is visible.
 	const tpsTheme = { fg: (color: string, text: string) => text.includes("tok/s") ? `<${color}>${text}` : text } as Theme;
-	const component = footerFactory({ requestRender() {} } as TUI, tpsTheme, footerData) as Component;
+	const { component, config, state } = footerFixture({
+		state: { workingSince: Date.now() }, theme: tpsTheme, hooks: { getLiveTps: () => liveTps },
+	});
+	config.footerSegments.hostname = false;
 	const line = (width = 120) => component.render(width)[0]!;
 
 	assert.match(line(), /o working \S+ · <accent>> ~54 tok\/s/);

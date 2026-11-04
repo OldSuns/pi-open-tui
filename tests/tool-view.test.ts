@@ -105,45 +105,30 @@ function fakeNative(renderShell?: "self") {
 	return { renderers, seen };
 }
 
+// Summaries, notices, and call details.
 test("summaries describe each built-in tool in one line", () => {
-	assert.equal(summarizeResult("read", text("a\nb\nc"), {}), "3 lines");
-	assert.equal(
-		summarizeResult("read", text("a\nb\n\n[Showing lines 1-2 of 9. Use offset=3 to continue.]", { truncation: { truncated: true } }), {}),
-		"2 lines · truncated",
-	);
-	assert.equal(summarizeResult("read", { content: [{ type: "image", data: "", mimeType: "image/png" }], details: undefined }, {}), "image");
-	assert.equal(
-		summarizeResult("read", text("a\nb\n\n[40 more lines in file. Use offset=3 to continue.]"), { limit: 2 }),
-		"2 lines · more",
-	);
-	assert.equal(summarizeResult("bash", text("one\ntwo\n"), {}), "Done · 2 lines");
-	assert.equal(summarizeResult("bash", text("(no output)"), {}), "Done · no output");
-	assert.equal(
-		summarizeResult("bash", text("tail", { truncation: { truncated: true, totalLines: 131 } }), {}),
-		"Done · 131 lines · truncated",
-	);
-	assert.equal(summarizeResult("edit", text("ok", { diff: " 1 a\n-2 b\n+2 c\n+3 d" }), {}), "+2 −1");
-	assert.equal(summarizeResult("write", text("Successfully wrote"), { content: "x\ny\n" }), "2 lines written");
-	assert.equal(
-		summarizeResult("grep", text("a.ts:1: x\na.ts-2- ctx\nb.ts:9: y\n\n[100 matches limit reached. Use limit=200 for more, or refine pattern]", { matchLimitReached: 100 }), {}),
-		"2 matches in 2 files · limit reached",
-	);
-	assert.equal(summarizeResult("grep", text("No matches found"), {}), "No matches");
-	assert.equal(summarizeResult("find", text("a.ts\nb.ts"), {}), "2 files");
-	assert.equal(
-		summarizeResult("find", text("a.ts\nb.ts\n\n[2 results limit reached]", { resultLimitReached: 2 }), {}),
-		"2 files · limit reached",
-	);
-	assert.equal(
-		summarizeResult("ls", text("a/\n\n[50KB limit reached]", { truncation: { truncated: true } }), {}),
-		"1 entry · truncated",
-	);
-	assert.equal(
-		summarizeResult("ls", text("a/\nb/\n\n[2 entries limit reached. Use limit=4 for more]", { entryLimitReached: 2 }), {}),
-		"2 entries · limit reached",
-	);
-	assert.equal(summarizeResult("ls", text("(empty directory)"), {}), "Empty");
-	assert.equal(summarizeResult("ls", text("a/\nb.ts"), {}), "2 entries");
+	const cases: Array<[string, ToolResult, Record<string, unknown>, string]> = [
+		["read", text("a\nb\nc"), {}, "3 lines"],
+		["read", text("a\nb\n\n[Showing lines 1-2 of 9. Use offset=3 to continue.]", { truncation: { truncated: true } }), {}, "2 lines · truncated"],
+		["read", { content: [{ type: "image", data: "", mimeType: "image/png" }], details: undefined }, {}, "image"],
+		["read", text("a\nb\n\n[40 more lines in file. Use offset=3 to continue.]"), { limit: 2 }, "2 lines · more"],
+		["bash", text("one\ntwo\n"), {}, "Done · 2 lines"],
+		["bash", text("(no output)"), {}, "Done · no output"],
+		["bash", text("tail", { truncation: { truncated: true, totalLines: 131 } }), {}, "Done · 131 lines · truncated"],
+		["edit", text("ok", { diff: " 1 a\n-2 b\n+2 c\n+3 d" }), {}, "+2 −1"],
+		["write", text("Successfully wrote"), { content: "x\ny\n" }, "2 lines written"],
+		["grep", text("a.ts:1: x\na.ts-2- ctx\nb.ts:9: y\n\n[100 matches limit reached. Use limit=200 for more, or refine pattern]", { matchLimitReached: 100 }), {}, "2 matches in 2 files · limit reached"],
+		["grep", text("No matches found"), {}, "No matches"],
+		["find", text("a.ts\nb.ts"), {}, "2 files"],
+		["find", text("a.ts\nb.ts\n\n[2 results limit reached]", { resultLimitReached: 2 }), {}, "2 files · limit reached"],
+		["ls", text("a/\n\n[50KB limit reached]", { truncation: { truncated: true } }), {}, "1 entry · truncated"],
+		["ls", text("a/\nb/\n\n[2 entries limit reached. Use limit=4 for more]", { entryLimitReached: 2 }), {}, "2 entries · limit reached"],
+		["ls", text("(empty directory)"), {}, "Empty"],
+		["ls", text("a/\nb.ts"), {}, "2 entries"],
+	];
+	for (const [tool, result, args, expected] of cases) {
+		assert.equal(summarizeResult(tool, result, args), expected, `${tool}: ${expected}`);
+	}
 });
 
 test("only the current tool's confirmed Pi notices are removed", () => {
@@ -232,6 +217,7 @@ test("call details show the key argument", () => {
 	assert.deepEqual(tailLines("a\r\nb\r\n\r\nc\r\nd\r\n", 3), ["b", "c", "d"]);
 });
 
+// Registration, native rendering, and scroll caches.
 test("real extension registration preserves native and third-party tools and cleans up pulses", async (t) => {
 	const cwd = await mkdtemp(join(tmpdir(), "pi-tool-view-"));
 	t.after(() => rm(cwd, { recursive: true, force: true }));
@@ -639,6 +625,7 @@ test("expanded rows hand off to Pi's native card", () => {
 	assert.deepEqual(compact.renderCall!({ path: "a.ts" }, theme, ctx).render(40), ["NATIVE CALL"]);
 });
 
+// Code previews and real write/edit execution.
 function plain(rows: string[]): string[] {
 	return rows.map(stripAnsi);
 }

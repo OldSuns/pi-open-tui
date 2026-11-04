@@ -3,8 +3,7 @@ import { spawnSync } from "node:child_process";
 import { dirname, join } from "node:path";
 import test from "node:test";
 import { initTheme, UserMessageComponent, type MarkdownTransformContext, type Theme } from "@earendil-works/pi-coding-agent";
-import { Markdown, ProcessTerminal, TuiAltScreen, visibleWidth, type Component, type MarkdownTheme, type Terminal, type TUI, type TuiMouseEvent } from "@earendil-works/pi-tui";
-import { theme as piTheme } from "../node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/theme/theme.js";
+import { Markdown, TuiAltScreen, visibleWidth, type Component, type MarkdownTheme, type Terminal, type TUI, type TuiMouseEvent } from "@earendil-works/pi-tui";
 import {
 	handleCopyMouse,
 	installCopyButtons,
@@ -12,6 +11,8 @@ import {
 	restoreTabs,
 	type CopyRegion,
 } from "../extensions/open-tui/copy-buttons.ts";
+import { installRealCopyButtons } from "./fixtures/copy-test-helpers.ts";
+import { mouseEvent } from "./fixtures/test-helpers.ts";
 
 const identity = (text: string) => text;
 const markdownTheme = new Proxy({}, {
@@ -30,11 +31,12 @@ function markdown(text: string, context: Partial<MarkdownTransformContext> = {})
 }
 
 function mouse(type: TuiMouseEvent["type"], x: number, y: number, button: TuiMouseEvent["button"] = "left"): TuiMouseEvent {
-	return { type, button, x, y, screenX: x, screenY: y, width: 40, height: 10, shift: false, alt: false, ctrl: false };
+	return mouseEvent(type, x, y, { button });
 }
 
 const md = "Intro\n\n```ts\nconst a = 1;\n```\n";
 
+// Frames, label eligibility, and user-message caches.
 test("frames code blocks with [Copy] embedded in the top border", () => {
 	const copy = setup();
 	try {
@@ -114,10 +116,7 @@ test("labels the last row of a user message inside the bubble", () => {
 });
 
 test("scroll cache keeps real user-message buttons current across resize, settings, and themes", () => {
-	initTheme("dark", false);
-	const tui = new TuiAltScreen(new ProcessTerminal(), false);
-	let enabled = true;
-	const copy = installCopyButtons({ getTui: () => tui, getTheme: () => piTheme, isEnabled: () => enabled });
+	const { tui, copy, enable } = installRealCopyButtons();
 	const message = new UserMessageComponent("hello\n\n```js\nx()\n```", undefined, 1, [markCopyScope]);
 	tui.addChild(message);
 	const render = (width: number) => {
@@ -139,11 +138,9 @@ test("scroll cache keeps real user-message buttons current across resize, settin
 		initTheme("light", false);
 		tui.invalidate();
 		assert.notDeepEqual(render(40), dark);
-		enabled = false;
-		copy.refresh();
+		enable(false);
 		assert.ok(message.render(40).every((line) => !line.includes("[Copy]")));
-		enabled = true;
-		copy.refresh();
+		enable(true);
 		render(40);
 		assert.ok(message.render(6).every((line) => !line.includes("[Copy]")));
 		render(40);
@@ -154,6 +151,7 @@ test("scroll cache keeps real user-message buttons current across resize, settin
 	}
 });
 
+// Actual clipboard transport and mouse release rules.
 test("scroll cache copies current user messages through real mouse handlers and OSC 52", {
 	skip: process.platform !== "linux" ? "Real clipboard clicks run in headless Linux to preserve the desktop clipboard" : false,
 }, () => {
@@ -212,6 +210,7 @@ test("copies on a left press and a release within tolerance only", () => {
 	assert.deepEqual(copied, ["code", "code"], "child dispatch must not discard a parent's label press");
 });
 
+// Source tabs, cleanup, and fullscreen selection.
 test("restores tabs from the source code block when shapes match", () => {
 	const source = "a\n\n```make\nall:\n\techo hi\n```\n\n```sh\nls\n```";
 	assert.equal(restoreTabs(source, 0, "all:\n   echo hi"), "all:\n\techo hi");
