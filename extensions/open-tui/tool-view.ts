@@ -321,14 +321,16 @@ function summarizeFff(kind: "grep" | "find", result: ToolResult, duration = ""):
 		+ duration + (head ? ` · ${head}` : "");
 }
 
-/** Match the package source or its installed entry point, never a tool name alone. */
+/** Match npm provenance, its installed entry point, or the official git source and entry point. */
 function fffKind(toolName: string, sourceInfo: SourceInfo | undefined): "grep" | "find" | undefined {
 	const kind = FFF_TOOLS.get(toolName);
 	if (!kind || !sourceInfo) return undefined;
 	const source = sourceInfo.source;
 	const path = sourceInfo.path.replace(/\\/g, "/");
+	const git = /^(?:git:)?(?:https?:\/\/github\.com\/|ssh:\/\/git@github\.com\/|git@github\.com:|github\.com\/)dmtrkovalenko\/fff(?:\.git)?(?:[@#][^\s]+)?$/i.test(source)
+		&& /(?:^|\/)packages\/pi-fff\/src\/index\.ts$/.test(path);
 	return source === "npm:@ff-labs/pi-fff" || source.startsWith("npm:@ff-labs/pi-fff@")
-		|| /(?:^|\/)node_modules\/@ff-labs\/pi-fff\/src\/index\.ts$/.test(path) ? kind : undefined;
+		|| /(?:^|\/)node_modules\/@ff-labs\/pi-fff\/src\/index\.ts$/.test(path) || git ? kind : undefined;
 }
 
 /**
