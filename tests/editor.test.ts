@@ -22,6 +22,7 @@ import { decorateOpenTuiEditor, installEditor, repaintAfterStreamWrites, type In
 import { OpenTuiHeader } from "../extensions/open-tui/header.ts";
 import type { CursorStyle } from "../extensions/open-tui/config.ts";
 import { stripAnsi } from "../extensions/open-tui/utils.ts";
+import { mouseEvent } from "./fixtures/test-helpers.ts";
 
 const tui = {
 	terminal: { columns: 80, rows: 24 },
@@ -39,26 +40,26 @@ const editorTheme = {
 	},
 } as EditorTheme;
 
-function createOpenTuiEditor(
-	tui: TUI,
-	editorTheme: EditorTheme,
-	keybindings: KeybindingsManager,
-	cursorStyle: CursorStyle = "block",
-	inlineFooter?: InlineFooterRenderer,
-) {
+function createOpenTuiEditor(options: {
+	tui?: TUI;
+	theme?: EditorTheme;
+	keybindings?: KeybindingsManager;
+	cursorStyle?: CursorStyle;
+	inlineFooter?: InlineFooterRenderer;
+} = {}) {
+	const hostTui = options.tui ?? tui;
+	const currentTheme = options.theme ?? editorTheme;
+	const keybindings = options.keybindings ?? { matches: () => false } as unknown as KeybindingsManager;
 	return decorateOpenTuiEditor(
-		new CustomEditor(tui, editorTheme, keybindings, { paddingX: 0 }),
-		tui,
-		{ cursorStyle, inlineFooter },
+		new CustomEditor(hostTui, currentTheme, keybindings, { paddingX: 0 }),
+		hostTui,
+		{ cursorStyle: options.cursorStyle ?? "block", inlineFooter: options.inlineFooter },
 	);
 }
 
+// Editor frame, content, and mouse coordinates.
 test("compensates Pi editor padding for the custom left rail", () => {
-	const editor = createOpenTuiEditor(
-		tui,
-		editorTheme,
-		{ matches: () => false } as unknown as KeybindingsManager,
-	);
+	const editor = createOpenTuiEditor();
 	editor.setText("x");
 
 	// Pi copies editorPaddingX after constructing a custom editor.
@@ -75,11 +76,7 @@ test("preserves legal editor text that resembles a border or scroll indicator", 
 		[40, "─── ↑ 3 more ───"],
 		[5, "─"],
 	] as const) {
-		const editor = createOpenTuiEditor(
-			tui,
-			editorTheme,
-			{ matches: () => false } as unknown as KeybindingsManager,
-		);
+		const editor = createOpenTuiEditor();
 		editor.setText(`${text}\nx`);
 
 		assert.equal(stripAnsi(editor.render(width)[1] ?? ""), `│ ${text.padEnd(width - 4)} │`);
@@ -87,28 +84,12 @@ test("preserves legal editor text that resembles a border or scroll indicator", 
 });
 
 test("maps framed editor clicks to the Pi editor coordinate space", () => {
-	const editor = createOpenTuiEditor(
-		tui,
-		editorTheme,
-		{ matches: () => false } as unknown as KeybindingsManager,
-	);
+	const editor = createOpenTuiEditor();
 	editor.setText("abcdef");
 	editor.render(40);
 
 	const click = (x: number): void => {
-		editor.handleMouse({
-			type: "click",
-			button: "left",
-			x,
-			y: 1,
-			screenX: x,
-			screenY: 1,
-			width: 40,
-			height: 8,
-			shift: false,
-			alt: false,
-			ctrl: false,
-		});
+		editor.handleMouse(mouseEvent("click", x, 1, { height: 8 }));
 	};
 
 	click(2);
@@ -120,36 +101,16 @@ test("maps framed editor clicks to the Pi editor coordinate space", () => {
 });
 
 test("leaves narrow unframed editor mouse coordinates unchanged", () => {
-	const editor = createOpenTuiEditor(
-		tui,
-		editorTheme,
-		{ matches: () => false } as unknown as KeybindingsManager,
-	);
+	const editor = createOpenTuiEditor();
 	editor.setText("abc");
 	editor.render(3);
 
-	editor.handleMouse({
-		type: "click",
-		button: "left",
-		x: 0,
-		y: 1,
-		screenX: 0,
-		screenY: 1,
-		width: 3,
-		height: 8,
-		shift: false,
-		alt: false,
-		ctrl: false,
-	});
+	editor.handleMouse(mouseEvent("click", 0, 1, { width: 3, height: 8 }));
 
 	assert.equal(editor.getCursor().col, 0);
 });
 test("embeds the working indicator in the editor top border", () => {
-	const editor = createOpenTuiEditor(
-		tui,
-		editorTheme,
-		{ matches: () => false } as unknown as KeybindingsManager,
-	);
+	const editor = createOpenTuiEditor();
 	editor.setWorkingStatusIndicator({
 		renderInBorder: () => "◐ working",
 		renderSpinnerInBorder: () => "◐",
@@ -159,19 +120,15 @@ test("embeds the working indicator in the editor top border", () => {
 });
 
 test("renders inline footer lines in the editor frame", () => {
-	const editor = createOpenTuiEditor(
-		tui,
-		editorTheme,
-		{ matches: () => false } as unknown as KeybindingsManager,
-		"block",
-		{
+	const editor = createOpenTuiEditor({
+		inlineFooter: {
 			enabled: () => true,
 			render: () => ({
 				top: { left: "cwd", right: "context" },
 				bottom: { left: "model", right: "stats" },
 			}),
 		},
-	);
+	});
 
 	const lines = editor.render(40).map(stripAnsi);
 	assert.match(lines[0] ?? "", /^╭─ cwd ─+ context ─╮$/);
@@ -181,11 +138,7 @@ test("renders inline footer lines in the editor frame", () => {
 });
 
 test("keeps a narrow scrolled working border intact", () => {
-	const editor = createOpenTuiEditor(
-		tui,
-		editorTheme,
-		{ matches: () => false } as unknown as KeybindingsManager,
-	);
+	const editor = createOpenTuiEditor();
 	editor.setText(Array.from({ length: 10 }, (_, index) => `line ${index}`).join("\n"));
 	let spinnerRenders = 0;
 	editor.setWorkingStatusIndicator({
@@ -205,6 +158,7 @@ test("keeps a narrow scrolled working border intact", () => {
 });
 
 
+// Hardware cursor and fullscreen settings.
 test("uses the terminal hardware cursor for non-block styles", () => {
 	for (const [cursorStyle, sequence] of [
 		["bar", "\x1b[6 q"],
@@ -223,12 +177,7 @@ test("uses the terminal hardware cursor for non-block styles", () => {
 				hardwareCursor = enabled;
 			},
 		} as unknown as TUI;
-		const editor = createOpenTuiEditor(
-			hardwareTui,
-			editorTheme,
-			{ matches: () => false } as unknown as KeybindingsManager,
-			cursorStyle,
-		);
+		const editor = createOpenTuiEditor({ tui: hardwareTui, cursorStyle });
 
 		const lines = editor.render(40);
 
@@ -251,11 +200,7 @@ test("shows a hardware cursor while previewing a non-block style under an overla
 		showCursor: () => cursorEvents.push("show"),
 	} as unknown as Terminal;
 	const overlayTui = new TuiMainScreen(terminal, false);
-	const editor = createOpenTuiEditor(
-		overlayTui,
-		editorTheme,
-		{ matches: () => false } as unknown as KeybindingsManager,
-	);
+	const editor = createOpenTuiEditor({ tui: overlayTui });
 	overlayTui.addChild(editor);
 	overlayTui.setFocus(editor);
 	overlayTui.showOverlay({ render: () => ["settings"], invalidate() {} });
@@ -283,12 +228,7 @@ test("preserves block hardware cursor settings", () => {
 		setShowHardwareCursor: () => changes++,
 	} as unknown as TUI;
 
-	createOpenTuiEditor(
-		hardwareTui,
-		editorTheme,
-		{ matches: () => false } as unknown as KeybindingsManager,
-		"block",
-	);
+	createOpenTuiEditor({ tui: hardwareTui });
 
 	assert.equal(changes, 0);
 });
@@ -334,11 +274,9 @@ function createInnerEditor() {
 	return new CustomEditor(tui, editorTheme, { matches: () => false } as unknown as KeybindingsManager);
 }
 
-const mouseClick: TuiMouseEvent = {
-	type: "click", button: "left", x: 5, y: 1, screenX: 5, screenY: 1,
-	width: 40, height: 8, shift: false, alt: false, ctrl: false,
-};
+const mouseClick = mouseEvent("click", 5, 1, { height: 8 });
 
+// Editor factory composition, replacement, and cleanup.
 test("preserves editor identity, input and cleanup in either registration order", () => {
 	for (const openTuiFirst of [false, true]) {
 		const inner = createInnerEditor();
@@ -642,6 +580,7 @@ test("cleanup preserves later method and factory wrappers as passthroughs", () =
 	assert.doesNotMatch(stripAnsi(host.editor.render(40)[0] ?? ""), /^╭/);
 });
 
+// Custom layouts and frame integration.
 test("leaves custom layouts, mouse coordinates, padding and status capabilities intact", () => {
 	const widths: number[] = [];
 	let received: TuiMouseEvent | undefined;
@@ -843,11 +782,7 @@ test("frame recolors via borderColor (bash mode / thinking level hook)", () => {
 			return text;
 		},
 	} as EditorTheme;
-	const editor = createOpenTuiEditor(
-		tui,
-		theme,
-		{ matches: () => false } as unknown as KeybindingsManager,
-	);
+	const editor = createOpenTuiEditor({ theme });
 	editor.setText("hi");
 	editor.setWorkingStatusIndicator({
 		renderInBorder: () => "◐ working",
@@ -878,12 +813,7 @@ test("keeps a hardware cursor after Pi re-applies its runtime settings", () => {
 		showCursor: () => cursorEvents.push("show"),
 	} as unknown as Terminal;
 	const hostTui = new TuiMainScreen(terminal, false);
-	const editor = createOpenTuiEditor(
-		hostTui,
-		editorTheme,
-		{ matches: () => false } as unknown as KeybindingsManager,
-		"bar",
-	);
+	const editor = createOpenTuiEditor({ tui: hostTui, cursorStyle: "bar" });
 	hostTui.addChild(editor);
 	hostTui.setFocus(editor);
 
@@ -902,6 +832,7 @@ test("keeps a hardware cursor after Pi re-applies its runtime settings", () => {
 	hostTui.stop();
 });
 
+// Header layout and colors.
 function createHeader(accent = "\x1b[35m"): OpenTuiHeader {
 	return new OpenTuiHeader(
 		{
@@ -953,6 +884,7 @@ test("keeps the static seven-row logo shape, spacing, and per-cell theme colorin
 	}
 });
 
+// Stream-write contract and repaint cleanup.
 function fakeTtyStream(written: string[], isTTY = true) {
 	const write = (chunk: string, ...rest: unknown[]) => {
 		written.push(chunk);

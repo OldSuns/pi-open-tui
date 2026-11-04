@@ -14,6 +14,7 @@ import { sanitizeStatus } from "../extensions/open-tui/utils.ts";
 
 const glyphs = { thinking: "~", done: "+" } as IconGlyphs;
 
+// Content collection.
 test("collectPeekParts joins thinking and answer text, ignoring other parts", () => {
 	const parts = collectPeekParts([
 		{ type: "thinking", thinking: "alpha" },
@@ -41,19 +42,16 @@ test("collectPeekParts ignores non-string fields without coercing or throwing", 
 	);
 });
 
-test("peekTail shows the last logical line only", () => {
-	assert.equal(peekTail("first line\nsecond line here"), "second line here");
-});
-
-test("peekTail keeps the last two logical lines when requested", () => {
-	assert.equal(peekTail("first\nsecond\n\nthird", 2), "second\nthird");
-});
-
-test("peekTail trims and collapses whitespace", () => {
-	assert.equal(peekTail("  padded   text  \n"), "padded text");
-	assert.equal(peekTail("   "), "");
-	assert.equal(peekTail(""), "");
-});
+// Logical tails and display-width clipping.
+for (const [name, source, count, expected] of [
+	["last logical line", "first line\nsecond line here", 1, "second line here"],
+	["last two nonempty lines", "first\nsecond\n\nthird", 2, "second\nthird"],
+	["collapsed whitespace", "  padded   text  \n", 1, "padded text"],
+	["blank input", "   ", 1, ""],
+	["empty input", "", 1, ""],
+] as const) {
+	test(`peekTail: ${name}`, () => assert.equal(peekTail(source, count), expected));
+}
 
 test("peekTail keeps the full tail; width bounding is clipTail's job", () => {
 	assert.equal(peekTail("x".repeat(500)).length, 500);
@@ -71,19 +69,18 @@ test("clipTail truncates wide CJK text by visible width, not code points", () =>
 	assert.ok(visibleWidth(tail) <= 10);
 });
 
-test("clipTail returns text that already fits untouched", () => {
-	assert.equal(clipTail("short", 10), "short");
-	assert.equal(clipTail("思思", 4), "思思");
-	assert.equal(clipTail("\u200babc", 3), "\u200babc");
-	assert.equal(clipTail("\u200b思", 2), "\u200b思");
-});
-
-test("clipTail handles degenerate budgets", () => {
-	assert.equal(clipTail("abc", 0), "");
-	assert.equal(clipTail("abc", -5), "");
-	assert.equal(clipTail("", 5), "");
-	assert.equal(clipTail("abcdef", 1), "…");
-});
+for (const [name, source, budget, expected] of [
+	["fitting Latin text", "short", 10, "short"],
+	["fitting CJK text", "思思", 4, "思思"],
+	["zero-width prefix with Latin", "\u200babc", 3, "\u200babc"],
+	["zero-width prefix with CJK", "\u200b思", 2, "\u200b思"],
+	["zero budget", "abc", 0, ""],
+	["negative budget", "abc", -5, ""],
+	["empty input", "", 5, ""],
+	["ellipsis-only budget", "abcdef", 1, "…"],
+] as const) {
+	test(`clipTail: ${name}`, () => assert.equal(clipTail(source, budget), expected));
+}
 
 test("clipTail preserves complete graphemes at the tail boundary", () => {
 	for (const grapheme of ["😀", "👩‍💻", "e\u0301"]) {
@@ -93,6 +90,7 @@ test("clipTail preserves complete graphemes at the tail boundary", () => {
 	}
 });
 
+// Labels and streaming state transitions.
 test("buildPeekLabel renders each phase", () => {
 	const state = createPeekState();
 	assert.equal(buildPeekLabel(state, 0, glyphs, 80), "~ think ·");
