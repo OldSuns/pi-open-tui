@@ -22,8 +22,6 @@ const MIN_FRAME_WIDTH = 8;
 // Zero-width APC sequence: survives wrapping and padding, and marks the label column before we strip it.
 const MARKER_PREFIX = "\x1b_open-tui:cb:";
 const PATCH_KEY = Symbol.for("pi-open-tui.copy-buttons");
-// pi-pretty-tui draws its own code-block [Copy]; patching the same methods twice would fight.
-const PRETTY_TUI_KEY = Symbol.for("pretty-tui.code-blocks");
 // Pi only synthesizes `click` for a zero-movement release, so allow a little jitter.
 const RELEASE_TOLERANCE = 2;
 
@@ -104,7 +102,7 @@ export function markCopyScope(markdown: string, context: MarkdownTransformContex
 }
 
 /**
- * Rounded frame with the language and the label in the top border, like pi-pretty-tui:
+ * Rounded frame with the language and the label in the top border:
  * `╭─ ts ───── [Copy] ╮`. It replaces the two fence rows, so the block keeps its height.
  */
 export function renderFramedCode(
@@ -251,7 +249,7 @@ export function installCopyButtons(options: {
 		tui?.invalidate();
 		tui?.requestRender();
 	};
-	if (markdownProto[PATCH_KEY] || markdownProto[PRETTY_TUI_KEY]) return { cleanup: () => {}, refresh };
+	if (markdownProto[PATCH_KEY]) return { cleanup: () => {}, refresh };
 
 	if (typeof markdownProto.render !== "function" || typeof markdownProto.renderToken !== "function"
 		|| typeof markdownProto.invalidate !== "function" || typeof altScreenProto.handleMouseEvent !== "function"
@@ -260,7 +258,6 @@ export function installCopyButtons(options: {
 	}
 	let installed = true;
 	const active = () => installed && options.isEnabled() && options.getTui()?.mode === "fullscreen";
-	const codeActive = () => active() && !markdownProto[PRETTY_TUI_KEY];
 	let markdownRegions = new WeakMap<object, MarkdownState>();
 	let userRegions = new WeakMap<object, { region: CopyRegion; source: string; label: string; width: number; line: string }>();
 	const markerPrefix = `${MARKER_PREFIX}${randomUUID()}:`;
@@ -276,7 +273,6 @@ export function installCopyButtons(options: {
 
 	const originalRender = markdownProto.render;
 	const originalRenderToken = markdownProto.renderToken;
-	const originalInvalidate = markdownProto.invalidate;
 	const originalMarkdownMouse = markdownProto.handleMouse;
 	const originalUserRender = userProto.render;
 	const originalUserMouse = userProto.handleMouse;
@@ -288,7 +284,6 @@ export function installCopyButtons(options: {
 				press = undefined;
 				return originalAltScreenMouse.call(this, raw);
 			}
-			if (press?.owner instanceof Markdown && !codeActive()) press = undefined;
 			const motion = (raw.button & 32) !== 0;
 			if (!raw.release && !motion) press = undefined;
 			// Leave press/drag to Pi's selection; intercept only a qualifying release before copy-on-select runs.
@@ -327,16 +322,7 @@ export function installCopyButtons(options: {
 		}),
 		patch(markdownProto, "render", function (this: MarkdownInternals, width) {
 			if (!installed) return originalRender.call(this, width);
-			if (markdownProto[PRETTY_TUI_KEY]) {
-				if (markdownRegions.has(this)) {
-					// Clear our old pixels without deleting a later owner's in-progress collection.
-					originalInvalidate.call(this);
-					markdownRegions.delete(this);
-					cancelStalePress(this, []);
-				}
-				return originalRender.call(this, width);
-			}
-			const enabled = codeActive();
+			const enabled = active();
 			const previous = markdownRegions.get(this);
 			const state: MarkdownState = previous ?? { active: enabled, regions: [], descriptors: new Map(), nextId: 0 };
 			if (!previous) {
@@ -413,7 +399,7 @@ export function installCopyButtons(options: {
 			}
 		}),
 		patch(markdownProto, "handleMouse", function (this: MarkdownInternals, event) {
-			if (!codeActive()) {
+			if (!active()) {
 				cancelStalePress(this, []);
 				return originalMarkdownMouse?.call(this, event);
 			}
