@@ -814,6 +814,8 @@ test("word pairing stays in adjacent runs and falls back for unrelated or oversi
 	const unicode = prepareToolPreview("edit", "-1 const 标签 = '👩‍💻 old';\n+1 const 标签 = '👩‍💻 new';", "a.ts", piTheme)(100, "");
 	assert.match(stripAnsi(unicode[1]!), /👩‍💻 new/);
 	assert.ok(unicode[1]!.includes(`${strong}n`), "word offsets follow source units, not CJK/emoji display columns");
+	assert.ok(unicode[1]!.includes(`${strong}new${band(26, 55, 40)}`), "only the changed word gets the stronger background");
+	assert.ok(unicode[0]!.includes(`${band(124, 42, 48)}old${band(70, 30, 32)}`));
 	for (const count of [16, 17, 24, 25]) {
 		const rows = prepareToolPreview("edit", Array.from({ length: count }, (_, i) => `+${i + 1} value`).join("\n"), "a.txt", piTheme)(80, "");
 		assert.equal(rows.length, count === 16 ? 16 : 17);
@@ -840,6 +842,51 @@ test("word pairing stays in adjacent runs and falls back for unrelated or oversi
 	assert.match(plain(rows).at(-1)!, /\+24 lines/);
 	for (const invalid of ["", "not a diff", "+no number", " 1 only context", "-1 valid\nmalformed"]) {
 		assert.deepEqual(prepareToolPreview("edit", invalid, "a.ts", piTheme)(80, ""), []);
+	}
+});
+
+test("short word diffs preserve exact bands through the 512 source-unit boundary", () => {
+	for (const appearance of ["dark", "light"]) {
+		initTheme(appearance);
+		const added = appearance === "dark" ? band(26, 55, 40) : band(229, 245, 232);
+		const addedWord = appearance === "dark" ? band(32, 96, 59) : band(174, 226, 185);
+		const removed = appearance === "dark" ? band(70, 30, 32) : band(255, 230, 230);
+		const removedWord = appearance === "dark" ? band(124, 42, 48) : band(255, 188, 188);
+		for (const length of [64, 512]) {
+			const oldText = "const 标签 = '👩‍💻 old'; const count = 1;".padEnd(length, " ");
+			const newText = "const 标签 = '👩‍💻 new'; const count = 2;".padEnd(length, " ");
+			assert.equal(oldText.length, length);
+			assert.equal(newText.length, length);
+			const rows = prepareToolPreview("edit", `-1 ${oldText}\n+1 ${newText}`, "plain.unknown", piTheme)(600, "");
+			assert.ok(stripAnsi(rows[0]!).startsWith(`-1 ${oldText}`));
+			assert.ok(stripAnsi(rows[1]!).startsWith(`+1 ${newText}`));
+			assert.ok(rows[0]!.includes(`${removedWord}old${removed}`));
+			assert.ok(rows[0]!.includes(`${removedWord}1${removed}`));
+			assert.ok(rows[1]!.includes(`${addedWord}new${added}`));
+			assert.ok(rows[1]!.includes(`${addedWord}2${added}`));
+		}
+	}
+});
+
+test("short word diffs fall back when their edit distance exceeds 256", () => {
+	initTheme("dark");
+	const shared = `标签 👩‍💻 ${"x".repeat(170)} `;
+	for (const count of [128, 129]) {
+		const oldText = shared + "!".repeat(count) + ";";
+		const newText = shared + "#".repeat(count) + ";";
+		assert.ok(Math.max(oldText.length, newText.length) <= 512);
+		const rows = prepareToolPreview("edit", `-1 ${oldText}\n+1 ${newText}`, "plain.unknown", piTheme)(600, "");
+		assert.ok(stripAnsi(rows[0]!).startsWith(`-1 ${oldText}`));
+		assert.ok(stripAnsi(rows[1]!).startsWith(`+1 ${newText}`));
+		assert.ok(rows[0]!.includes(band(70, 30, 32)));
+		assert.ok(rows[1]!.includes(band(26, 55, 40)));
+		if (count === 128) {
+			assert.ok(rows[0]!.includes(`${band(124, 42, 48)}${"!".repeat(count)}${band(70, 30, 32)}`));
+			assert.ok(rows[1]!.includes(`${band(32, 96, 59)}${"#".repeat(count)}${band(26, 55, 40)}`));
+		} else {
+			assert.ok(!rows[0]!.includes(band(124, 42, 48)));
+			assert.ok(!rows[1]!.includes(band(32, 96, 59)));
+		}
 	}
 });
 

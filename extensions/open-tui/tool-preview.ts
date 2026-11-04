@@ -6,6 +6,7 @@ import { stripAnsi } from "./utils.ts";
 const MAX_PREVIEW_LINES = 16;
 const MAX_HIGHLIGHT_CHARS = 16_384;
 const MAX_WORD_CHARS = 4_096;
+const MAX_DETERMINISTIC_WORD_CHARS = 512;
 const SGR = /\x1b\[([\d;]*)m/g;
 
 type Span = { start: number; end: number };
@@ -42,8 +43,13 @@ function parseDiff(source: string): PreviewLine[] {
 }
 
 function changedWords(oldLine: PreviewLine, newLine: PreviewLine): void {
-	if (Math.max(oldLine.text.length, newLine.text.length) > MAX_WORD_CHARS) return;
-	const changes = diffWordsWithSpace(oldLine.text, newLine.text, { timeout: 5, maxEditLength: 256 });
+	const chars = Math.max(oldLine.text.length, newLine.text.length);
+	if (chars > MAX_WORD_CHARS) return;
+	// Short lines have bounded input and edit distance, so scheduling cannot abort their diff.
+	const options = chars <= MAX_DETERMINISTIC_WORD_CHARS
+		? { maxEditLength: 256 }
+		: { timeout: 5, maxEditLength: 256 };
+	const changes = diffWordsWithSpace(oldLine.text, newLine.text, options);
 	if (!changes) return;
 	const shared = changes.filter((part) => !part.added && !part.removed)
 		.reduce((count, part) => count + part.value.replace(/\s/g, "").length, 0);
