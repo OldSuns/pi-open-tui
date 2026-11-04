@@ -37,6 +37,7 @@ interface RowState {
 	callCard?: Box;
 	callCardBottom?: Spacer;
 	resultCard?: Box;
+	hasResult?: boolean;
 	startedAt?: number;
 	pulse?: ReturnType<typeof setInterval>;
 	pulseBright?: boolean;
@@ -264,11 +265,15 @@ export function summarizeGeneric(result: ToolResult, duration = ""): string {
 	const body = textOutput(result).split("\n").filter((line) => line.trim());
 	const images = result.content.filter((block) => block.type === "image").length;
 	const head = sanitizeStatus((body[0] ?? "").replace(/^#+\s+/, ""));
+	const info = truncation(result);
+	const totalLines = info.truncated && typeof info.totalLines === "number"
+		&& Number.isSafeInteger(info.totalLines) && info.totalLines >= body.length
+		? info.totalLines : body.length;
 	const counts = [
-		...(body.length ? [plural(truncation(result).totalLines ?? body.length, "line")] : []),
+		...(totalLines ? [plural(totalLines, "line")] : []),
 		...(images ? [plural(images, "image")] : []),
 	].join(" · ");
-	return (counts || "Done") + incomplete(result) + duration + (head ? ` · ${head}` : "");
+	return (counts || "Done") + (info.truncated ? " · truncated" : "") + duration + (head ? ` · ${head}` : "");
 }
 
 /**
@@ -341,9 +346,9 @@ function genericCall(toolName: string, args: unknown, theme: Theme): Component {
 	const entries = typeof args === "object" && args !== null ? Object.entries(args) : [];
 	const rows = entries.map(([key, value]) => {
 		const shown = typeof value === "string" ? value : JSON.stringify(value, null, 2) ?? String(value);
-		return `  ${key}: ${cleanOutput(shown).replace(/\t/g, "   ").split("\n").join("\n    ")}`;
+		return `  ${sanitizeStatus(key)}: ${cleanOutput(shown).replace(/\t/g, "   ").split("\n").join("\n    ")}`;
 	});
-	const title = theme.fg("toolTitle", theme.bold(toolName));
+	const title = theme.fg("toolTitle", theme.bold(sanitizeStatus(toolName)));
 	return new Text(rows.length ? `${title}\n${theme.fg("muted", rows.join("\n"))}` : title, 0, 0);
 }
 
@@ -357,7 +362,8 @@ function genericResult(result: ToolResult, theme: Theme, context: RenderContext)
 
 /**
  * `generic` is for tools other than Pi's own built-ins: their output format and renderers are
- * unknown, so summaries parse nothing and native renderers run only once a row is expanded.
+ * unknown. Native renderers start on expansion; after collapse they still receive completion
+ * and error updates, but skip hidden progress.
  */
 export function createCompactRenderers(
 	toolName: string,
@@ -366,8 +372,8 @@ export function createCompactRenderers(
 	running?: Map<string, RowState | undefined>,
 	generic = false,
 ): ToolRenderers {
-	const label = TOOL_LABELS[toolName] ?? toolName;
-	const isShell = toolName === "bash" || toolName === "powershell";
+	const label = Object.hasOwn(TOOL_LABELS, toolName) ? TOOL_LABELS[toolName]! : sanitizeStatus(toolName);
+	const isShell = !generic && (toolName === "bash" || toolName === "powershell");
 	const nativeShell = native?.renderShell;
 	const renderNativeCall: RenderCall | undefined = native?.renderCall
 		?? (generic ? (args, theme) => genericCall(toolName, args, theme) : undefined);
@@ -423,14 +429,24 @@ export function createCompactRenderers(
 			const callArgs = (args ?? {}) as Args;
 			const detail = sanitizeStatus(generic ? genericDetail(callArgs, context.cwd) : callDetail(toolName, callArgs, context.cwd));
 			const pad = " ".repeat(context.outputPad);
-			return lines((_width, icons) => [
-				pad + theme.fg(color, icons.toolCall) + " " + theme.fg(titleColor, titleColor === "dim" ? label : theme.bold(label))
-					+ (detail ? theme.fg(context.isPartial || context.isError ? "muted" : "dim", `(${detail})`) : ""),
-			], theme, glyphs, !context.isPartial);
+			return lines((_width, icons) => {
+				const call = pad + theme.fg(color, icons.toolCall) + " " + theme.fg(titleColor, titleColor === "dim" ? label : theme.bold(label))
+					+ (detail ? theme.fg(context.isPartial || context.isError ? "muted" : "dim", `(${detail})`) : "");
+				// Pi does not call renderResult until the tool provides its first result.
+				// Read the shared flag during rendering, after both slots have been prepared.
+				if (generic && live && !row.hasResult) {
+					const elapsed = row.startedAt === undefined ? "" : ` ${formatElapsed(Date.now() - row.startedAt)}`;
+					const gutter = `${pad}  ${theme.fg("dim", icons.toolResult)}  `;
+					return [call, gutter + theme.fg("warning", `Running…${elapsed}`)];
+				}
+				return [call];
+			}, theme, glyphs, !context.isPartial);
 		},
 
 		renderResult(result, options, theme, context) {
 			const row = rowState(context);
+			row.hasResult = true;
+			const partial = options.isPartial && !context.isError;
 			if (!options.isPartial || context.isError) stopPulse(row);
 			if (!generic || context.expanded || feedCollapsedNative(row, options.isPartial, context.isError)) {
 				row.nativeResult = renderNativeResult?.(result, options, theme, nativeContext(context, row, row.nativeResult));
@@ -458,14 +474,14 @@ export function createCompactRenderers(
 			}
 			const timed = isShell || generic;
 			const duration = timed && context.durationMs !== undefined ? ` · ${formatElapsed(context.durationMs)}` : "";
-			const summary = options.isPartial ? "" : context.isError
+			const summary = partial ? "" : context.isError
 				? summarizeError(generic ? "" : toolName, result, duration)
 				: generic ? summarizeGeneric(result, duration) : summarizeResult(toolName, result, args) + duration;
-			const tail = options.isPartial && isShell ? tailLines(textOutput(result), LIVE_TAIL_LINES) : [];
+			const tail = partial && isShell ? tailLines(textOutput(result), LIVE_TAIL_LINES) : [];
 			return lines((width, { toolResult }) => {
 				const gutter = `${pad}  ${theme.fg("dim", toolResult)}  `;
 				const indent = `${pad}  ${" ".repeat(visibleWidth(toolResult))}  `;
-				if (options.isPartial) {
+				if (partial) {
 					if (!timed) return [gutter + theme.fg("warning", "Running…")];
 					const elapsed = row.startedAt === undefined ? "" : ` ${formatElapsed(Date.now() - row.startedAt)}`;
 					return [...tail.map((line) => theme.fg("toolOutput", line)), theme.fg("warning", `Running…${elapsed}`)]
@@ -473,7 +489,7 @@ export function createCompactRenderers(
 				}
 				if (context.isError) return [gutter + theme.fg("error", summary)];
 				return [gutter + theme.fg("dim", summary), ...(row.preview?.render(width, indent) ?? [])];
-			}, theme, glyphs, !options.isPartial);
+			}, theme, glyphs, !partial);
 		},
 	};
 }
