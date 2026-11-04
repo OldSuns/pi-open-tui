@@ -23,7 +23,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { theme as piTheme } from "../node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/theme/theme.js";
 import { ToolExecutionComponent } from "../node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/components/tool-execution.js";
-import { backgroundAnsi, ProcessTerminal, rgbColor, TuiAltScreen, visibleWidth } from "@earendil-works/pi-tui";
+import { backgroundAnsi, getCapabilities, ProcessTerminal, resetCapabilitiesCache, rgbColor, setCapabilities, TuiAltScreen, visibleWidth } from "@earendil-works/pi-tui";
 import { codeLines, prepareToolPreview } from "../extensions/open-tui/tool-preview.ts";
 import { stripAnsi } from "../extensions/open-tui/utils.ts";
 import type { Component } from "@earendil-works/pi-tui";
@@ -477,6 +477,23 @@ test("tools without renderers expand into Pi's generic layout through the real c
 	assert.deepEqual(shown(), ["plain_tool", "query: q", "n: 1", "one   tab", "two"]);
 	row.setExpanded(false);
 	assert.deepEqual(shown(), ["● plain_tool(q)", "└  2 lines · one tab"]);
+});
+
+test("collapsed generic rows still show inline images because Pi draws them after self-rendered content", (t) => {
+	initTheme("dark");
+	setCapabilities({ ...getCapabilities(), images: "kitty" });
+	t.after(resetCapabilitiesCache);
+	const isImageLine = (line: string) => line.includes("\x1b_G");
+	// 1x1 PNG
+	const png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
+	const compact = createCompactRenderers("plain_tool", undefined, glyphs, undefined, true);
+	const row = new ToolExecutionComponent("plain_tool", "call-1", { query: "q" }, {}, compact as never, { requestRender() {} } as never, "/repo");
+	row.markExecutionStarted();
+	row.setArgsComplete();
+	row.updateResult({ content: [{ type: "image", data: png, mimeType: "image/png" }], details: undefined, isError: false }, false);
+	const lines = row.render(60);
+	assert.deepEqual(plain(lines.filter((line) => !isImageLine(line))).map((line) => line.trim()).filter(Boolean), ["● plain_tool(q)", "└  1 image"]);
+	assert.ok(lines.some(isImageLine), "Pi appends the image even though the row is collapsed");
 });
 
 test("collapsed rows are compact while native renderers keep their own state", () => {
