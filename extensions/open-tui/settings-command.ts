@@ -34,6 +34,7 @@ const COPY = {
 			copyButtons: "Copy buttons",
 			thinkingPeek: "Thinking peek",
 			toolView: "Tool view",
+			extensionTools: "Compact extension tools",
 			language: "Language",
 			cursorStyle: "Cursor style",
 			iconMode: "Icon mode",
@@ -77,6 +78,7 @@ const COPY = {
 			copyButtons: "复制按钮",
 			thinkingPeek: "思考预览",
 			toolView: "工具视图",
+			extensionTools: "紧凑显示扩展工具",
 			language: "语言",
 			cursorStyle: "光标样式",
 			iconMode: "图标模式",
@@ -175,6 +177,7 @@ function buildFeaturesItems(config: OpenTuiConfig, copy: SettingsCopy): SettingI
 		{ id: "inlineFooter", label: copy.labels.inlineFooter, currentValue: flag(config.inlineFooter) },
 		{ id: "copyButtons", label: copy.labels.copyButtons, currentValue: flag(config.copyButtons) },
 		{ id: "toolView", label: copy.labels.toolView, currentValue: copy.values.toolView[config.toolView.mode] },
+		{ id: "extensionTools", label: copy.labels.extensionTools, currentValue: flag(config.toolView.extensionTools) },
 	];
 }
 
@@ -243,7 +246,10 @@ function handleSettingChange(
 		if (itemId === "settingsLanguage") return toggleLanguage(config);
 		if (itemId === "thinkingPeek") return cycleThinkingPeek(config);
 		if (itemId === "toolView") {
-			return { ...config, toolView: { mode: config.toolView.mode === "native" ? "compact" : "native" } };
+			return { ...config, toolView: { ...config.toolView, mode: config.toolView.mode === "native" ? "compact" : "native" } };
+		}
+		if (itemId === "extensionTools") {
+			return { ...config, toolView: { ...config.toolView, extensionTools: !config.toolView.extensionTools } };
 		}
 	}
 	if (tab === "icons") {

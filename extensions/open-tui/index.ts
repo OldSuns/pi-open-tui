@@ -373,7 +373,7 @@ export default function (pi: ExtensionAPI) {
 				config = loadConfig();
 				configLoaded = true;
 			}
-			return config.enabled ? config.toolView.mode : "native";
+			return config.enabled ? config.toolView : { ...config.toolView, mode: "native" };
 		},
 		() => resolveGlyphs(config.icons.mode),
 	);
