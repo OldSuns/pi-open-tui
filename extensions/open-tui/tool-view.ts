@@ -1,6 +1,6 @@
 import { homedir } from "node:os";
 import { isAbsolute, relative, sep } from "node:path";
-import type { ExtensionAPI, Theme, ThemeColor, ToolRenderers } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, SourceInfo, Theme, ThemeColor, ToolRenderers } from "@earendil-works/pi-coding-agent";
 import { Box, type Component, getCapabilities, getImageDimensions, imageFallback, Spacer, Text, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import type { ToolViewConfig } from "./config.ts";
 import type { IconGlyphs } from "./icons.ts";
@@ -28,6 +28,11 @@ const LIVE_TAIL_LINES = 3;
 const GENERIC_DETAIL_KEYS = ["command", "query", "sql", "pattern", "prompt", "task", "url", "path", "file_path"];
 const GENERIC_DETAIL_ARGS = 3;
 const GENERIC_DETAIL_VALUE_CHARS = 80;
+const FFF_TOOLS = new Map<string, "grep" | "find">([
+	["ffgrep", "grep"], ["grep", "grep"],
+	["fffind", "find"], ["find", "find"],
+	["fff-multi-grep", "grep"], ["multi_grep", "grep"],
+]);
 
 /** Per-row slots: Pi's native renderers keep their own state and components here. */
 interface RowState {
@@ -276,6 +281,56 @@ export function summarizeGeneric(result: ToolResult, duration = ""): string {
 	return (counts || "Done") + (info.truncated ? " · truncated" : "") + duration + (head ? ` · ${head}` : "");
 }
 
+/** FFF's grep count belongs to this page; find's count covers all matching files. */
+function summarizeFff(kind: "grep" | "find", result: ToolResult, duration = ""): string {
+	const info = details(result);
+	const matched = info.totalMatched;
+	if (typeof matched !== "number" || !Number.isSafeInteger(matched) || matched < 0
+		|| result.content.some((block) => block.type === "image")) return summarizeGeneric(result, duration);
+	const output = textOutput(result).trim();
+	const footer = /\n\n\[(Invalid regex: [\s\S]+, used literal match(?:\. Continue with cursor="fff_c\d+")?|[^\n]+)\]$/.exec(output);
+	const body = footer ? output.slice(0, footer.index) : output;
+	// FFF also returns zero counts for its wildcard guard; keep that explanation first.
+	if (matched === 0 && body !== (kind === "grep" ? "No matches found" : "No files found matching pattern")) {
+		return summarizeGeneric(result, duration);
+	}
+	const notice = footer?.[1] ?? "";
+	const fuzzy = kind === "grep" && output.startsWith("[0 exact matches. Maybe you meant this?]\n");
+	const literal = kind === "grep" && /^Invalid regex: [\s\S]+, used literal match(?:\. Continue with cursor="fff_c\d+")?$/.test(notice);
+	let more: boolean;
+	let weak: RegExpExecArray | null = null;
+	if (kind === "find") {
+		if (typeof info.hasMore !== "boolean" || typeof info.pageIndex !== "number"
+			|| !Number.isSafeInteger(info.pageIndex) || info.pageIndex < 0) return summarizeGeneric(result, duration);
+		// Weak fuzzy results can have hasMore=true while FFF intentionally provides no cursor.
+		weak = /^Query "[^\n]*" produced only weak scattered fuzzy matches\. Output capped at (\d+)\/(\d+)\.$/.exec(notice);
+		if (weak && (Number(weak[2]) !== matched || Number(weak[1]) > matched)) return summarizeGeneric(result, duration);
+		more = info.hasMore && /^\d+ more match(?:es)? available\. cursor="\d+" to continue$/.test(notice);
+		if (info.hasMore && !more && !weak) return summarizeGeneric(result, duration);
+	} else {
+		more = /(?:^|\. )(?:Continue with cursor="fff_c\d+"|More available\. cursor="fff_c\d+" to continue)$/.test(notice);
+	}
+	const matchType = fuzzy ? "fuzzy " : literal ? "literal " : "";
+	const count = kind === "find" ? `${plural(matched, "file")} matched`
+		: `${plural(matched, `${matchType}match`, `${matchType}matches`)} on this page`;
+	const head = sanitizeStatus(output.split("\n")[fuzzy ? 1 : 0] ?? "");
+	return count + (more ? " · more available" : "")
+		+ (literal ? " · regex fallback" : "")
+		+ (weak ? " · weak matches" + (Number(weak[1]) < matched ? " · capped" : "") : "")
+		+ (truncation(result).truncated ? " · truncated" : "")
+		+ duration + (head ? ` · ${head}` : "");
+}
+
+/** Match the package source or its installed entry point, never a tool name alone. */
+function fffKind(toolName: string, sourceInfo: SourceInfo | undefined): "grep" | "find" | undefined {
+	const kind = FFF_TOOLS.get(toolName);
+	if (!kind || !sourceInfo) return undefined;
+	const source = sourceInfo.source;
+	const path = sourceInfo.path.replace(/\\/g, "/");
+	return source === "npm:@ff-labs/pi-fff" || source.startsWith("npm:@ff-labs/pi-fff@")
+		|| /(?:^|\/)node_modules\/@ff-labs\/pi-fff\/src\/index\.ts$/.test(path) ? kind : undefined;
+}
+
 /**
  * One-line summary for a failed call: the shell's closing status plus its last output line,
  * otherwise the error's first line.
@@ -362,8 +417,8 @@ function genericResult(result: ToolResult, theme: Theme, context: RenderContext)
 
 /**
  * `generic` is for tools other than Pi's own built-ins: their output format and renderers are
- * unknown. Native renderers start on expansion; after collapse they still receive completion
- * and error updates, but skip hidden progress.
+ * unknown. A known extension can supply its own summary. Native renderers start on expansion;
+ * after collapse they still receive completion and error updates, but skip hidden progress.
  */
 export function createCompactRenderers(
 	toolName: string,
@@ -371,6 +426,7 @@ export function createCompactRenderers(
 	glyphs: () => IconGlyphs,
 	running?: Map<string, RowState | undefined>,
 	generic = false,
+	summarizeExtension = summarizeGeneric,
 ): ToolRenderers {
 	const label = Object.hasOwn(TOOL_LABELS, toolName) ? TOOL_LABELS[toolName]! : sanitizeStatus(toolName);
 	const isShell = !generic && (toolName === "bash" || toolName === "powershell");
@@ -476,7 +532,7 @@ export function createCompactRenderers(
 			const duration = timed && context.durationMs !== undefined ? ` · ${formatElapsed(context.durationMs)}` : "";
 			const summary = partial ? "" : context.isError
 				? summarizeError(generic ? "" : toolName, result, duration)
-				: generic ? summarizeGeneric(result, duration) : summarizeResult(toolName, result, args) + duration;
+				: generic ? summarizeExtension(result, duration) : summarizeResult(toolName, result, args) + duration;
 			const tail = partial && isShell ? tailLines(textOutput(result), LIVE_TAIL_LINES) : [];
 			return lines((width, { toolResult }) => {
 				const gutter = `${pad}  ${theme.fg("dim", toolResult)}  `;
@@ -516,9 +572,13 @@ export function registerToolView(pi: ExtensionAPI, getView: () => ToolViewConfig
 		const native = next();
 		const view = getView();
 		if (view.mode !== "compact" || view.exclude.includes(toolName)) return native;
-		const builtin = OWNED_TOOLS.has(toolName)
-			&& pi.getAllTools().find((tool) => tool.name === toolName)?.sourceInfo?.source === "builtin";
+		const sourceInfo = OWNED_TOOLS.has(toolName) || view.extensionTools && FFF_TOOLS.has(toolName)
+			? pi.getAllTools().find((tool) => tool.name === toolName)?.sourceInfo : undefined;
+		const builtin = OWNED_TOOLS.has(toolName) && sourceInfo?.source === "builtin";
 		if (builtin) return native && createCompactRenderers(toolName, native, glyphs, running);
-		return view.extensionTools ? createCompactRenderers(toolName, native, glyphs, running, true) : native;
+		if (!view.extensionTools) return native;
+		const fff = fffKind(toolName, sourceInfo);
+		return createCompactRenderers(toolName, native, glyphs, running, true,
+			fff ? (result, duration) => summarizeFff(fff, result, duration) : summarizeGeneric);
 	});
 }
