@@ -41,6 +41,14 @@ export interface ThinkingPeekConfig {
 	lines: ThinkingPeekLines;
 }
 
+export interface ToolViewConfig {
+	mode: ToolViewMode;
+	/** In compact mode, also collapse tools that are not Pi's own built-ins. */
+	extensionTools: boolean;
+	/** Tool names that always keep their native rendering. */
+	exclude: string[];
+}
+
 export interface OpenTuiConfig {
 	enabled: boolean;
 	/** Override Pi's header with the open-tui header. When false, the header slot is left to Pi or another extension. */
@@ -56,9 +64,7 @@ export interface OpenTuiConfig {
 	footerSegments: FooterSegments;
 	telemetry: TelemetryConfig;
 	thinkingPeek: ThinkingPeekConfig;
-	toolView: {
-		mode: ToolViewMode;
-	};
+	toolView: ToolViewConfig;
 }
 
 export const DEFAULT_CONFIG: OpenTuiConfig = {
@@ -101,6 +107,8 @@ export const DEFAULT_CONFIG: OpenTuiConfig = {
 	},
 	toolView: {
 		mode: "native",
+		extensionTools: false,
+		exclude: [],
 	},
 };
 
@@ -111,6 +119,17 @@ export function getConfigPath(): string {
 
 function normalizeThinkingPeekLines(value: unknown): ThinkingPeekLines {
 	return value === 0 || value === 1 || value === 2 ? value : DEFAULT_CONFIG.thinkingPeek.lines;
+}
+
+function normalizeToolView(value: unknown): ToolViewConfig {
+	const source = typeof value === "object" && value !== null && !Array.isArray(value)
+		? (value as Partial<Record<keyof ToolViewConfig, unknown>>)
+		: {};
+	return {
+		mode: source.mode === "compact" ? "compact" : DEFAULT_CONFIG.toolView.mode,
+		extensionTools: source.extensionTools === true,
+		exclude: Array.isArray(source.exclude) ? source.exclude.filter((name): name is string => typeof name === "string") : [],
+	};
 }
 
 const ICON_MODES: IconMode[] = ["auto", "nerd", "unicode", "ascii"];
@@ -198,10 +217,7 @@ export function loadConfig(notify?: (msg: string, level: "warning" | "info") => 
 		} else {
 			config.thinkingPeek.lines = normalizeThinkingPeekLines(config.thinkingPeek.lines);
 		}
-		if (typeof config.toolView !== "object" || config.toolView === null
-			|| (config.toolView.mode !== "native" && config.toolView.mode !== "compact")) {
-			config.toolView = structuredClone(DEFAULT_CONFIG.toolView);
-		}
+		config.toolView = normalizeToolView(config.toolView);
 		return config;
 	} catch (err) {
 		notify?.(`open-tui config parse error: ${err instanceof Error ? err.message : String(err)}`, "warning");

@@ -302,6 +302,21 @@ test("toggles copy buttons from General settings", async () => {
 	assert.equal(settings.getConfig().copyButtons, false);
 });
 
+test("toggling tool view settings keeps the other tool view options", async () => {
+	const config = structuredClone(DEFAULT_CONFIG);
+	config.toolView.exclude = ["subagent_wait"];
+	const settings = await openSettings(config);
+	// Enabled → Header → Language → Thinking peek → Footer in editor border → Copy buttons → Tool view
+	for (let i = 0; i < 6; i++) settings.component.handleInput("\x1b[B");
+	assert.match(selectedLine(settings.component), /Tool view/);
+	settings.component.handleInput(" ");
+	settings.component.handleInput("\x1b[B");
+	assert.match(selectedLine(settings.component), /Compact extension tools/);
+	settings.component.handleInput(" ");
+	assert.equal(settings.getConfig().toolView.extensionTools, true);
+	assert.deepEqual(settings.getConfig().toolView, { mode: "compact", extensionTools: true, exclude: ["subagent_wait"] });
+});
+
 test("toggles the header without resetting a disabled slot and warns when persistence fails", async (t) => {
 	const agentDir = temporaryDirectory(t, "pi-open-tui-");
 	preserveEnvironment(t, ["PI_CODING_AGENT_DIR"]);
@@ -466,7 +481,7 @@ test("normalizes invalid settings values", (t) => {
 		inlineFooter: "yes",
 		copyButtons: "no",
 		thinkingPeek: { lines: 9 },
-		toolView: { mode: "hidden" },
+		toolView: { mode: "hidden", extensionTools: "yes", exclude: ["keep", 1, null] },
 		fullscreen: { wheelScrollLines: 10 },
 	}), "utf8");
 	const loaded = loadConfig();
@@ -476,7 +491,7 @@ test("normalizes invalid settings values", (t) => {
 	assert.equal(loaded.inlineFooter, false);
 	assert.equal(loaded.copyButtons, true);
 	assert.equal(loaded.thinkingPeek.lines, 1);
-	assert.equal(loaded.toolView.mode, "native");
+	assert.deepEqual(loaded.toolView, { mode: "native", extensionTools: false, exclude: ["keep"] });
 	assert.equal("fullscreen" in loaded, true);
 });
 

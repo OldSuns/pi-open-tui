@@ -1,8 +1,8 @@
 import { homedir } from "node:os";
 import { isAbsolute, relative, sep } from "node:path";
-import type { ExtensionAPI, Theme, ThemeColor, ToolRenderers } from "@earendil-works/pi-coding-agent";
-import { Box, type Component, Spacer, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
-import type { ToolViewMode } from "./config.ts";
+import type { ExtensionAPI, SourceInfo, Theme, ThemeColor, ToolRenderers } from "@earendil-works/pi-coding-agent";
+import { Box, type Component, getCapabilities, getImageDimensions, imageFallback, Spacer, Text, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import type { ToolViewConfig } from "./config.ts";
 import type { IconGlyphs } from "./icons.ts";
 import { codeLines, prepareToolPreview } from "./tool-preview.ts";
 import { sanitizeStatus, stripAnsi } from "./utils.ts";
@@ -24,6 +24,15 @@ const TOOL_LABELS: Record<string, string> = {
 	ls: "LS",
 };
 const LIVE_TAIL_LINES = 3;
+/** Arguments that best identify a call to a tool this view knows nothing else about. */
+const GENERIC_DETAIL_KEYS = ["command", "query", "sql", "pattern", "prompt", "task", "url", "path", "file_path"];
+const GENERIC_DETAIL_ARGS = 3;
+const GENERIC_DETAIL_VALUE_CHARS = 80;
+const FFF_TOOLS = new Map<string, "grep" | "find">([
+	["ffgrep", "grep"], ["grep", "grep"],
+	["fffind", "find"], ["find", "find"],
+	["fff-multi-grep", "grep"], ["multi_grep", "grep"],
+]);
 
 /** Per-row slots: Pi's native renderers keep their own state and components here. */
 interface RowState {
@@ -33,6 +42,7 @@ interface RowState {
 	callCard?: Box;
 	callCardBottom?: Spacer;
 	resultCard?: Box;
+	hasResult?: boolean;
 	startedAt?: number;
 	pulse?: ReturnType<typeof setInterval>;
 	pulseBright?: boolean;
@@ -165,6 +175,23 @@ export function callDetail(toolName: string, args: Args, cwd: string): string {
 	}
 }
 
+/** `Tool(...)` for tools with unknown arguments: the most identifying one, else the first few as `key=value`. */
+export function genericDetail(args: Args, cwd: string): string {
+	for (const key of GENERIC_DETAIL_KEYS) {
+		const value = args[key];
+		if (typeof value !== "string" || !value.trim()) continue;
+		return key === "path" || key === "file_path" ? displayPath(value, cwd) : firstLine(value);
+	}
+	return Object.entries(args)
+		.filter(([, value]) => value !== undefined && value !== null)
+		.slice(0, GENERIC_DETAIL_ARGS)
+		.map(([key, value]) => {
+			const shown = typeof value === "string" ? firstLine(value) : JSON.stringify(value) ?? String(value);
+			return `${key}=${shown.slice(0, GENERIC_DETAIL_VALUE_CHARS)}`;
+		})
+		.join(", ");
+}
+
 function details(result: ToolResult): Record<string, unknown> {
 	const value: unknown = result.details;
 	return typeof value === "object" && value !== null ? (value as Record<string, unknown>) : {};
@@ -236,6 +263,77 @@ export function summarizeResult(toolName: string, result: ToolResult, args: Args
 }
 
 /**
+ * One-line summary for a tool whose output format is unknown, so nothing is parsed out of it.
+ * The first line goes last so narrow rows cut it before the counts and duration.
+ */
+export function summarizeGeneric(result: ToolResult, duration = ""): string {
+	const body = textOutput(result).split("\n").filter((line) => line.trim());
+	const images = result.content.filter((block) => block.type === "image").length;
+	const head = sanitizeStatus((body[0] ?? "").replace(/^#+\s+/, ""));
+	const info = truncation(result);
+	const totalLines = info.truncated && typeof info.totalLines === "number"
+		&& Number.isSafeInteger(info.totalLines) && info.totalLines >= body.length
+		? info.totalLines : body.length;
+	const counts = [
+		...(totalLines ? [plural(totalLines, "line")] : []),
+		...(images ? [plural(images, "image")] : []),
+	].join(" · ");
+	return (counts || "Done") + (info.truncated ? " · truncated" : "") + duration + (head ? ` · ${head}` : "");
+}
+
+/** FFF's grep count belongs to this page; find's count covers all matching files. */
+function summarizeFff(kind: "grep" | "find", result: ToolResult, duration = ""): string {
+	const info = details(result);
+	const matched = info.totalMatched;
+	if (typeof matched !== "number" || !Number.isSafeInteger(matched) || matched < 0
+		|| result.content.some((block) => block.type === "image")) return summarizeGeneric(result, duration);
+	const output = textOutput(result).trim();
+	const footer = /\n\n\[(Invalid regex: [\s\S]+, used literal match(?:\. Continue with cursor="fff_c\d+")?|[^\n]+)\]$/.exec(output);
+	const body = footer ? output.slice(0, footer.index) : output;
+	// FFF also returns zero counts for its wildcard guard; keep that explanation first.
+	if (matched === 0 && body !== (kind === "grep" ? "No matches found" : "No files found matching pattern")) {
+		return summarizeGeneric(result, duration);
+	}
+	const notice = footer?.[1] ?? "";
+	const fuzzy = kind === "grep" && output.startsWith("[0 exact matches. Maybe you meant this?]\n");
+	const literal = kind === "grep" && /^Invalid regex: [\s\S]+, used literal match(?:\. Continue with cursor="fff_c\d+")?$/.test(notice);
+	let more: boolean;
+	let weak: RegExpExecArray | null = null;
+	if (kind === "find") {
+		if (typeof info.hasMore !== "boolean" || typeof info.pageIndex !== "number"
+			|| !Number.isSafeInteger(info.pageIndex) || info.pageIndex < 0) return summarizeGeneric(result, duration);
+		// Weak fuzzy results can have hasMore=true while FFF intentionally provides no cursor.
+		weak = /^Query "[^\n]*" produced only weak scattered fuzzy matches\. Output capped at (\d+)\/(\d+)\.$/.exec(notice);
+		if (weak && (Number(weak[2]) !== matched || Number(weak[1]) > matched)) return summarizeGeneric(result, duration);
+		more = info.hasMore && /^\d+ more match(?:es)? available\. cursor="\d+" to continue$/.test(notice);
+		if (info.hasMore && !more && !weak) return summarizeGeneric(result, duration);
+	} else {
+		more = /(?:^|\. )(?:Continue with cursor="fff_c\d+"|More available\. cursor="fff_c\d+" to continue)$/.test(notice);
+	}
+	const matchType = fuzzy ? "fuzzy " : literal ? "literal " : "";
+	const count = kind === "find" ? `${plural(matched, "file")} matched`
+		: `${plural(matched, `${matchType}match`, `${matchType}matches`)} on this page`;
+	const head = sanitizeStatus(output.split("\n")[fuzzy ? 1 : 0] ?? "");
+	return count + (more ? " · more available" : "")
+		+ (literal ? " · regex fallback" : "")
+		+ (weak ? " · weak matches" + (Number(weak[1]) < matched ? " · capped" : "") : "")
+		+ (truncation(result).truncated ? " · truncated" : "")
+		+ duration + (head ? ` · ${head}` : "");
+}
+
+/** Match npm provenance, its installed entry point, or the official git source and entry point. */
+export function fffKind(toolName: string, sourceInfo: SourceInfo | undefined): "grep" | "find" | undefined {
+	const kind = FFF_TOOLS.get(toolName);
+	if (!kind || !sourceInfo) return undefined;
+	const source = sourceInfo.source;
+	const path = sourceInfo.path.replace(/\\/g, "/");
+	const git = /^(?:git:)?(?:https?:\/\/github\.com\/|ssh:\/\/git@github\.com\/|git@github\.com:|github\.com\/)dmtrkovalenko\/fff(?:\.git)?(?:[@#][^\s]+)?$/i.test(source)
+		&& /(?:^|\/)packages\/pi-fff\/src\/index\.ts$/.test(path);
+	return source === "npm:@ff-labs/pi-fff" || source.startsWith("npm:@ff-labs/pi-fff@")
+		|| /(?:^|\/)node_modules\/@ff-labs\/pi-fff\/src\/index\.ts$/.test(path) || git ? kind : undefined;
+}
+
+/**
  * One-line summary for a failed call: the shell's closing status plus its last output line,
  * otherwise the error's first line.
  */
@@ -300,24 +398,58 @@ function stopPulse(row: RowState): void {
 	row.pulse = undefined;
 }
 
+/** Pi's expanded card for a tool without its own call renderer. */
+function genericCall(toolName: string, args: unknown, theme: Theme): Component {
+	const entries = typeof args === "object" && args !== null ? Object.entries(args) : [];
+	const rows = entries.map(([key, value]) => {
+		const shown = typeof value === "string" ? value : JSON.stringify(value, null, 2) ?? String(value);
+		return `  ${sanitizeStatus(key)}: ${cleanOutput(shown).replace(/\t/g, "   ").split("\n").join("\n    ")}`;
+	});
+	const title = theme.fg("toolTitle", theme.bold(sanitizeStatus(toolName)));
+	return new Text(rows.length ? `${title}\n${theme.fg("muted", rows.join("\n"))}` : title, 0, 0);
+}
+
+/** Pi's expanded card for a tool without its own result renderer. Pi still draws images it can show. */
+function genericResult(result: ToolResult, theme: Theme, context: RenderContext): Component {
+	const inline = getCapabilities().images && context.showImages;
+	const missing = inline ? [] : result.content.flatMap((block) => (block.type === "image" ? [imageFallback(block.mimeType, getImageDimensions(block.data, block.mimeType) ?? undefined)] : []));
+	const output = [textOutput(result).replace(/\t/g, "   "), ...missing].filter(Boolean).join("\n");
+	return new Text(output ? theme.fg("toolOutput", output) : "", 0, 0);
+}
+
+/**
+ * `generic` is for tools other than Pi's own built-ins: their output format and renderers are
+ * unknown. A known extension can supply its own summary. Native renderers start on expansion;
+ * after collapse they still receive completion and error updates, but skip hidden progress.
+ */
 export function createCompactRenderers(
 	toolName: string,
-	native: ToolRenderers,
+	native: ToolRenderers | undefined,
 	glyphs: () => IconGlyphs,
 	running?: Map<string, RowState | undefined>,
+	generic = false,
+	summarizeExtension = summarizeGeneric,
 ): ToolRenderers {
-	const label = TOOL_LABELS[toolName] ?? toolName;
-	const isShell = toolName === "bash" || toolName === "powershell";
+	const label = Object.hasOwn(TOOL_LABELS, toolName) ? TOOL_LABELS[toolName]! : sanitizeStatus(toolName);
+	const isShell = !generic && (toolName === "bash" || toolName === "powershell");
+	const nativeShell = native?.renderShell;
+	const renderNativeCall: RenderCall | undefined = native?.renderCall
+		?? (generic ? (args, theme) => genericCall(toolName, args, theme) : undefined);
+	const renderNativeResult: RenderResult | undefined = native?.renderResult
+		?? (generic ? (result, _options, theme, context) => genericResult(result, theme, context) : undefined);
 	// Expanded rows hand off to Pi's own card so nothing is hidden.
 	const showNative = (context: RenderContext) => context.expanded;
+	// A generic row that was expanded skips hidden progress but still sees the call finish, for a renderer's own timers.
+	const feedCollapsedNative = (row: RowState, isPartial: boolean, isError: boolean) =>
+		row.nativeCall !== undefined && (!isPartial || isError);
 
 	return {
 		renderShell: "self",
 		renderCall(args, theme, context) {
 			const row = rowState(context);
 			// Keep native timers/edit state current; write rebuilds its full highlight cache only on expansion.
-			if (toolName !== "write" || context.expanded) {
-				row.nativeCall = native.renderCall?.(args, theme, nativeContext(context, row, row.nativeCall));
+			if (context.expanded || (generic ? feedCollapsedNative(row, context.isPartial, context.isError) : toolName !== "write")) {
+				row.nativeCall = renderNativeCall?.(args, theme, nativeContext(context, row, row.nativeCall));
 			}
 			if (context.executionStarted) row.startedAt ??= Date.now();
 			const live = context.executionStarted && context.isPartial && !context.isError;
@@ -336,7 +468,7 @@ export function createCompactRenderers(
 				stopPulse(row);
 			}
 			if (showNative(context) && row.nativeCall) {
-				if (native.renderShell === "self") return row.nativeCall;
+				if (nativeShell === "self") return row.nativeCall;
 				// Recreate Pi's default card: top padding, call, then result (or bottom padding while pending).
 				row.callCard ??= new Box(context.outputPad, 0);
 				row.callCardBottom ??= new Spacer(1);
@@ -352,20 +484,33 @@ export function createCompactRenderers(
 				? live && row.pulseBright !== false ? "accent" : "dim"
 				: "success";
 			const titleColor = context.isPartial || context.isError ? "toolTitle" : "dim";
-			const detail = sanitizeStatus(callDetail(toolName, (args ?? {}) as Args, context.cwd));
+			const callArgs = (args ?? {}) as Args;
+			const detail = sanitizeStatus(generic ? genericDetail(callArgs, context.cwd) : callDetail(toolName, callArgs, context.cwd));
 			const pad = " ".repeat(context.outputPad);
-			return lines((_width, icons) => [
-				pad + theme.fg(color, icons.toolCall) + " " + theme.fg(titleColor, titleColor === "dim" ? label : theme.bold(label))
-					+ (detail ? theme.fg(context.isPartial || context.isError ? "muted" : "dim", `(${detail})`) : ""),
-			], theme, glyphs, !context.isPartial);
+			return lines((_width, icons) => {
+				const call = pad + theme.fg(color, icons.toolCall) + " " + theme.fg(titleColor, titleColor === "dim" ? label : theme.bold(label))
+					+ (detail ? theme.fg(context.isPartial || context.isError ? "muted" : "dim", `(${detail})`) : "");
+				// Pi does not call renderResult until the tool provides its first result.
+				// Read the shared flag during rendering, after both slots have been prepared.
+				if (generic && live && !row.hasResult) {
+					const elapsed = row.startedAt === undefined ? "" : ` ${formatElapsed(Date.now() - row.startedAt)}`;
+					const gutter = `${pad}  ${theme.fg("dim", icons.toolResult)}  `;
+					return [call, gutter + theme.fg("warning", `Running…${elapsed}`)];
+				}
+				return [call];
+			}, theme, glyphs, !context.isPartial);
 		},
 
 		renderResult(result, options, theme, context) {
 			const row = rowState(context);
+			row.hasResult = true;
+			const partial = options.isPartial && !context.isError;
 			if (!options.isPartial || context.isError) stopPulse(row);
-			row.nativeResult = native.renderResult?.(result, options, theme, nativeContext(context, row, row.nativeResult));
+			if (!generic || context.expanded || feedCollapsedNative(row, options.isPartial, context.isError)) {
+				row.nativeResult = renderNativeResult?.(result, options, theme, nativeContext(context, row, row.nativeResult));
+			}
 			if (showNative(context) && row.nativeResult) {
-				if (native.renderShell === "self") return row.nativeResult;
+				if (nativeShell === "self") return row.nativeResult;
 				// The result now closes the card, so the call card drops its pending bottom padding.
 				if (row.callCard && row.callCardBottom) row.callCard.removeChild(row.callCardBottom);
 				row.resultCard ??= new Box(context.outputPad, 0);
@@ -378,30 +523,31 @@ export function createCompactRenderers(
 			}
 			const pad = " ".repeat(context.outputPad);
 			const args = (context.args ?? {}) as Args;
-			if (!options.isPartial && !context.isError && (toolName === "edit" || toolName === "write")) {
+			if (!generic && !options.isPartial && !context.isError && (toolName === "edit" || toolName === "write")) {
 				const source = toolName === "edit" ? str(details(result).diff) : str(args.content);
 				const path = str(args.file_path ?? args.path);
 				if (!row.preview || row.preview.source !== source || row.preview.path !== path || row.preview.colors !== theme.colors) {
 					row.preview = { source, path, colors: theme.colors, render: prepareToolPreview(toolName, source, path, theme) };
 				}
 			}
-			const duration = isShell && context.durationMs !== undefined ? ` · ${formatElapsed(context.durationMs)}` : "";
-			const summary = options.isPartial ? "" : context.isError
-				? summarizeError(toolName, result, duration)
-				: summarizeResult(toolName, result, args) + duration;
-			const tail = options.isPartial && isShell ? tailLines(textOutput(result), LIVE_TAIL_LINES) : [];
+			const timed = isShell || generic;
+			const duration = timed && context.durationMs !== undefined ? ` · ${formatElapsed(context.durationMs)}` : "";
+			const summary = partial ? "" : context.isError
+				? summarizeError(generic ? "" : toolName, result, duration)
+				: generic ? summarizeExtension(result, duration) : summarizeResult(toolName, result, args) + duration;
+			const tail = partial && isShell ? tailLines(textOutput(result), LIVE_TAIL_LINES) : [];
 			return lines((width, { toolResult }) => {
 				const gutter = `${pad}  ${theme.fg("dim", toolResult)}  `;
 				const indent = `${pad}  ${" ".repeat(visibleWidth(toolResult))}  `;
-				if (options.isPartial) {
-					if (!isShell) return [gutter + theme.fg("warning", "Running…")];
+				if (partial) {
+					if (!timed) return [gutter + theme.fg("warning", "Running…")];
 					const elapsed = row.startedAt === undefined ? "" : ` ${formatElapsed(Date.now() - row.startedAt)}`;
 					return [...tail.map((line) => theme.fg("toolOutput", line)), theme.fg("warning", `Running…${elapsed}`)]
 						.map((line, index) => (index === 0 ? gutter : indent) + line);
 				}
 				if (context.isError) return [gutter + theme.fg("error", summary)];
 				return [gutter + theme.fg("dim", summary), ...(row.preview?.render(width, indent) ?? [])];
-			}, theme, glyphs, !options.isPartial);
+			}, theme, glyphs, !partial);
 		},
 	};
 }
@@ -409,10 +555,10 @@ export function createCompactRenderers(
 const OWNED_TOOLS = new Set(Object.keys(TOOL_LABELS));
 
 /**
- * Display-only: Pi's tools, execution, arguments and results are untouched. The mode is read
- * when Pi builds a row, so switching it affects new rows only.
+ * Display-only: Pi's tools, execution, arguments and results are untouched. The configuration is
+ * read when Pi builds a row, so changing it affects new rows only.
  */
-export function registerToolView(pi: ExtensionAPI, getMode: () => ToolViewMode, glyphs: () => IconGlyphs): void {
+export function registerToolView(pi: ExtensionAPI, getView: () => ToolViewConfig, glyphs: () => IconGlyphs): void {
 	const running = new Map<string, RowState | undefined>();
 	pi.on("tool_execution_start", (event) => { running.set(event.toolCallId, undefined); });
 	pi.on("tool_execution_end", (event) => {
@@ -426,8 +572,15 @@ export function registerToolView(pi: ExtensionAPI, getMode: () => ToolViewMode, 
 	});
 	pi.registerToolRenderer((toolName, next) => {
 		const native = next();
-		if (!native || !OWNED_TOOLS.has(toolName) || getMode() !== "compact") return native;
-		if (pi.getAllTools().find((tool) => tool.name === toolName)?.sourceInfo?.source !== "builtin") return native;
-		return createCompactRenderers(toolName, native, glyphs, running);
+		const view = getView();
+		if (view.mode !== "compact" || view.exclude.includes(toolName)) return native;
+		const sourceInfo = OWNED_TOOLS.has(toolName) || view.extensionTools && FFF_TOOLS.has(toolName)
+			? pi.getAllTools().find((tool) => tool.name === toolName)?.sourceInfo : undefined;
+		const builtin = OWNED_TOOLS.has(toolName) && sourceInfo?.source === "builtin";
+		if (builtin) return native && createCompactRenderers(toolName, native, glyphs, running);
+		if (!view.extensionTools) return native;
+		const fff = fffKind(toolName, sourceInfo);
+		return createCompactRenderers(toolName, native, glyphs, running, true,
+			fff ? (result, duration) => summarizeFff(fff, result, duration) : summarizeGeneric);
 	});
 }

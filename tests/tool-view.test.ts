@@ -7,6 +7,7 @@ import {
 	createAgentSession,
 	createEditTool,
 	createEditToolDefinition,
+	createGrepTool,
 	createReadTool,
 	createReadToolDefinition,
 	createWriteTool,
@@ -18,24 +19,29 @@ import {
 	keyText,
 	SessionManager,
 	SettingsManager,
+	type SourceInfo,
 	type Theme,
 	type ToolRenderers,
 } from "@earendil-works/pi-coding-agent";
 import { theme as piTheme } from "../node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/theme/theme.js";
 import { ToolExecutionComponent } from "../node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/components/tool-execution.js";
-import { backgroundAnsi, ProcessTerminal, rgbColor, TuiAltScreen, visibleWidth } from "@earendil-works/pi-tui";
+import { backgroundAnsi, getCapabilities, ProcessTerminal, resetCapabilitiesCache, rgbColor, setCapabilities, TuiAltScreen, visibleWidth } from "@earendil-works/pi-tui";
 import { codeLines, prepareToolPreview } from "../extensions/open-tui/tool-preview.ts";
 import { stripAnsi } from "../extensions/open-tui/utils.ts";
 import type { Component } from "@earendil-works/pi-tui";
+import type { ToolViewConfig } from "../extensions/open-tui/config.ts";
 import { resolveGlyphs } from "../extensions/open-tui/icons.ts";
 import {
 	callDetail,
 	createCompactRenderers,
 	displayPath,
+	fffKind,
 	firstLine,
+	genericDetail,
 	registerToolView,
 	stripNotice,
 	summarizeError,
+	summarizeGeneric,
 	summarizeResult,
 	tailLines,
 	textOutput,
@@ -224,7 +230,7 @@ test("real extension registration preserves native and third-party tools and cle
 		cwd, agentDir: cwd, settingsManager,
 		noExtensions: true, noSkills: true, noThemes: true, noPromptTemplates: true, noContextFiles: true,
 		extensionFactories: [(pi) => {
-			registerToolView(pi, () => mode, glyphs);
+			registerToolView(pi, () => ({ mode, extensionTools: false, exclude: [] }), glyphs);
 			pi.registerTool({ ...createWriteToolDefinition(cwd), name: "write" });
 		}],
 	});
@@ -266,6 +272,336 @@ test("real extension registration preserves native and third-party tools and cle
 	await runner.emit({ type: "session_shutdown", reason: "reload" });
 	await new Promise((resolve) => setTimeout(resolve, 1050));
 	assert.equal(redraws, stopped, "reload stops outstanding timers");
+});
+
+test("extension tool opt-in wraps every tool except exclusions and keeps built-ins specific", async (t) => {
+	const cwd = await mkdtemp(join(tmpdir(), "pi-tool-view-"));
+	t.after(() => rm(cwd, { recursive: true, force: true }));
+	const settingsManager = SettingsManager.inMemory();
+	const view: ToolViewConfig = { mode: "compact", extensionTools: true, exclude: [] };
+	const resourceLoader = new DefaultResourceLoader({
+		cwd, agentDir: cwd, settingsManager,
+		noExtensions: true, noSkills: true, noThemes: true, noPromptTemplates: true, noContextFiles: true,
+		extensionFactories: [(pi) => {
+			registerToolView(pi, () => view, glyphs);
+			pi.registerTool({ ...createWriteToolDefinition(cwd), name: "write" });
+		}],
+	});
+	await resourceLoader.reload();
+	assert.deepEqual(resourceLoader.getExtensions().errors, []);
+	const { session } = await createAgentSession({
+		cwd, agentDir: cwd, resourceLoader, settingsManager, sessionManager: SessionManager.inMemory(cwd),
+	});
+	t.after(() => session.dispose());
+	const runner = session.extensionRunner;
+	const replacement = session.getToolDefinition("write")!;
+	const resolved = runner.resolveToolRenderers("write", () => replacement)!;
+	assert.equal(resolved.renderShell, "self");
+	const ctx = context({ args: { path: "a.ts", content: "x" } });
+	assert.deepEqual(
+		resolved.renderResult!(text("Wrote it"), { expanded: false, isPartial: false }, theme, ctx).render(80),
+		["   └  1 line · Wrote it"],
+		"replacements with built-in names are not summarized as the built-in",
+	);
+
+	const edit = createEditToolDefinition(cwd) as ToolRenderers;
+	const builtin = runner.resolveToolRenderers("edit", () => edit)!;
+	assert.deepEqual(
+		builtin.renderResult!(text("x"), { expanded: false, isPartial: false }, theme, context()).render(80),
+		["   └  Edited"],
+		"built-ins keep their specific summaries",
+	);
+
+	const unregistered = runner.resolveToolRenderers("mcp__late", () => undefined);
+	assert.equal(unregistered?.renderShell, "self", "tools not registered yet still collapse");
+
+	view.exclude = ["mcp__late", "edit"];
+	assert.equal(runner.resolveToolRenderers("mcp__late", () => undefined), undefined);
+	assert.equal(runner.resolveToolRenderers("edit", () => edit), edit);
+
+	view.exclude = [];
+	view.extensionTools = false;
+	assert.equal(runner.resolveToolRenderers("write", () => replacement), replacement);
+	view.extensionTools = true;
+	view.mode = "native";
+	assert.equal(runner.resolveToolRenderers("write", () => replacement), replacement);
+});
+
+test("FFF recognizes official Git sources and entry paths for prefixed and override tools", () => {
+	const sources = [
+		"git:github.com/dmtrKovalenko/fff@v0.11.0",
+		"github.com/dmtrKovalenko/fff",
+		"https://github.com/dmtrKovalenko/fff.git",
+		"git:https://github.com/dmtrKovalenko/fff.git@main",
+		"ssh://git@github.com/dmtrKovalenko/fff.git",
+		"git@github.com:dmtrKovalenko/fff.git#95fd777",
+	];
+	const paths = [
+		"/agent/git/fff/packages/pi-fff/src/index.ts",
+		"C:\\agent\\git\\fff\\packages\\pi-fff\\src\\index.ts",
+	];
+	const tools: Array<[string, "grep" | "find"]> = [
+		["ffgrep", "grep"], ["fffind", "find"], ["fff-multi-grep", "grep"],
+		["grep", "grep"], ["find", "find"], ["multi_grep", "grep"],
+	];
+	for (const source of sources) {
+		for (const path of paths) {
+			const info: SourceInfo = { source, path, scope: "user", origin: "package" };
+			for (const [name, kind] of tools) {
+				assert.equal(fffKind(name, info), kind, `${name}: ${source} at ${path}`);
+			}
+		}
+	}
+});
+
+test("FFF Git recognition preserves npm packages and local npm entry paths", () => {
+	const entries = [
+		{ source: "npm:@ff-labs/pi-fff", path: "/agent/npm/pi-fff/src/index.ts" },
+		{ source: "npm:@ff-labs/pi-fff@0.11.0", path: "/agent/npm/pi-fff/src/index.ts" },
+		{ source: "local", path: "/agent/node_modules/@ff-labs/pi-fff/src/index.ts" },
+		{ source: "local", path: "C:\\agent\\node_modules\\@ff-labs\\pi-fff\\src\\index.ts" },
+	];
+	for (const entry of entries) {
+		const info: SourceInfo = { ...entry, scope: "project", origin: "package" };
+		assert.equal(fffKind("ffgrep", info), "grep", entry.source);
+		assert.equal(fffKind("fffind", info), "find", entry.source);
+	}
+});
+
+test("FFF rejects lookalike sources, incorrect Git entry paths, and unrelated tool names", () => {
+	const official: SourceInfo = {
+		source: "git:github.com/dmtrKovalenko/fff@v0.11.0",
+		path: "/agent/git/fff/packages/pi-fff/src/index.ts",
+		scope: "user", origin: "package",
+	};
+	const sources = [
+		"local", "builtin", "npm:@ff-labs/pi-fff-wrapper",
+		"git:github.com/another-owner/fff",
+		"git:github.com/dmtrKovalenko/fff-wrapper",
+		"https://github.com.example.org/dmtrKovalenko/fff.git",
+	];
+	const paths = [
+		"/agent/git/fff/src/index.ts",
+		"/agent/git/fff/packages/pi-fff-wrapper/src/index.ts",
+		"/agent/git/fff/packages/pi-fff/src/index.ts.bak",
+		"C:\\agent\\git\\fff\\packages\\another-plugin\\src\\index.ts",
+	];
+	for (const source of sources) {
+		assert.equal(fffKind("ffgrep", { ...official, source }), undefined, source);
+		assert.equal(fffKind("grep", { ...official, source }), undefined, source);
+	}
+	for (const path of paths) {
+		assert.equal(fffKind("ffgrep", { ...official, path }), undefined, path);
+		assert.equal(fffKind("fffind", { ...official, path }), undefined, path);
+	}
+	assert.equal(fffKind("ffgrep", undefined), undefined);
+	assert.equal(fffKind("grep", { ...official, source: "builtin", path: "builtin:grep" }), undefined);
+	for (const name of ["bash", "fff-mode", "fff-grep", "ffgrep-wrapper"]) {
+		assert.equal(fffKind(name, official), undefined, name);
+	}
+});
+
+test("real builtin grep keeps its display with extension tools enabled and no FFF", async (t) => {
+	initTheme("dark");
+	const cwd = await mkdtemp(join(tmpdir(), "pi-builtin-grep-"));
+	t.after(() => rm(cwd, { recursive: true, force: true }));
+	const settingsManager = SettingsManager.inMemory();
+	const view: ToolViewConfig = { mode: "compact", extensionTools: false, exclude: [] };
+	const resourceLoader = new DefaultResourceLoader({
+		cwd, agentDir: cwd, settingsManager,
+		noExtensions: true, noSkills: true, noThemes: true, noPromptTemplates: true, noContextFiles: true,
+		extensionFactories: [(pi) => registerToolView(pi, () => view, glyphs)],
+	});
+	await resourceLoader.reload();
+	assert.deepEqual(resourceLoader.getExtensions().errors, []);
+	const { session } = await createAgentSession({
+		cwd, agentDir: cwd, resourceLoader, settingsManager, sessionManager: SessionManager.inMemory(cwd),
+		tools: ["grep"],
+	});
+	t.after(() => session.dispose());
+	assert.equal(session.getAllTools().find((tool) => tool.name === "grep")?.sourceInfo.source, "builtin");
+	assert.ok(!session.getAllTools().some((tool) => tool.name === "ffgrep"));
+	await createWriteTool(cwd).execute("grep-fixture", { path: "rows.txt", content: "alpha\nbeta\ngamma\n" });
+	const native = session.getToolDefinition("grep")!;
+	const grep = createGrepTool(cwd);
+	const cases: Array<[string, string]> = [["^(beta|gamma)$", "2 matches in 1 file"], ["absent", "No matches"]];
+	for (const [pattern, expected] of cases) {
+		const args = { pattern, path: "rows.txt" };
+		const result = await grep.execute("grep-search", args);
+		const render = (expanded: boolean) => {
+			const resolved = session.extensionRunner.resolveToolRenderers("grep", () => native)!;
+			return resolved.renderResult!(result, { expanded, isPartial: false }, piTheme,
+				context({ cwd, args, expanded, executionStarted: false })).render(100);
+		};
+		view.extensionTools = false;
+		const collapsed = render(false);
+		const expanded = render(true);
+		assert.equal(plain(collapsed).join("\n").trim(), `└  ${expected}`);
+		view.extensionTools = true;
+		assert.deepEqual(render(false), collapsed);
+		assert.deepEqual(render(true), expanded);
+		assert.notDeepEqual(plain(expanded), plain(collapsed));
+	}
+	view.exclude = ["grep"];
+	assert.equal(session.extensionRunner.resolveToolRenderers("grep", () => native), native);
+});
+
+test("generic details prefer the identifying argument and stay bounded", () => {
+	assert.equal(genericDetail({ db: "mysql", sql: "select 1\nfrom t" }, "/repo"), "select 1 … (+1 lines)");
+	assert.equal(genericDetail({ limit: 3, path: "/repo/src/a.ts" }, "/repo"), "src/a.ts");
+	assert.equal(genericDetail({ a: 1, b: { c: true }, d: null, e: "x", f: "y" }, "/repo"), 'a=1, b={"c":true}, e=x');
+	assert.equal(genericDetail({ a: "z".repeat(200) }, "/repo"), `a=${"z".repeat(80)}`);
+	assert.equal(genericDetail({}, "/repo"), "");
+});
+
+test("generic summaries parse nothing and keep the first line last", () => {
+	assert.equal(summarizeGeneric(text("### Title\n\nbody\n"), " · 1.0s"), "2 lines · 1.0s · Title");
+	assert.equal(summarizeGeneric(text("file.ts:1: hit")), "1 line · file.ts:1: hit");
+	assert.equal(summarizeGeneric(text("")), "Done");
+	assert.equal(summarizeGeneric(text("10%\r20%\r100%\ndone")), "2 lines · 100%", "progress frames are not lines");
+	assert.equal(summarizeGeneric(text("\x1b[31mred\x1b[0m\tx")), "1 line · red x");
+	assert.equal(summarizeGeneric(text("a", { truncation: { truncated: true, totalLines: 500 } })), "500 lines · truncated · a");
+	assert.equal(summarizeGeneric({ content: [{ type: "image", data: "", mimeType: "image/png" }], details: undefined }), "1 image");
+	assert.equal(
+		summarizeGeneric({ content: [{ type: "text", text: "a" }, { type: "image", data: "", mimeType: "image/png" }], details: undefined }),
+		"1 line · 1 image · a",
+	);
+});
+
+test("generic rows run native renderers only when expanded", () => {
+	const { renderers, seen } = fakeNative();
+	const compact = createCompactRenderers("wiki_lookup", renderers, glyphs, undefined, true);
+	const args = { query: "How\ndoes it work" };
+	const ctx = context({ args, durationMs: 1500 });
+	assert.deepEqual(compact.renderCall!(args, theme, ctx).render(80), [" ● wiki_lookup(How … (+1 lines))"]);
+	assert.deepEqual(compact.renderResult!(text("a\nb"), { expanded: false, isPartial: false }, theme, ctx).render(80), [
+		"   └  2 lines · 1.5s · a",
+	]);
+	assert.equal(seen.length, 0, "collapsed rows do not touch third-party renderers");
+
+	const expanded = { ...ctx, expanded: true };
+	const call = compact.renderCall!(args, theme, expanded);
+	const result = compact.renderResult!(text("a\nb"), { expanded: true, isPartial: false }, theme, expanded);
+	assert.deepEqual([...call.render(40), ...result.render(40)].map((line) => line.trim()), ["", "NATIVE CALL", "NATIVE RESULT", ""]);
+	assert.equal(seen.length, 2);
+	assert.notEqual(seen[0]!.state, ctx.state, "native renderers get their own state slot");
+
+	seen.length = 0;
+	compact.renderCall!(args, theme, ctx);
+	compact.renderResult!(text("a"), { expanded: false, isPartial: false }, theme, ctx);
+	assert.equal(seen.length, 2, "a row collapsed mid-run still lets its renderer see the call finish");
+
+	const self = createCompactRenderers("wiki_lookup", fakeNative("self").renderers, glyphs, undefined, true);
+	assert.deepEqual(self.renderCall!(args, theme, expanded).render(40), ["NATIVE CALL"]);
+});
+
+test("generic rows skip hidden progress but stay fed for completion and errors", () => {
+	const { renderers, seen } = fakeNative();
+	const compact = createCompactRenderers("slow_tool", renderers, glyphs, undefined, true);
+	const state = {};
+	compact.renderCall!({}, theme, context({ state, isPartial: true, expanded: true }));
+	seen.length = 0;
+
+	const running = context({ state, isPartial: true });
+	for (let i = 0; i < 50; i++) {
+		compact.renderCall!({}, theme, running);
+		compact.renderResult!(text("progress"), { expanded: false, isPartial: true }, theme, running);
+	}
+	assert.equal(seen.length, 0, "a collapsed row does no renderer work for progress");
+
+	const failing = context({ state, isPartial: true, isError: true });
+	compact.renderCall!({}, theme, failing);
+	compact.renderResult!(text("boom"), { expanded: false, isPartial: true }, theme, failing);
+	assert.equal(seen.length, 2, "errors reach the renderer");
+
+	seen.length = 0;
+	const finished = context({ state });
+	compact.renderCall!({}, theme, finished);
+	compact.renderResult!(text("done"), { expanded: false, isPartial: false }, theme, finished);
+	assert.equal(seen.length, 2, "completion reaches the renderer");
+});
+
+test("generic rows show live elapsed time, errors, and identifying details", () => {
+	const compact = createCompactRenderers("slow_tool", undefined, glyphs, undefined, true);
+	const ctx = context({ args: {}, isPartial: true });
+	compact.renderCall!({}, theme, ctx);
+	assert.match(compact.renderResult!(text(""), { expanded: false, isPartial: true }, theme, ctx).render(80)[0]!, /Running… \d+ms$/);
+	const failed = context({ args: {}, isError: true });
+	assert.deepEqual(compact.renderResult!(text("boom\nstack"), { expanded: false, isPartial: false }, theme, failed).render(80), [
+		"   └  boom",
+	]);
+
+	const replaced = createCompactRenderers("read", undefined, glyphs, undefined, true);
+	assert.deepEqual(replaced.renderCall!({ path: "/repo/a.ts" }, theme, context()).render(80), [" ● Read(a.ts)"]);
+	assert.deepEqual(replaced.renderCall!({ target: "a.ts" }, theme, context()).render(80), [" ● Read(target=a.ts)"]);
+});
+
+test("replacements with built-in names never use built-in call or error parsing", () => {
+	const ls = createCompactRenderers("ls", undefined, glyphs, undefined, true);
+	assert.deepEqual(ls.renderCall!({ query: "files" }, theme, context()).render(80), [" ● LS(files)"]);
+	assert.deepEqual(ls.renderCall!({}, theme, context()).render(80), [" ● LS"]);
+
+	const read = createCompactRenderers("read", undefined, glyphs, undefined, true);
+	assert.deepEqual(read.renderCall!({ path: "/repo/a.ts", offset: 5, limit: 2 }, theme, context()).render(80), [" ● Read(a.ts)"]);
+
+	const bash = createCompactRenderers("bash", undefined, glyphs, undefined, true);
+	const failed = context({ args: {}, isError: true });
+	assert.deepEqual(bash.renderResult!(text("real first line\nmore\n\nCommand not valid"), { expanded: false, isPartial: false }, theme, failed).render(80), [
+		"   └  real first line",
+	]);
+
+	const builtin = createCompactRenderers("bash", undefined, glyphs);
+	assert.deepEqual(builtin.renderResult!(text("out\n\nCommand exited with code 2"), { expanded: false, isPartial: false }, theme, failed).render(80), [
+		"   └  Exited with code 2 · 1 line · out",
+	]);
+});
+
+test("completed generic rows are not reparsed while scrolling through the real component", () => {
+	initTheme("dark");
+	let reads = 0;
+	const body = { type: "text" as const, get text() { reads++; return "one\ntwo"; } };
+	const { renderers, seen } = fakeNative();
+	const compact = createCompactRenderers("wiki_lookup", renderers, glyphs, undefined, true);
+	const row = new ToolExecutionComponent("wiki_lookup", "call-1", { query: "q" }, {}, compact as never, { requestRender() {} } as never, "/repo");
+	row.updateResult({ content: [body], details: undefined, isError: false }, false);
+	const settled = reads;
+	const first = row.render(60);
+	for (let i = 0; i < 100; i++) assert.deepEqual(row.render(60), first);
+	assert.equal(reads, settled, "repeated renders reuse the prepared summary");
+	assert.equal(seen.length, 0);
+});
+
+test("tools without renderers expand into Pi's generic layout through the real component", () => {
+	initTheme("dark");
+	const compact = createCompactRenderers("plain_tool", undefined, glyphs, undefined, true);
+	const ui = { requestRender() {} } as never;
+	const row = new ToolExecutionComponent("plain_tool", "call-1", { query: "q", n: 1 }, {}, compact as never, ui, "/repo");
+	row.markExecutionStarted();
+	row.setArgsComplete();
+	row.updateResult({ content: [{ type: "text", text: "\x1b[31mone\x1b[0m\ttab\ntwo" }], details: undefined, isError: false }, false);
+	const shown = () => plain(row.render(60)).map((line) => line.trim()).filter(Boolean);
+	assert.deepEqual(shown(), ["● plain_tool(q)", "└  2 lines · one tab"]);
+	row.setExpanded(true);
+	assert.deepEqual(shown(), ["plain_tool", "query: q", "n: 1", "one   tab", "two"]);
+	row.setExpanded(false);
+	assert.deepEqual(shown(), ["● plain_tool(q)", "└  2 lines · one tab"]);
+});
+
+test("collapsed generic rows still show inline images because Pi draws them after self-rendered content", (t) => {
+	initTheme("dark");
+	setCapabilities({ ...getCapabilities(), images: "kitty" });
+	t.after(resetCapabilitiesCache);
+	const isImageLine = (line: string) => line.includes("\x1b_G");
+	// 1x1 PNG
+	const png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
+	const compact = createCompactRenderers("plain_tool", undefined, glyphs, undefined, true);
+	const row = new ToolExecutionComponent("plain_tool", "call-1", { query: "q" }, {}, compact as never, { requestRender() {} } as never, "/repo");
+	row.markExecutionStarted();
+	row.setArgsComplete();
+	row.updateResult({ content: [{ type: "image", data: png, mimeType: "image/png" }], details: undefined, isError: false }, false);
+	const lines = row.render(60);
+	assert.deepEqual(plain(lines.filter((line) => !isImageLine(line))).map((line) => line.trim()).filter(Boolean), ["● plain_tool(q)", "└  1 image"]);
+	assert.ok(lines.some(isImageLine), "Pi appends the image even though the row is collapsed");
 });
 
 test("collapsed rows are compact while native renderers keep their own state", () => {
