@@ -7,6 +7,7 @@ import {
 	createAgentSession,
 	createEditTool,
 	createEditToolDefinition,
+	createGrepTool,
 	createReadTool,
 	createReadToolDefinition,
 	createWriteTool,
@@ -18,6 +19,7 @@ import {
 	keyText,
 	SessionManager,
 	SettingsManager,
+	type SourceInfo,
 	type Theme,
 	type ToolRenderers,
 } from "@earendil-works/pi-coding-agent";
@@ -33,6 +35,7 @@ import {
 	callDetail,
 	createCompactRenderers,
 	displayPath,
+	fffKind,
 	firstLine,
 	genericDetail,
 	registerToolView,
@@ -322,6 +325,125 @@ test("extension tool opt-in wraps every tool except exclusions and keeps built-i
 	view.extensionTools = true;
 	view.mode = "native";
 	assert.equal(runner.resolveToolRenderers("write", () => replacement), replacement);
+});
+
+test("FFF recognizes official Git sources and entry paths for prefixed and override tools", () => {
+	const sources = [
+		"git:github.com/dmtrKovalenko/fff@v0.11.0",
+		"github.com/dmtrKovalenko/fff",
+		"https://github.com/dmtrKovalenko/fff.git",
+		"git:https://github.com/dmtrKovalenko/fff.git@main",
+		"ssh://git@github.com/dmtrKovalenko/fff.git",
+		"git@github.com:dmtrKovalenko/fff.git#95fd777",
+	];
+	const paths = [
+		"/agent/git/fff/packages/pi-fff/src/index.ts",
+		"C:\\agent\\git\\fff\\packages\\pi-fff\\src\\index.ts",
+	];
+	const tools: Array<[string, "grep" | "find"]> = [
+		["ffgrep", "grep"], ["fffind", "find"], ["fff-multi-grep", "grep"],
+		["grep", "grep"], ["find", "find"], ["multi_grep", "grep"],
+	];
+	for (const source of sources) {
+		for (const path of paths) {
+			const info: SourceInfo = { source, path, scope: "user", origin: "package" };
+			for (const [name, kind] of tools) {
+				assert.equal(fffKind(name, info), kind, `${name}: ${source} at ${path}`);
+			}
+		}
+	}
+});
+
+test("FFF Git recognition preserves npm packages and local npm entry paths", () => {
+	const entries = [
+		{ source: "npm:@ff-labs/pi-fff", path: "/agent/npm/pi-fff/src/index.ts" },
+		{ source: "npm:@ff-labs/pi-fff@0.11.0", path: "/agent/npm/pi-fff/src/index.ts" },
+		{ source: "local", path: "/agent/node_modules/@ff-labs/pi-fff/src/index.ts" },
+		{ source: "local", path: "C:\\agent\\node_modules\\@ff-labs\\pi-fff\\src\\index.ts" },
+	];
+	for (const entry of entries) {
+		const info: SourceInfo = { ...entry, scope: "project", origin: "package" };
+		assert.equal(fffKind("ffgrep", info), "grep", entry.source);
+		assert.equal(fffKind("fffind", info), "find", entry.source);
+	}
+});
+
+test("FFF rejects lookalike sources, incorrect Git entry paths, and unrelated tool names", () => {
+	const official: SourceInfo = {
+		source: "git:github.com/dmtrKovalenko/fff@v0.11.0",
+		path: "/agent/git/fff/packages/pi-fff/src/index.ts",
+		scope: "user", origin: "package",
+	};
+	const sources = [
+		"local", "builtin", "npm:@ff-labs/pi-fff-wrapper",
+		"git:github.com/another-owner/fff",
+		"git:github.com/dmtrKovalenko/fff-wrapper",
+		"https://github.com.example.org/dmtrKovalenko/fff.git",
+	];
+	const paths = [
+		"/agent/git/fff/src/index.ts",
+		"/agent/git/fff/packages/pi-fff-wrapper/src/index.ts",
+		"/agent/git/fff/packages/pi-fff/src/index.ts.bak",
+		"C:\\agent\\git\\fff\\packages\\another-plugin\\src\\index.ts",
+	];
+	for (const source of sources) {
+		assert.equal(fffKind("ffgrep", { ...official, source }), undefined, source);
+		assert.equal(fffKind("grep", { ...official, source }), undefined, source);
+	}
+	for (const path of paths) {
+		assert.equal(fffKind("ffgrep", { ...official, path }), undefined, path);
+		assert.equal(fffKind("fffind", { ...official, path }), undefined, path);
+	}
+	assert.equal(fffKind("ffgrep", undefined), undefined);
+	assert.equal(fffKind("grep", { ...official, source: "builtin", path: "builtin:grep" }), undefined);
+	for (const name of ["bash", "fff-mode", "fff-grep", "ffgrep-wrapper"]) {
+		assert.equal(fffKind(name, official), undefined, name);
+	}
+});
+
+test("real builtin grep keeps its display with extension tools enabled and no FFF", async (t) => {
+	initTheme("dark");
+	const cwd = await mkdtemp(join(tmpdir(), "pi-builtin-grep-"));
+	t.after(() => rm(cwd, { recursive: true, force: true }));
+	const settingsManager = SettingsManager.inMemory();
+	const view: ToolViewConfig = { mode: "compact", extensionTools: false, exclude: [] };
+	const resourceLoader = new DefaultResourceLoader({
+		cwd, agentDir: cwd, settingsManager,
+		noExtensions: true, noSkills: true, noThemes: true, noPromptTemplates: true, noContextFiles: true,
+		extensionFactories: [(pi) => registerToolView(pi, () => view, glyphs)],
+	});
+	await resourceLoader.reload();
+	assert.deepEqual(resourceLoader.getExtensions().errors, []);
+	const { session } = await createAgentSession({
+		cwd, agentDir: cwd, resourceLoader, settingsManager, sessionManager: SessionManager.inMemory(cwd),
+		tools: ["grep"],
+	});
+	t.after(() => session.dispose());
+	assert.equal(session.getAllTools().find((tool) => tool.name === "grep")?.sourceInfo.source, "builtin");
+	assert.ok(!session.getAllTools().some((tool) => tool.name === "ffgrep"));
+	await createWriteTool(cwd).execute("grep-fixture", { path: "rows.txt", content: "alpha\nbeta\ngamma\n" });
+	const native = session.getToolDefinition("grep")!;
+	const grep = createGrepTool(cwd);
+	const cases: Array<[string, string]> = [["^(beta|gamma)$", "2 matches in 1 file"], ["absent", "No matches"]];
+	for (const [pattern, expected] of cases) {
+		const args = { pattern, path: "rows.txt" };
+		const result = await grep.execute("grep-search", args);
+		const render = (expanded: boolean) => {
+			const resolved = session.extensionRunner.resolveToolRenderers("grep", () => native)!;
+			return resolved.renderResult!(result, { expanded, isPartial: false }, piTheme,
+				context({ cwd, args, expanded, executionStarted: false })).render(100);
+		};
+		view.extensionTools = false;
+		const collapsed = render(false);
+		const expanded = render(true);
+		assert.equal(plain(collapsed).join("\n").trim(), `└  ${expected}`);
+		view.extensionTools = true;
+		assert.deepEqual(render(false), collapsed);
+		assert.deepEqual(render(true), expanded);
+		assert.notDeepEqual(plain(expanded), plain(collapsed));
+	}
+	view.exclude = ["grep"];
+	assert.equal(session.extensionRunner.resolveToolRenderers("grep", () => native), native);
 });
 
 test("generic details prefer the identifying argument and stay bounded", () => {

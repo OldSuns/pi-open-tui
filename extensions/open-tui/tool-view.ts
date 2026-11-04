@@ -322,7 +322,7 @@ function summarizeFff(kind: "grep" | "find", result: ToolResult, duration = ""):
 }
 
 /** Match npm provenance, its installed entry point, or the official git source and entry point. */
-function fffKind(toolName: string, sourceInfo: SourceInfo | undefined): "grep" | "find" | undefined {
+export function fffKind(toolName: string, sourceInfo: SourceInfo | undefined): "grep" | "find" | undefined {
 	const kind = FFF_TOOLS.get(toolName);
 	if (!kind || !sourceInfo) return undefined;
 	const source = sourceInfo.source;
