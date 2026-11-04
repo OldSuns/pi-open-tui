@@ -20,9 +20,9 @@ Use `npm test` for the full test suite and `npm run typecheck` for the strict Ty
 
 ## Compatibility
 
-- Support Pi 1.2.0 and later, with Node.js 22.19.0 as the minimum.
-- Use public extension APIs available in Pi 1.2.0; do not add fallbacks for older, unsupported releases.
-- CI checks Pi 1.2.0 and latest on Node.js 22.19.0/24 across Linux, Windows, and macOS. Keep all Pi packages on the same version when reproducing either endpoint.
+- Support Pi 1.5.0 and later, with Node.js 22.19.0 as the minimum.
+- Use public extension APIs available in Pi 1.5.0; do not add fallbacks for older, unsupported releases.
+- CI checks Pi 1.5.0 and latest on Node.js 22.19.0/24 across Linux, Windows, and macOS. Keep all Pi packages on the same version when reproducing either endpoint.
 
 ## Code Conventions
 

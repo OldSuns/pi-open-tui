@@ -1,12 +1,19 @@
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { getMarkdownTheme, initTheme, UserMessageComponent } from "@earendil-works/pi-coding-agent";
 import { Markdown, ProcessTerminal, TuiAltScreen, visibleWidth, type TuiMouseEvent, type TuiMouseEventResult } from "@earendil-works/pi-tui";
 import { theme } from "../../node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/theme/theme.js";
 import { installCopyButtons, markCopyScope } from "../../extensions/open-tui/copy-buttons.ts";
 import { stripAnsi } from "../../extensions/open-tui/utils.ts";
+import { assertMarkdownCopy, copyMarkdown, blockA, blockB, textA, textB, nestedCode, nestedText, readMarkdownCopyState } from "./copy-test-helpers.ts";
+import { mouseEvent } from "./test-helpers.ts";
 
+process.env.PI_CODING_AGENT_DIR = join(tmpdir(), `open-tui-copy-${randomUUID()}`);
 initTheme("dark", false);
-const tui = new TuiAltScreen(new ProcessTerminal(), false);
+const terminal = new ProcessTerminal();
+const tui = new TuiAltScreen(terminal, false, undefined, { copyOnSelect: false });
 let enabled = true;
 let copy = installCopyButtons({ getTui: () => tui, getTheme: () => theme, isEnabled: () => enabled });
 const text = "长消息 🙂 " + "A real user message that wraps when the terminal gets narrower. ".repeat(3);
@@ -26,10 +33,7 @@ const column = (lines: string[], row = lines.length - 1) => {
 	return visibleWidth(bottom.slice(0, index));
 };
 const click = (target: UserMessageComponent, lines: string[], width: number, x: number, y: number, expected?: string) => {
-	const event: TuiMouseEvent = {
-		type: "press", button: "left", x, y, screenX: x, screenY: y, width, height: lines.length,
-		shift: false, alt: false, ctrl: false,
-	};
+	const event = mouseEvent("press", x, y, { width, height: lines.length });
 	assert.equal(target.handleMouse(event), undefined);
 	const released = target.handleMouse({ ...event, type: "release" });
 	if (expected !== undefined) {
@@ -45,10 +49,7 @@ type CopyTarget = { handleMouse(event: TuiMouseEvent): TuiMouseEventResult | und
 const releaseAfterRender = (
 	target: CopyTarget, lines: string[], width: number, x: number, y: number, redraw: () => void, expected?: string,
 ) => {
-	assert.equal(target.handleMouse({
-		type: "press", button: "left", x, y, screenX: x, screenY: y,
-		width, height: lines.length, shift: false, alt: false, ctrl: false,
-	}), undefined);
+	assert.equal(target.handleMouse(mouseEvent("press", x, y, { width, height: lines.length })), undefined);
 	redraw();
 	// This is Pi's actual release interception, which runs before component mouse dispatch.
 	(tui as unknown as {
@@ -58,6 +59,7 @@ const releaseAfterRender = (
 };
 
 try {
+	// User-message cache, settings, geometry, and stale releases.
 	const dark = render(40);
 	assert.deepEqual(render(40), dark);
 	clickLabel(dark, 40);
@@ -167,6 +169,77 @@ try {
 		markdown.setText("```ts\nconst value = 2;\n```");
 		markdown.render(40);
 	});
+	// Exercise native block reuse and copy the actual payload through Pi's clipboard transport.
+	const { component: cachedMarkdown, state: streamingState } = copyMarkdown("", { isStreaming: true });
+	tui.addChild(cachedMarkdown);
+	const cachedTarget = cachedMarkdown as unknown as CopyTarget;
+	const copyBlocks = (source: string, expected: readonly string[], width = 60) => {
+		cachedMarkdown.setText(source);
+		const { lines, state: { regions } } = assertMarkdownCopy(cachedMarkdown, expected, width);
+		for (const [index, region] of regions.entries()) {
+			const event = mouseEvent("press", region.col, region.row, { width, height: lines.length });
+			assert.equal(cachedTarget.handleMouse(event), undefined);
+			assert.equal(cachedTarget.handleMouse({ ...event, type: "release" })?.handled, true);
+			expectedCopies.push(expected[index]!);
+		}
+		return { lines, regions };
+	};
+	copyBlocks(blockA, []);
+	streamingState.isStreaming = false;
+	for (const [source, expected] of [
+		[blockA, [textA]],
+		[blockA, [textA]],
+		[blockA + "\n\n" + blockB, [textA, textB]],
+		[blockB + "\n\n" + blockA + "\n\n" + blockB, [textB, textA, textB]],
+		[blockA + "\n\n" + blockA, [textA, textA]],
+		[nestedCode, nestedText],
+		[nestedCode + " more", nestedText],
+		["[link][target]\n\n" + blockA + "\n\n[target]: https://example.com\n", [textA]],
+		[blockA + " extra", [textA]],
+	] as const) copyBlocks(source, expected);
+	const current = copyBlocks(blockA, [textA]);
+	const button = current.regions[0]!;
+	releaseAfterRender(cachedTarget, current.lines, 60, button.col, button.row, () => {
+		cachedMarkdown.setText(blockB);
+		cachedMarkdown.render(60);
+	});
+	copyBlocks(blockA, [textA]);
+	releaseAfterRender(cachedTarget, current.lines, 60, button.col, button.row, () => {
+		streamingState.isStreaming = true;
+		cachedMarkdown.setText(blockA);
+		cachedMarkdown.render(60);
+		streamingState.isStreaming = false;
+		cachedMarkdown.setText(blockA);
+		cachedMarkdown.render(60);
+	});
+	copyBlocks(blockA, [textA]);
+	copyBlocks("No code", []);
+	// Start the actual terminal renderer in this captured child process; no fake terminal or render callback.
+	cachedMarkdown.setText(blockA);
+	tui.setLayoutRoot(cachedMarkdown);
+	tui.start();
+	const native = tui as unknown as {
+		doRender(): void;
+		handleMouseEvent(event: { button: number; x: number; y: number; release: boolean }): void;
+	};
+	native.doRender();
+	const nativeButton = readMarkdownCopyState(cachedMarkdown).regions[0]!;
+	assert.ok(nativeButton);
+	const send = (button: number, x: number, y: number, release = false) => native.handleMouseEvent({ button, x, y, release });
+	send(0, nativeButton.col, nativeButton.row);
+	send(32, nativeButton.col + 1, nativeButton.row);
+	send(0, nativeButton.col + 1, nativeButton.row, true);
+	expectedCopies.push(textA);
+	assert.equal(tui.hasActiveSelection(), false, "a Copy release clears the temporary selection");
+	send(0, nativeButton.col, nativeButton.row);
+	send(32, 0, nativeButton.row + 1);
+	assert.equal(tui.hasActiveSelection(), true, "a long drag remains native selection");
+	send(0, 0, nativeButton.row + 1, true);
+	send(0, nativeButton.col, nativeButton.row);
+	cachedMarkdown.setText(blockB);
+	native.doRender();
+	send(0, nativeButton.col, nativeButton.row, true);
+	tui.stop();
 	copy.cleanup();
 	const cleaned = render(40);
 	assert.ok(cleaned.every((line) => !line.includes("[Copy]")));

@@ -65,8 +65,12 @@ function startTurn(tracker: TurnTelemetryTracker, message: AssistantMessage, tur
 
 function endTurn(tracker: TurnTelemetryTracker, message: AssistantMessage, turnIndex = 0) {
 	tracker.handle({ type: "message_end", message });
-	return tracker.handle({
-		type: "turn_end",
+	return tracker.handle(turnEnd(message, turnIndex));
+}
+
+function turnEnd(message: AssistantMessage, turnIndex = 0) {
+	return {
+		type: "turn_end" as const,
 		turnIndex,
 		message,
 		toolResults: [],
@@ -81,10 +85,24 @@ function endTurn(tracker: TurnTelemetryTracker, message: AssistantMessage, turnI
 			pendingMessages: [],
 			canContinue: false,
 		},
-		outcome: "completed",
-	});
+		outcome: "completed" as const,
+	};
 }
 
+function measure(updates: readonly number[], endMs = 800, output = 20) {
+	let now = 0;
+	const tracker = new TurnTelemetryTracker(() => now);
+	const message = makeMessage(output);
+	startTurn(tracker, message);
+	for (const timestamp of updates) {
+		now = timestamp;
+		tracker.handle(update(message));
+	}
+	now = endMs;
+	return endTurn(tracker, message)!;
+}
+
+// Turn timing and usage.
 test("uses total output over full generation time", () => {
 	let now = 0;
 	const tracker = new TurnTelemetryTracker(() => now);
@@ -133,24 +151,7 @@ test("normalizes invalid usage without breaking turn telemetry", () => {
 		now += 100;
 		tracker.handle({ type: "message_end", message });
 	}
-	const telemetry = tracker.handle({
-		type: "turn_end",
-		turnIndex: 0,
-		message: messages[1]!,
-		toolResults: [],
-		messageEntryId: "",
-		toolResultEntryIds: [],
-		entries: [],
-		continue: false,
-		context: {
-			contextEntries: [],
-			contextMessages: [],
-			llmMessages: [],
-			pendingMessages: [],
-			canContinue: false,
-		},
-		outcome: "completed",
-	})!;
+	const telemetry = tracker.handle(turnEnd(messages[1]!))!;
 
 	assert.equal(telemetry.inputTokens, 50);
 	assert.equal(telemetry.outputTokens, 20);
@@ -168,24 +169,7 @@ test("measures non-streamed responses from turn start", () => {
 	now = 5_000;
 	tracker.handle({ type: "message_start", message });
 	tracker.handle({ type: "message_end", message });
-	const telemetry = tracker.handle({
-		type: "turn_end",
-		turnIndex: 0,
-		message,
-		toolResults: [],
-		messageEntryId: "",
-		toolResultEntryIds: [],
-		entries: [],
-		continue: false,
-		context: {
-			contextEntries: [],
-			contextMessages: [],
-			llmMessages: [],
-			pendingMessages: [],
-			canContinue: false,
-		},
-		outcome: "completed",
-	})!;
+	const telemetry = tracker.handle(turnEnd(message))!;
 
 	assert.equal(telemetry.tps, 4);
 	assert.equal(telemetry.ttftMs, 5_000);
@@ -242,35 +226,13 @@ test("returns no TPS without output or generation time", () => {
 	];
 
 	for (const scenario of scenarios) {
-		let now = 0;
-		const tracker = new TurnTelemetryTracker(() => now);
-		const message = makeMessage(scenario.output);
-		startTurn(tracker, message);
-		for (const timestamp of scenario.updates) {
-			now = timestamp;
-			tracker.handle(update(message));
-		}
-		now = scenario.endMs;
-		const telemetry = endTurn(tracker, message);
+		const telemetry = measure(scenario.updates, scenario.endMs, scenario.output);
 		assert.equal(telemetry?.tps, null, scenario.name);
 		assert.equal(telemetry?.outputTokens, scenario.output, scenario.name);
 	}
 });
 
 test("keeps stalls in delivery time so they lower TPS", () => {
-	function measure(updates: number[], endMs: number) {
-		let now = 0;
-		const tracker = new TurnTelemetryTracker(() => now);
-		const message = makeMessage();
-		startTurn(tracker, message);
-		for (const timestamp of updates) {
-			now = timestamp;
-			tracker.handle(update(message));
-		}
-		now = endMs;
-		return endTurn(tracker, message)!;
-	}
-
 	const uninterrupted = measure([100, 200, 300], 800);
 	const stalled = measure([100, 1200, 2300, 2400, 3500], 3600);
 
@@ -309,19 +271,6 @@ test("only meaningful stream deltas define TTFT and stalls", () => {
 });
 
 test("is stable across chunk counts", () => {
-	function measure(updateTimes: number[]) {
-		let now = 0;
-		const tracker = new TurnTelemetryTracker(() => now);
-		const message = makeMessage();
-		startTurn(tracker, message);
-		for (const timestamp of updateTimes) {
-			now = timestamp;
-			tracker.handle(update(message));
-		}
-		now = 800;
-		return endTurn(tracker, message)!;
-	}
-
 	assert.equal(measure([100, 700]).tps, 25);
 	assert.equal(measure([100, 200, 300, 400, 500, 700]).tps, 25);
 });
@@ -340,6 +289,7 @@ test("uses full generation time for high rates", () => {
 	assert.equal(endTurn(tracker, message)?.tps, 10_000);
 });
 
+// Aggregation across assistant messages and agent turns.
 test("excludes tool gaps between assistant messages", () => {
 	function measure(toolGapMs: number) {
 		let now = 0;
@@ -465,6 +415,7 @@ test("aggregates all output and generation time across an agent run", () => {
 	assert.equal(telemetry.rateUsdPerMTokens, 4);
 });
 
+// Extension lifecycle and thinking preview integration.
 test("open-tui notifies once after a complete agent run", () => {
 	const handlers = new Map<string, Array<(event: any, ctx: ExtensionContext) => void>>();
 	const notifications: string[] = [];
@@ -630,6 +581,7 @@ test("open-tui keeps a bounded peek scoped to the current assistant", async () =
 	}
 });
 
+// Live throughput and text estimates.
 test("estimates CJK at one token per character and Latin at four characters per token", () => {
 	assert.equal(estimateDeltaTokens("abcdefgh"), 2);
 	assert.equal(estimateDeltaTokens("你好世界"), 4);
