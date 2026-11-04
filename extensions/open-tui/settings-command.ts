@@ -177,7 +177,9 @@ function buildFeaturesItems(config: OpenTuiConfig, copy: SettingsCopy): SettingI
 		{ id: "inlineFooter", label: copy.labels.inlineFooter, currentValue: flag(config.inlineFooter) },
 		{ id: "copyButtons", label: copy.labels.copyButtons, currentValue: flag(config.copyButtons) },
 		{ id: "toolView", label: copy.labels.toolView, currentValue: copy.values.toolView[config.toolView.mode] },
-		{ id: "extensionTools", label: copy.labels.extensionTools, currentValue: flag(config.toolView.extensionTools) },
+		...(config.toolView.mode === "compact" ? [
+			{ id: "extensionTools", label: `  ${copy.labels.extensionTools}`, currentValue: flag(config.toolView.extensionTools) },
+		] : []),
 	];
 }
 

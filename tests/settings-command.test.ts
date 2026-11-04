@@ -309,12 +309,11 @@ test("toggling tool view settings keeps the other tool view options", async () =
 	// Enabled → Header → Language → Thinking peek → Footer in editor border → Copy buttons → Tool view
 	for (let i = 0; i < 6; i++) settings.component.handleInput("\x1b[B");
 	assert.match(selectedLine(settings.component), /Tool view/);
+	settings.component.handleInput(" ");
 	settings.component.handleInput("\x1b[B");
 	assert.match(selectedLine(settings.component), /Compact extension tools/);
 	settings.component.handleInput(" ");
 	assert.equal(settings.getConfig().toolView.extensionTools, true);
-	settings.component.handleInput("\x1b[A");
-	settings.component.handleInput(" ");
 	assert.deepEqual(settings.getConfig().toolView, { mode: "compact", extensionTools: true, exclude: ["subagent_wait"] });
 });
 

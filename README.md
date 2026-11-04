@@ -60,6 +60,8 @@ If wide Nerd Font icons visually consume the gap before their labels (for exampl
 
 Run `/open-tui` to open the settings dialog. It provides **General**, **Appearance**, **Footer**, and **Telemetry** tabs and adapts to the terminal size. Settings are stored in `open-tui.json` inside Pi's agent directory, which defaults to `~/.pi/agent`; `PI_CODING_AGENT_DIR` overrides that directory. If saving fails, a warning explains that the change applies only to the current session.
 
+In **General**, selecting **Tool view: Compact** reveals **Compact extension tools** as an indented child setting. Switching back to **Native** hides the child setting and retains its value for the next time you select **Compact**.
+
 Example configuration:
 
 ```json
