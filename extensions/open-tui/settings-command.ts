@@ -376,16 +376,20 @@ class SectionedSettingsList {
 	onSelectionChange?: (item: SelectItem) => void;
 	private readonly selectList: SelectList;
 	private readonly items: SelectItem[];
+	private readonly rows: SettingRow[];
+	private readonly theme: Theme;
 	private readonly visibleRows: number;
 	private readonly showScrollInfo: boolean;
 	private pressedItemId: string | undefined;
 
 	constructor(
-		private readonly rows: SettingRow[],
+		rows: SettingRow[],
 		availableRows: number,
 		width: number,
-		private readonly theme: Theme,
+		theme: Theme,
 	) {
+		this.rows = rows;
+		this.theme = theme;
 		const compact = width <= 60;
 		this.items = rows.flatMap<SelectItem>((row) => {
 			if (row.kind !== "setting") return [];
