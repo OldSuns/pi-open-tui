@@ -308,7 +308,9 @@ test("toggles copy buttons from General settings", async () => {
 });
 
 test("toggling tool view settings keeps the other tool view options", async () => {
-	const settings = await openSettings();
+	const config = structuredClone(DEFAULT_CONFIG);
+	config.toolView.exclude = ["subagent_wait"];
+	const settings = await openSettings(config);
 	// Enabled → Header → Language → Thinking peek → Footer in editor border → Copy buttons → Tool view
 	for (let i = 0; i < 6; i++) settings.component.handleInput("\x1b[B");
 	assert.match(selectedLine(settings.component), /Tool view/);
@@ -318,7 +320,7 @@ test("toggling tool view settings keeps the other tool view options", async () =
 	assert.equal(settings.getConfig().toolView.extensionTools, true);
 	settings.component.handleInput("\x1b[A");
 	settings.component.handleInput(" ");
-	assert.deepEqual(settings.getConfig().toolView, { mode: "compact", extensionTools: true, exclude: [] });
+	assert.deepEqual(settings.getConfig().toolView, { mode: "compact", extensionTools: true, exclude: ["subagent_wait"] });
 });
 
 test("toggles the header without resetting a disabled slot and warns when persistence fails", async () => {

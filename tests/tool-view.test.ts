@@ -387,7 +387,33 @@ test("generic rows run native renderers only when expanded", () => {
 	assert.deepEqual(self.renderCall!(args, theme, expanded).render(40), ["NATIVE CALL"]);
 });
 
-test("generic rows show live elapsed time, errors, and name-known details", () => {
+test("generic rows skip hidden progress but stay fed for completion and errors", () => {
+	const { renderers, seen } = fakeNative();
+	const compact = createCompactRenderers("slow_tool", renderers, glyphs, undefined, true);
+	const state = {};
+	compact.renderCall!({}, theme, context({ state, isPartial: true, expanded: true }));
+	seen.length = 0;
+
+	const running = context({ state, isPartial: true });
+	for (let i = 0; i < 50; i++) {
+		compact.renderCall!({}, theme, running);
+		compact.renderResult!(text("progress"), { expanded: false, isPartial: true }, theme, running);
+	}
+	assert.equal(seen.length, 0, "a collapsed row does no renderer work for progress");
+
+	const failing = context({ state, isPartial: true, isError: true });
+	compact.renderCall!({}, theme, failing);
+	compact.renderResult!(text("boom"), { expanded: false, isPartial: true }, theme, failing);
+	assert.equal(seen.length, 2, "errors reach the renderer");
+
+	seen.length = 0;
+	const finished = context({ state });
+	compact.renderCall!({}, theme, finished);
+	compact.renderResult!(text("done"), { expanded: false, isPartial: false }, theme, finished);
+	assert.equal(seen.length, 2, "completion reaches the renderer");
+});
+
+test("generic rows show live elapsed time, errors, and identifying details", () => {
 	const compact = createCompactRenderers("slow_tool", undefined, glyphs, undefined, true);
 	const ctx = context({ args: {}, isPartial: true });
 	compact.renderCall!({}, theme, ctx);
@@ -400,6 +426,26 @@ test("generic rows show live elapsed time, errors, and name-known details", () =
 	const replaced = createCompactRenderers("read", undefined, glyphs, undefined, true);
 	assert.deepEqual(replaced.renderCall!({ path: "/repo/a.ts" }, theme, context()).render(80), [" ● Read(a.ts)"]);
 	assert.deepEqual(replaced.renderCall!({ target: "a.ts" }, theme, context()).render(80), [" ● Read(target=a.ts)"]);
+});
+
+test("replacements with built-in names never use built-in call or error parsing", () => {
+	const ls = createCompactRenderers("ls", undefined, glyphs, undefined, true);
+	assert.deepEqual(ls.renderCall!({ query: "files" }, theme, context()).render(80), [" ● LS(files)"]);
+	assert.deepEqual(ls.renderCall!({}, theme, context()).render(80), [" ● LS"]);
+
+	const read = createCompactRenderers("read", undefined, glyphs, undefined, true);
+	assert.deepEqual(read.renderCall!({ path: "/repo/a.ts", offset: 5, limit: 2 }, theme, context()).render(80), [" ● Read(a.ts)"]);
+
+	const bash = createCompactRenderers("bash", undefined, glyphs, undefined, true);
+	const failed = context({ args: {}, isError: true });
+	assert.deepEqual(bash.renderResult!(text("real first line\nmore\n\nCommand not valid"), { expanded: false, isPartial: false }, theme, failed).render(80), [
+		"   └  real first line",
+	]);
+
+	const builtin = createCompactRenderers("bash", undefined, glyphs);
+	assert.deepEqual(builtin.renderResult!(text("out\n\nCommand exited with code 2"), { expanded: false, isPartial: false }, theme, failed).render(80), [
+		"   └  Exited with code 2 · 1 line · out",
+	]);
 });
 
 test("completed generic rows are not reparsed while scrolling through the real component", () => {

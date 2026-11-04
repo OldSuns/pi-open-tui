@@ -375,14 +375,16 @@ export function createCompactRenderers(
 		?? (generic ? (result, _options, theme, context) => genericResult(result, theme, context) : undefined);
 	// Expanded rows hand off to Pi's own card so nothing is hidden.
 	const showNative = (context: RenderContext) => context.expanded;
+	// A generic row that was expanded skips hidden progress but still sees the call finish, for a renderer's own timers.
+	const feedCollapsedNative = (row: RowState, isPartial: boolean, isError: boolean) =>
+		row.nativeCall !== undefined && (!isPartial || isError);
 
 	return {
 		renderShell: "self",
 		renderCall(args, theme, context) {
 			const row = rowState(context);
 			// Keep native timers/edit state current; write rebuilds its full highlight cache only on expansion.
-			// A generic row that was expanded stays fed, so a renderer's own timers see the call finish.
-			if (context.expanded || (generic ? row.nativeCall !== undefined : toolName !== "write")) {
+			if (context.expanded || (generic ? feedCollapsedNative(row, context.isPartial, context.isError) : toolName !== "write")) {
 				row.nativeCall = renderNativeCall?.(args, theme, nativeContext(context, row, row.nativeCall));
 			}
 			if (context.executionStarted) row.startedAt ??= Date.now();
@@ -419,7 +421,7 @@ export function createCompactRenderers(
 				: "success";
 			const titleColor = context.isPartial || context.isError ? "toolTitle" : "dim";
 			const callArgs = (args ?? {}) as Args;
-			const detail = sanitizeStatus(callDetail(toolName, callArgs, context.cwd) || (generic ? genericDetail(callArgs, context.cwd) : ""));
+			const detail = sanitizeStatus(generic ? genericDetail(callArgs, context.cwd) : callDetail(toolName, callArgs, context.cwd));
 			const pad = " ".repeat(context.outputPad);
 			return lines((_width, icons) => [
 				pad + theme.fg(color, icons.toolCall) + " " + theme.fg(titleColor, titleColor === "dim" ? label : theme.bold(label))
@@ -430,7 +432,7 @@ export function createCompactRenderers(
 		renderResult(result, options, theme, context) {
 			const row = rowState(context);
 			if (!options.isPartial || context.isError) stopPulse(row);
-			if (!generic || context.expanded || row.nativeCall !== undefined) {
+			if (!generic || context.expanded || feedCollapsedNative(row, options.isPartial, context.isError)) {
 				row.nativeResult = renderNativeResult?.(result, options, theme, nativeContext(context, row, row.nativeResult));
 			}
 			if (showNative(context) && row.nativeResult) {
@@ -457,7 +459,7 @@ export function createCompactRenderers(
 			const timed = isShell || generic;
 			const duration = timed && context.durationMs !== undefined ? ` · ${formatElapsed(context.durationMs)}` : "";
 			const summary = options.isPartial ? "" : context.isError
-				? summarizeError(toolName, result, duration)
+				? summarizeError(generic ? "" : toolName, result, duration)
 				: generic ? summarizeGeneric(result, duration) : summarizeResult(toolName, result, args) + duration;
 			const tail = options.isPartial && isShell ? tailLines(textOutput(result), LIVE_TAIL_LINES) : [];
 			return lines((width, { toolResult }) => {
