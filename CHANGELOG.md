@@ -6,6 +6,10 @@
 
 - Require Pi 1.5.0 or later.
 
+### Changed
+
+- Group `/open-tui` settings into sections in English and Simplified Chinese, with non-selectable headings and scrolling that includes heading rows.
+
 ### Fixed
 
 - Show code-block Copy labels as soon as streaming ends, without requiring a terminal resize, and hide them when streaming resumes.

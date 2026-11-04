@@ -240,7 +240,7 @@ test("toggles live TPS from the Footer tab", async () => {
 	const settings = await openSettings();
 
 	settings.press("\t", 2);
-	settings.press("\x1b[B", 10);
+	settings.press("\x1b[B", 8);
 	assert.match(selectedLine(settings.component), /Live TPS/);
 
 	settings.component.handleInput("\r");
@@ -285,8 +285,8 @@ test("supports localized settings and keyboard shortcuts", async () => {
 
 test("configures inline footer from General settings", async () => {
 	const settings = await openSettings();
-	// Enabled → Header → Language → Thinking peek → Footer in editor border
-	settings.press("\x1b[B", 4);
+	// Headers are skipped: Enabled → Header → Language → Thinking peek → Copy buttons → Tool view → Footer in editor border.
+	settings.press("\x1b[B", 6);
 	assert.match(selectedLine(settings.component), /Footer in editor border/);
 	settings.component.handleInput(" ");
 	assert.equal(settings.getConfig().inlineFooter, true);
@@ -295,8 +295,8 @@ test("configures inline footer from General settings", async () => {
 test("toggles copy buttons from General settings", async () => {
 	const settings = await openSettings();
 	assert.equal(settings.getConfig().copyButtons, true);
-	// Enabled → Header → Language → Thinking peek → Footer in editor border → Copy buttons
-	settings.press("\x1b[B", 5);
+	// Enabled → Header → Language → Thinking peek → Copy buttons
+	settings.press("\x1b[B", 4);
 	assert.match(selectedLine(settings.component), /Copy buttons/);
 	settings.component.handleInput(" ");
 	assert.equal(settings.getConfig().copyButtons, false);
@@ -306,8 +306,8 @@ test("toggling tool view settings keeps the other tool view options", async () =
 	const config = structuredClone(DEFAULT_CONFIG);
 	config.toolView.exclude = ["subagent_wait"];
 	const settings = await openSettings(config);
-	// Enabled → Header → Language → Thinking peek → Footer in editor border → Copy buttons → Tool view
-	for (let i = 0; i < 6; i++) settings.component.handleInput("\x1b[B");
+	// Enabled → Header → Language → Thinking peek → Copy buttons → Tool view
+	for (let i = 0; i < 5; i++) settings.component.handleInput("\x1b[B");
 	assert.match(selectedLine(settings.component), /Tool view/);
 	settings.component.handleInput(" ");
 	settings.component.handleInput("\x1b[B");
@@ -405,7 +405,9 @@ test("keeps localized settings and values within narrow widths", async () => {
 		}
 		const output = lines.join("\n");
 		assert.match(output, /开启/);
-		assert.match(output, /简体中文/);
+		settings.press("\x1b[B", 2);
+		assert.match(selectedLine(settings.component, width), /简体中文/);
+		settings.press("\x1b[A", 2);
 	}
 });
 

@@ -45,7 +45,7 @@ pi -e npm:pi-open-tui
 
 Download any patched font from the official [Nerd Fonts downloads page](https://www.nerdfonts.com/font-downloads) or [latest GitHub release](https://github.com/ryanoasis/nerd-fonts/releases/latest). Install it, select that font in your terminal profile, and restart the terminal.
 
-The default `auto` mode checks the terminal environment, not the installed font file. It uses Nerd Font icons in interactive UTF-8 TTYs, including terminals running through a runner or subshell. If icons appear as boxes or incorrect symbols, open `/open-tui` and choose one of these modes under **Appearance**:
+The default `auto` mode checks the terminal environment, not the installed font file. It uses Nerd Font icons in interactive UTF-8 TTYs, including terminals running through a runner or subshell. If icons appear as boxes or incorrect symbols, open `/open-tui` and choose one of these modes under **Appearance → Icons**:
 
 - `nerd`: force Nerd Font icons after configuring a Nerd Font in the terminal
 - `unicode`: portable Unicode icons (folder, branch, laptop, bulb, plug, hourglass, ...) that render without a patched font; emoji glyphs use the terminal's emoji fallback
@@ -54,13 +54,24 @@ The default `auto` mode checks the terminal environment, not the installed font 
 
 If the font is installed but `auto` still selects ASCII, choose `nerd` explicitly. In VS Code, Windows Terminal, and similar apps, configure the font in the terminal profile rather than only installing it in the operating system. If your SSH client terminal does ship a Nerd Font and you want the full icon set over SSH, set the mode to `nerd` explicitly.
 
-If wide Nerd Font icons visually consume the gap before their labels (for example in Kitty), enable `footerSegments.nerdIconSpacing` (**Footer → Extra space after Nerd icons** in `/open-tui`). The footer then reserves an extra blank cell after Nerd Font icons, including runtime icons, and includes it in regular and inline footer width calculations. Unicode/ASCII icons and compact Git status flags are unchanged. In Kitty, `narrow_symbols U+E000-U+F8FF 1` in `kitty.conf` is an alternative.
+If wide Nerd Font icons visually consume the gap before their labels (for example in Kitty), enable `footerSegments.nerdIconSpacing` (**Footer → Other → Extra space after Nerd icons** in `/open-tui`). The footer then reserves an extra blank cell after Nerd Font icons, including runtime icons, and includes it in regular and inline footer width calculations. Unicode/ASCII icons and compact Git status flags are unchanged. In Kitty, `narrow_symbols U+E000-U+F8FF 1` in `kitty.conf` is an alternative.
 
 ## Configuration
 
 Run `/open-tui` to open the settings dialog. It provides **General**, **Appearance**, **Footer**, and **Telemetry** tabs and adapts to the terminal size. Settings are stored in `open-tui.json` inside Pi's agent directory, which defaults to `~/.pi/agent`; `PI_CODING_AGENT_DIR` overrides that directory. If saving fails, a warning explains that the change applies only to the current session.
 
-In **General**, selecting **Tool view: Compact** reveals **Compact extension tools** as an indented child setting. Switching back to **Native** hides the child setting and retains its value for the next time you select **Compact**.
+Each tab groups related settings under dim section headings:
+
+| Tab | Sections |
+| --- | --- |
+| General | Extension, Interface, Messages & tools, Footer |
+| Appearance | Icons, Editor |
+| Footer | Location, Git, Runtime, Usage, Other |
+| Telemetry | Enabled (standalone master switch), Measurements |
+
+Use Tab/Shift+Tab or ←/→ to switch tabs, ↑/↓ or Page Up/Page Down to move between settings, Enter/Space to change a value, and Esc/q to close. Section headings occupy one row, are skipped by navigation, and cannot be selected or changed by clicking. The list scrolls within the available terminal height; its position indicator counts settings and headings. Existing configuration files need no migration.
+
+In **General → Messages & tools**, selecting **Tool view: Compact** reveals **Compact extension tools** as an indented child setting. Switching back to **Native** hides the child setting and retains its value for the next time you select **Compact**. **Footer in editor border** is in **General → Footer**.
 
 Example configuration:
 
@@ -152,9 +163,9 @@ After each complete agent run, pi-open-tui shows one transient result. Tool-call
 
 TPS is calculated from all provider-reported assistant output tokens divided by the total generation time across the run. Timing starts at `turn_start` and ends at the assistant `message_end`, so it includes TTFT, hidden reasoning, buffering, and stalls; tool execution between turns is excluded. Runs without output tokens or measurable generation time show `TPS —`.
 
-While a response streams, the working timer also shows the current estimated speed, for example `working 12.3s · ~54 tok/s`. The `~` marks it as an estimate: it is the rate over the last 2 seconds of streamed text, thinking, and tool-call arguments, estimated at about 4 characters per token for Latin text and code and 1 token per CJK character. It drops toward zero during stalls and stays dimmed at its last value during tool execution and between messages. It is controlled by **Footer → Live TPS** (`footerSegments.liveTps`), independently of the telemetry notification. It disappears when the run ends; the exact TPS above is the authoritative value.
+While a response streams, the working timer also shows the current estimated speed, for example `working 12.3s · ~54 tok/s`. The `~` marks it as an estimate: it is the rate over the last 2 seconds of streamed text, thinking, and tool-call arguments, estimated at about 4 characters per token for Latin text and code and 1 token per CJK character. It drops toward zero during stalls and stays dimmed at its last value during tool execution and between messages. It is controlled by **Footer → Runtime → Live TPS** (`footerSegments.liveTps`), independently of the telemetry notification. It disappears when the run ends; the exact TPS above is the authoritative value.
 
-The `$ / M` value is the model's list-price rate from `usage.cost.total`, not the cumulative session cost shown in the footer. Every telemetry field can be toggled from the **Telemetry** tab.
+The `$ / M` value is the model's list-price rate from `usage.cost.total`, not the cumulative session cost shown in the footer. Every telemetry field can be toggled from **Telemetry → Measurements**, with **Enabled** as the separate master switch.
 
 ## Thinking peek
 
@@ -170,11 +181,11 @@ When Pi's **Hide thinking** setting is enabled, pi-open-tui shows a compact tick
           latest thought
 ```
 
-The ticker appears only once the model actually streams reasoning, so non-reasoning models never show it. Pi's own Hide thinking toggle controls visibility; changing it takes effect immediately. Each row is truncated by *visible* width, so CJK-wide thinking text cannot overflow. Configure it from **General → Thinking peek** in `/open-tui`, or via `thinkingPeek.lines` in `open-tui.json`.
+The ticker appears only once the model actually streams reasoning, so non-reasoning models never show it. Pi's own Hide thinking toggle controls visibility; changing it takes effect immediately. Each row is truncated by *visible* width, so CJK-wide thinking text cannot overflow. Configure it from **General → Messages & tools → Thinking peek** in `/open-tui`, or via `thinkingPeek.lines` in `open-tui.json`.
 
 ## Tool view
 
-**Native** remains the default. With **General → Tool view** set to **Compact** (`toolView.mode: "compact"`), Pi's built-in tools (`read`, `bash`, `powershell`, `edit`, `write`, `grep`, `find`, `ls`) render as one call line and one summary line, with previews for successful edits and writes:
+**Native** remains the default. With **General → Messages & tools → Tool view** set to **Compact** (`toolView.mode: "compact"`), Pi's built-in tools (`read`, `bash`, `powershell`, `edit`, `write`, `grep`, `find`, `ls`) render as one call line and one summary line, with previews for successful edits and writes:
 
 ```text
 ● Read(extensions/open-tui/footer.ts:1-120)
@@ -191,7 +202,7 @@ The ticker appears only once the model actually streams reasoning, so non-reason
 - Preview bodies show at most 16 rows; longer bodies show the first 16 plus a hidden-row count and `Ctrl+O` hint. Edit context and ellipsis rows count toward these limits. In compact mode only, long lines truncate horizontally with `…` instead of wrapping.
 - Clicking a row expands only that row into Pi's native card, and `Ctrl+O` expands all rows. Native expanded rendering, including full output, diffs, and truncation notices, is unchanged. Calls remain separate, with no grouping.
 - Only the display changes. Tools, arguments, results, and what the model sees are untouched. By default only tools confirmed by Pi as built-in are wrapped; third-party and MCP tools, including replacements with built-in names, keep their own rendering.
-- With **General → Compact extension tools** (`toolView.extensionTools: true`), every other tool also collapses, including MCP tools and replacements with built-in names. Their output format is unknown, so summaries show text/image counts, duration, and the first line, with no edit/write previews. Only explicit `details.truncation.truncated: true` marks truncation; a valid total line count may replace the displayed count, while built-in limit fields are ignored. Running rows show elapsed time even before the first result arrives. Native renderers start when a row is expanded; after it collapses, they skip hidden progress updates but still receive completion and error updates so their timers can stop. Tools that depend on native progress displays can be listed in `toolView.exclude`, which also applies to built-ins.
+- With **General → Messages & tools → Compact extension tools** (`toolView.extensionTools: true`), every other tool also collapses, including MCP tools and replacements with built-in names. Their output format is unknown, so summaries show text/image counts, duration, and the first line, with no edit/write previews. Only explicit `details.truncation.truncated: true` marks truncation; a valid total line count may replace the displayed count, while built-in limit fields are ignored. Running rows show elapsed time even before the first result arrives. Native renderers start when a row is expanded; after it collapses, they skip hidden progress updates but still receive completion and error updates so their timers can stop. Tools that depend on native progress displays can be listed in `toolView.exclude`, which also applies to built-ins.
 - Recognized installations of `@ff-labs/pi-fff` use search summaries: `ffgrep` and optional `fff-multi-grep` show this page's match count; `fffind` shows the total matching file count. Summaries retain FFF's next-page, fuzzy fallback, regex-to-literal fallback, and capped weak-match hints, including in its `grep`/`find`/`multi_grep` override mode. FFF's indexed file count is not treated as a matched file count. Recognition uses Pi's npm package source, the installed npm entry path, or the official `dmtrKovalenko/fff` GitHub source with its `packages/pi-fff/src/index.ts` entry point; unrecognized sources or metadata use the generic summary. Expansion preserves FFF's native output, including its existing line-length limits.
 - Expanded extension rows use the renderers Pi resolves. Pi may supply built-in renderers for replacements with built-in names when the extension omits them; the generic argument/output card is used only for missing renderers. Inline images in results stay visible while collapsed, since Pi draws them below the row.
 - Compact summaries flag truncated output, including grep's long-line truncation. Bracketed output and failure messages are preserved rather than mistaken for tool notices.
@@ -216,7 +227,7 @@ In fullscreen mode (Pi's `tuiMode: "fullscreen"`), code blocks are drawn in roun
 - Drag-selecting across a frame includes its border characters and the `[Copy]` text.
 - If pi-pretty-tui is installed, its own code-block frames and copy buttons are kept and these are not drawn.
 
-Toggle it from **General → Copy buttons** in `/open-tui`, or via `copyButtons` in `open-tui.json`.
+Toggle it from **General → Messages & tools → Copy buttons** in `/open-tui`, or via `copyButtons` in `open-tui.json`.
 
 ## Local development
 

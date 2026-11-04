@@ -1,11 +1,15 @@
 import type { ExtensionAPI, ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
 import {
 	Box,
+	getKeybindings,
+	getSelectPageIndex,
 	Key,
 	matchesKey,
 	SelectList,
 	type SelectItem,
 	type TUI,
+	type TuiMouseEvent,
+	type TuiMouseEventResult,
 	Text,
 	truncateToWidth,
 	visibleWidth,
@@ -18,6 +22,15 @@ interface SettingItem {
 	currentValue: string;
 }
 
+interface SettingGroup {
+	label?: string;
+	items: SettingItem[];
+}
+
+type SettingRow =
+	| { kind: "header"; label: string }
+	| { kind: "setting"; item: SettingItem };
+
 type Tab = "features" | "icons" | "segments" | "telemetry";
 
 const TABS: Tab[] = ["features", "icons", "segments", "telemetry"];
@@ -26,6 +39,20 @@ const COPY = {
 	en: {
 		title: "Open TUI Settings",
 		tabs: { features: "General", icons: "Appearance", segments: "Footer", telemetry: "Telemetry" },
+		sections: {
+			extension: "Extension",
+			interface: "Interface",
+			messages: "Messages & tools",
+			footer: "Footer",
+			icons: "Icons",
+			editor: "Editor",
+			location: "Location",
+			git: "Git",
+			runtime: "Runtime",
+			usage: "Usage",
+			other: "Other",
+			measurements: "Measurements",
+		},
 		hint: "Tab/Shift+Tab/←/→: tabs · ↑/↓: move · Enter/Space: change · Esc/q: close",
 		labels: {
 			enabled: "Enabled",
@@ -70,6 +97,20 @@ const COPY = {
 	zh: {
 		title: "Open TUI 设置",
 		tabs: { features: "常规", icons: "外观", segments: "底栏", telemetry: "遥测" },
+		sections: {
+			extension: "扩展",
+			interface: "界面",
+			messages: "消息与工具",
+			footer: "底栏",
+			icons: "图标",
+			editor: "输入框",
+			location: "位置",
+			git: "Git",
+			runtime: "运行环境",
+			usage: "用量",
+			other: "其他",
+			measurements: "测量指标",
+		},
 		hint: "Tab/Shift+Tab/←/→：切页 · ↑/↓：移动 · Enter/Space：更改 · Esc/q：关闭",
 		labels: {
 			enabled: "启用",
@@ -167,72 +208,131 @@ function cycleThinkingPeek(config: OpenTuiConfig): OpenTuiConfig {
 	};
 }
 
-function buildFeaturesItems(config: OpenTuiConfig, copy: SettingsCopy): SettingItem[] {
+function buildFeaturesItems(config: OpenTuiConfig, copy: SettingsCopy): SettingGroup[] {
 	const flag = (value: boolean) => value ? copy.values.on : copy.values.off;
 	return [
-		{ id: "enabled", label: copy.labels.enabled, currentValue: flag(config.enabled) },
-		{ id: "header", label: copy.labels.header, currentValue: flag(config.header) },
-		{ id: "settingsLanguage", label: copy.labels.language, currentValue: copy.values.languages[config.settingsLanguage] },
-		{ id: "thinkingPeek", label: copy.labels.thinkingPeek, currentValue: formatThinkingPeekLines(config.thinkingPeek.lines, copy) },
-		{ id: "inlineFooter", label: copy.labels.inlineFooter, currentValue: flag(config.inlineFooter) },
-		{ id: "copyButtons", label: copy.labels.copyButtons, currentValue: flag(config.copyButtons) },
-		{ id: "toolView", label: copy.labels.toolView, currentValue: copy.values.toolView[config.toolView.mode] },
-		...(config.toolView.mode === "compact" ? [
-			{ id: "extensionTools", label: `  ${copy.labels.extensionTools}`, currentValue: flag(config.toolView.extensionTools) },
-		] : []),
+		{
+			label: copy.sections.extension,
+			items: [{ id: "enabled", label: copy.labels.enabled, currentValue: flag(config.enabled) }],
+		},
+		{
+			label: copy.sections.interface,
+			items: [
+				{ id: "header", label: copy.labels.header, currentValue: flag(config.header) },
+				{ id: "settingsLanguage", label: copy.labels.language, currentValue: copy.values.languages[config.settingsLanguage] },
+			],
+		},
+		{
+			label: copy.sections.messages,
+			items: [
+				{ id: "thinkingPeek", label: copy.labels.thinkingPeek, currentValue: formatThinkingPeekLines(config.thinkingPeek.lines, copy) },
+				{ id: "copyButtons", label: copy.labels.copyButtons, currentValue: flag(config.copyButtons) },
+				{ id: "toolView", label: copy.labels.toolView, currentValue: copy.values.toolView[config.toolView.mode] },
+				...(config.toolView.mode === "compact" ? [
+					{ id: "extensionTools", label: `  ${copy.labels.extensionTools}`, currentValue: flag(config.toolView.extensionTools) },
+				] : []),
+			],
+		},
+		{
+			label: copy.sections.footer,
+			items: [{ id: "inlineFooter", label: copy.labels.inlineFooter, currentValue: flag(config.inlineFooter) }],
+		},
 	];
 }
 
-function buildIconsItems(config: OpenTuiConfig, copy: SettingsCopy): SettingItem[] {
+function buildIconsItems(config: OpenTuiConfig, copy: SettingsCopy): SettingGroup[] {
 	return [
-		{ id: "mode", label: copy.labels.iconMode, currentValue: copy.values.icons[config.icons.mode] },
-		{ id: "cursorStyle", label: copy.labels.cursorStyle, currentValue: copy.values.cursorStyles[config.cursorStyle] },
+		{
+			label: copy.sections.icons,
+			items: [{ id: "mode", label: copy.labels.iconMode, currentValue: copy.values.icons[config.icons.mode] }],
+		},
+		{
+			label: copy.sections.editor,
+			items: [{ id: "cursorStyle", label: copy.labels.cursorStyle, currentValue: copy.values.cursorStyles[config.cursorStyle] }],
+		},
 	];
 }
 
-function buildSegmentsItems(config: OpenTuiConfig, copy: SettingsCopy): SettingItem[] {
+function buildSegmentsItems(config: OpenTuiConfig, copy: SettingsCopy): SettingGroup[] {
 	const segs = config.footerSegments;
 	const flag = (value: boolean) => value ? copy.values.on : copy.values.off;
 	return [
-		{ id: "cwd", label: copy.labels.cwd, currentValue: flag(segs.cwd) },
-		{ id: "hostname", label: copy.labels.hostname, currentValue: flag(segs.hostname) },
-		{ id: "sessionName", label: copy.labels.sessionName, currentValue: flag(segs.sessionName) },
-		{ id: "gitBranch", label: copy.labels.gitBranch, currentValue: flag(segs.gitBranch) },
-		{ id: "gitStatus", label: copy.labels.gitStatus, currentValue: flag(segs.gitStatus) },
-		{ id: "gitCommit", label: copy.labels.gitCommit, currentValue: flag(segs.gitCommit) },
-		{ id: "runtime", label: copy.labels.runtime, currentValue: flag(segs.runtime) },
-		{ id: "context", label: copy.labels.context, currentValue: flag(segs.context) },
-		{ id: "tokens", label: copy.labels.tokens, currentValue: flag(segs.tokens) },
-		{ id: "cost", label: copy.labels.cost, currentValue: flag(segs.cost) },
-		{ id: "liveTps", label: copy.labels.liveTps, currentValue: flag(segs.liveTps) },
-		{ id: "extensionStatuses", label: copy.labels.extensionStatuses, currentValue: flag(segs.extensionStatuses) },
-		{ id: "capitalizeProviderName", label: copy.labels.capitalizeProviderName, currentValue: flag(segs.capitalizeProviderName) },
-		{ id: "nerdIconSpacing", label: copy.labels.nerdIconSpacing, currentValue: flag(segs.nerdIconSpacing) },
+		{
+			label: copy.sections.location,
+			items: [
+				{ id: "cwd", label: copy.labels.cwd, currentValue: flag(segs.cwd) },
+				{ id: "hostname", label: copy.labels.hostname, currentValue: flag(segs.hostname) },
+				{ id: "sessionName", label: copy.labels.sessionName, currentValue: flag(segs.sessionName) },
+			],
+		},
+		{
+			label: copy.sections.git,
+			items: [
+				{ id: "gitBranch", label: copy.labels.gitBranch, currentValue: flag(segs.gitBranch) },
+				{ id: "gitStatus", label: copy.labels.gitStatus, currentValue: flag(segs.gitStatus) },
+				{ id: "gitCommit", label: copy.labels.gitCommit, currentValue: flag(segs.gitCommit) },
+			],
+		},
+		{
+			label: copy.sections.runtime,
+			items: [
+				{ id: "runtime", label: copy.labels.runtime, currentValue: flag(segs.runtime) },
+				{ id: "context", label: copy.labels.context, currentValue: flag(segs.context) },
+				{ id: "liveTps", label: copy.labels.liveTps, currentValue: flag(segs.liveTps) },
+			],
+		},
+		{
+			label: copy.sections.usage,
+			items: [
+				{ id: "tokens", label: copy.labels.tokens, currentValue: flag(segs.tokens) },
+				{ id: "cost", label: copy.labels.cost, currentValue: flag(segs.cost) },
+			],
+		},
+		{
+			label: copy.sections.other,
+			items: [
+				{ id: "extensionStatuses", label: copy.labels.extensionStatuses, currentValue: flag(segs.extensionStatuses) },
+				{ id: "capitalizeProviderName", label: copy.labels.capitalizeProviderName, currentValue: flag(segs.capitalizeProviderName) },
+				{ id: "nerdIconSpacing", label: copy.labels.nerdIconSpacing, currentValue: flag(segs.nerdIconSpacing) },
+			],
+		},
 	];
 }
 
-function buildTelemetryItems(config: OpenTuiConfig, copy: SettingsCopy): SettingItem[] {
+function buildTelemetryItems(config: OpenTuiConfig, copy: SettingsCopy): SettingGroup[] {
 	const telemetry = config.telemetry;
 	const flag = (value: boolean) => value ? copy.values.on : copy.values.off;
 	return [
-		{ id: "enabled", label: copy.labels.enabled, currentValue: flag(telemetry.enabled) },
-		{ id: "tps", label: "TPS", currentValue: flag(telemetry.tps) },
-		{ id: "ttft", label: "TTFT", currentValue: flag(telemetry.ttft) },
-		{ id: "duration", label: copy.labels.totalDuration, currentValue: flag(telemetry.duration) },
-		{ id: "tokens", label: copy.labels.tokenCounts, currentValue: flag(telemetry.tokens) },
-		{ id: "stalls", label: copy.labels.stallDetails, currentValue: flag(telemetry.stalls) },
-		{ id: "cost", label: copy.labels.costRate, currentValue: flag(telemetry.cost) },
+		{ items: [{ id: "enabled", label: copy.labels.enabled, currentValue: flag(telemetry.enabled) }] },
+		{
+			label: copy.sections.measurements,
+			items: [
+				{ id: "tps", label: "TPS", currentValue: flag(telemetry.tps) },
+				{ id: "ttft", label: "TTFT", currentValue: flag(telemetry.ttft) },
+				{ id: "duration", label: copy.labels.totalDuration, currentValue: flag(telemetry.duration) },
+				{ id: "tokens", label: copy.labels.tokenCounts, currentValue: flag(telemetry.tokens) },
+				{ id: "stalls", label: copy.labels.stallDetails, currentValue: flag(telemetry.stalls) },
+				{ id: "cost", label: copy.labels.costRate, currentValue: flag(telemetry.cost) },
+			],
+		},
 	];
 }
 
-function buildItems(tab: Tab, config: OpenTuiConfig): SettingItem[] {
+function buildItems(tab: Tab, config: OpenTuiConfig): SettingRow[] {
 	const copy = COPY[config.settingsLanguage];
+	let groups: SettingGroup[];
 	switch (tab) {
-		case "features": return buildFeaturesItems(config, copy);
-		case "icons": return buildIconsItems(config, copy);
-		case "segments": return buildSegmentsItems(config, copy);
-		case "telemetry": return buildTelemetryItems(config, copy);
+		case "features": groups = buildFeaturesItems(config, copy); break;
+		case "icons": groups = buildIconsItems(config, copy); break;
+		case "segments": groups = buildSegmentsItems(config, copy); break;
+		case "telemetry": groups = buildTelemetryItems(config, copy); break;
 	}
+	return groups.flatMap<SettingRow>((group) => [
+		...(group.label ? [
+			{ kind: "header" as const, label: group.label },
+		] : []),
+		...group.items.map((item) => ({ kind: "setting" as const, item })),
+	]);
 }
 
 function handleSettingChange(
@@ -267,16 +367,160 @@ function handleSettingChange(
 	return config;
 }
 
+// SelectList only receives actual settings. This component inserts section rows
+// into its rendered output and scrolls in display rows, including the headers.
+class SectionedSettingsList {
+	readonly capturesViewportInput = true;
+	onSelect?: (item: SelectItem) => void;
+	onCancel?: () => void;
+	onSelectionChange?: (item: SelectItem) => void;
+	private readonly selectList: SelectList;
+	private readonly items: SelectItem[];
+	private readonly rows: SettingRow[];
+	private readonly theme: Theme;
+	private readonly visibleRows: number;
+	private readonly showScrollInfo: boolean;
+	private pressedItemId: string | undefined;
+
+	constructor(
+		rows: SettingRow[],
+		availableRows: number,
+		width: number,
+		theme: Theme,
+	) {
+		this.rows = rows;
+		this.theme = theme;
+		const compact = width <= 60;
+		this.items = rows.flatMap<SelectItem>((row) => {
+			if (row.kind !== "setting") return [];
+			const item = row.item;
+			return [{
+				value: item.id,
+				// Reserve Box padding (2), SelectList prefix/safety (4), and ": " (2).
+				label: compact
+					? `${truncateToWidth(item.label, Math.max(0, width - 8 - visibleWidth(item.currentValue)))}: ${item.currentValue}`
+					: item.label,
+				description: compact ? undefined : item.currentValue,
+			}];
+		});
+		// Reserve the scroll indicator when there is room for it and a setting.
+		this.showScrollInfo = rows.length > availableRows && availableRows > 1;
+		this.visibleRows = Math.max(1, availableRows - (this.showScrollInfo ? 1 : 0));
+		this.selectList = new SelectList(this.items, this.items.length, {
+			selectedPrefix: (t) => theme.fg("accent", t),
+			selectedText: (t) => theme.fg("accent", t),
+			description: (t) => theme.fg("muted", t),
+			scrollInfo: (t) => theme.fg("dim", t),
+			noMatch: (t) => theme.fg("warning", t),
+		});
+		this.selectList.onSelect = (item) => this.onSelect?.(item);
+		this.selectList.onCancel = () => this.onCancel?.();
+		this.selectList.onSelectionChange = (item) => this.onSelectionChange?.(item);
+	}
+
+	getSelectedItem(): SelectItem | null {
+		return this.selectList.getSelectedItem();
+	}
+
+	selectItem(itemId: string | undefined): void {
+		const index = this.items.findIndex((item) => item.value === itemId);
+		if (index >= 0) this.selectList.setSelectedIndex(index);
+	}
+
+	private selectedRowIndex(): number {
+		const selected = this.getSelectedItem();
+		return this.rows.findIndex((row) => row.kind === "setting" && row.item.id === selected?.value);
+	}
+
+	private visibleRange(): { start: number; end: number } {
+		const start = Math.max(0, Math.min(
+			this.selectedRowIndex() - Math.floor(this.visibleRows / 2),
+			this.rows.length - this.visibleRows,
+		));
+		return { start, end: Math.min(start + this.visibleRows, this.rows.length) };
+	}
+
+	render(width: number): string[] {
+		const settingLines = this.selectList.render(width);
+		let itemIndex = 0;
+		const lines = this.rows.map((row) => {
+			if (row.kind === "setting") return settingLines[itemIndex++]!;
+			const label = truncateToWidth(`  ──${row.label} `, width, "");
+			return this.theme.fg("dim", label + "─".repeat(Math.max(0, width - visibleWidth(label))));
+		});
+		const { start, end } = this.visibleRange();
+		const visible = lines.slice(start, end);
+		if (this.showScrollInfo) {
+			visible.push(this.theme.fg("dim", truncateToWidth(
+				`  (${this.selectedRowIndex() + 1}/${this.rows.length})`, width, "",
+			)));
+		}
+		return visible;
+	}
+
+	handleInput(data: string): void {
+		this.pressedItemId = undefined;
+		const kb = getKeybindings();
+		const pageIndex = getSelectPageIndex(kb, data, this.selectedRowIndex(), this.rows.length, this.visibleRows);
+		if (pageIndex === undefined) {
+			this.selectList.handleInput(data);
+			return;
+		}
+		const direction = kb.matches(data, "tui.select.pageUp") ? -1 : 1;
+		let index = pageIndex;
+		while (index >= 0 && index < this.rows.length && this.rows[index]?.kind !== "setting") index += direction;
+		if (index < 0 || index >= this.rows.length) {
+			index = pageIndex;
+			while (index >= 0 && index < this.rows.length && this.rows[index]?.kind !== "setting") index -= direction;
+		}
+		const row = this.rows[index];
+		if (row?.kind === "setting") {
+			this.selectItem(row.item.id);
+			const selected = this.getSelectedItem();
+			if (selected) this.onSelectionChange?.(selected);
+		}
+	}
+
+	handleMouse(event: TuiMouseEvent): TuiMouseEventResult | undefined {
+		if (event.type === "wheel") {
+			this.pressedItemId = undefined;
+			return this.selectList.handleMouse(event);
+		}
+		if (event.button !== "left" || (event.type !== "press" && event.type !== "click")) return undefined;
+		const { start, end } = this.visibleRange();
+		const rowIndex = start + event.y;
+		const row = rowIndex >= start && rowIndex < end ? this.rows[rowIndex] : undefined;
+		if (row?.kind !== "setting") {
+			this.pressedItemId = undefined;
+			return { handled: true, render: false };
+		}
+		const itemId = event.type === "click" ? this.pressedItemId ?? row.item.id : row.item.id;
+		this.pressedItemId = event.type === "press" ? itemId : undefined;
+		this.selectItem(itemId);
+		const selected = this.getSelectedItem();
+		if (selected) {
+			this.onSelectionChange?.(selected);
+			if (event.type === "click") this.onSelect?.(selected);
+		}
+		return { handled: true, focus: true, render: true };
+	}
+
+	invalidate(): void {
+		this.selectList.invalidate();
+	}
+}
+
 interface SettingsUiHandle {
 	render: (width: number) => string[];
 	invalidate: () => void;
 	handleInput: (data: string) => void;
+	handleMouse: (event: TuiMouseEvent) => TuiMouseEventResult | undefined;
 }
 
 class SettingsUi implements SettingsUiHandle {
 	private tab: Tab = "features";
 	private config: OpenTuiConfig;
-	private selectList!: SelectList;
+	private selectList!: SectionedSettingsList;
 	private readonly selectedItemByTab: Partial<Record<Tab, string>> = {};
 	private readonly container: Box;
 	private readonly tui: TUI;
@@ -322,7 +566,6 @@ class SettingsUi implements SettingsUiHandle {
 	): void {
 		this.layoutWidth = width;
 		this.layoutRows = this.tui.terminal.rows;
-		const compact = width <= 60;
 		const copy = COPY[this.config.settingsLanguage];
 		this.container.clear();
 		this.container.addChild(new Text(this.theme.bold(this.theme.fg("accent", copy.title)), 1, 0));
@@ -335,28 +578,9 @@ class SettingsUi implements SettingsUiHandle {
 		this.container.addChild(new Text(tabBar, 1, 0));
 		this.container.addChild(new Text(this.theme.fg("dim", copy.hint), 1, 0));
 
-		const items = buildItems(this.tab, this.config).map<SelectItem>((item) => ({
-			value: item.id,
-			// Reserve Box padding (2), SelectList prefix/safety (4), and ": " (2).
-			label: compact
-				? `${truncateToWidth(item.label, Math.max(0, width - 8 - visibleWidth(item.currentValue)))}: ${item.currentValue}`
-				: item.label,
-			description: compact ? undefined : item.currentValue,
-		}));
 		const availableRows = this.layoutRows - this.container.render(width).length;
-		// A scrolling SelectList adds one status row below the items.
-		const visibleItems = items.length <= availableRows ? items.length : Math.max(1, availableRows - 1);
-		this.selectList = new SelectList(items, visibleItems, {
-			selectedPrefix: (t) => this.theme.fg("accent", t),
-			selectedText: (t) => this.theme.fg("accent", t),
-			description: (t) => this.theme.fg("muted", t),
-			scrollInfo: (t) => this.theme.fg("dim", t),
-			noMatch: (t) => this.theme.fg("warning", t),
-		});
-		const selectedIndex = items.findIndex((item) => item.value === preferredItemId);
-		if (selectedIndex >= 0) {
-			this.selectList.setSelectedIndex(selectedIndex);
-		}
+		this.selectList = new SectionedSettingsList(buildItems(this.tab, this.config), availableRows, width, this.theme);
+		this.selectList.selectItem(preferredItemId);
 		this.selectedItemByTab[this.tab] = this.selectList.getSelectedItem()?.value;
 		this.selectList.onSelectionChange = (item) => {
 			this.selectedItemByTab[this.tab] = item.value;
@@ -396,6 +620,14 @@ class SettingsUi implements SettingsUiHandle {
 		this.invalidate();
 	}
 
+	handleMouse(event: TuiMouseEvent): TuiMouseEventResult | undefined {
+		const result = this.container.handleMouse(event);
+		if (result?.handled && result.render !== false) this.invalidate();
+		// Keep keyboard focus on SettingsUi so tab switching and close shortcuts
+		// still run here after clicking a setting inside the nested Box.
+		return result ? { handled: result.handled, render: result.render } : undefined;
+	}
+
 	render(width: number): string[] {
 		if (width !== this.layoutWidth || this.tui.terminal.rows !== this.layoutRows) {
 			this.rebuild(undefined, width);
@@ -432,11 +664,17 @@ export function registerSettingsCommand(
 					() => done(undefined),
 				);
 				return {
+					capturesViewportInput: true,
 					render: (w: number) => ui.render(w),
 					invalidate: () => ui.invalidate(),
 					handleInput: (data: string) => {
 						ui.handleInput(data);
 						tui.requestRender();
+					},
+					handleMouse: (event: TuiMouseEvent) => {
+						const result = ui.handleMouse(event);
+						if (result?.handled && result.render !== false) tui.requestRender();
+						return result;
 					},
 				};
 			}, { overlay: true });
