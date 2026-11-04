@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { copyToClipboard, UserMessageComponent, type MarkdownTransformContext, type Theme } from "@earendil-works/pi-coding-agent";
 import {
 	compositeTuiLine,
@@ -13,12 +14,13 @@ import {
 	type TuiMouseEvent,
 	type TuiMouseEventResult,
 } from "@earendil-works/pi-tui";
+import { stripAnsi } from "./utils.ts";
 
 const LABEL = "[Copy]";
 // Below this width a frame plus label would crowd the code, so Pi's plain fences are kept.
 const MIN_FRAME_WIDTH = 8;
 // Zero-width APC sequence: survives wrapping and padding, and marks the label column before we strip it.
-const MARKER = "\x1b_open-tui:cb\x07";
+const MARKER_PREFIX = "\x1b_open-tui:cb:";
 const PATCH_KEY = Symbol.for("pi-open-tui.copy-buttons");
 // pi-pretty-tui draws its own code-block [Copy]; patching the same methods twice would fight.
 const PRETTY_TUI_KEY = Symbol.for("pretty-tui.code-blocks");
@@ -58,6 +60,7 @@ interface AltScreenInternals {
 interface MarkdownInternals {
 	text?: unknown;
 	theme: MarkdownTheme;
+	invalidate(): void;
 	render(width: number): string[];
 	renderToken(token: Token, width: number, nextTokenType?: string, styleContext?: unknown): string[];
 	handleMouse?(event: TuiMouseEvent): TuiMouseEventResult | undefined;
@@ -69,20 +72,33 @@ interface UserMessageInternals {
 	handleMouse?(event: TuiMouseEvent): TuiMouseEventResult | undefined;
 }
 
+interface MarkdownState {
+	active: boolean;
+	policy?: { frame: boolean; label: boolean };
+	lines?: readonly string[];
+	regions: CopyRegion[];
+	descriptors: Map<number, { text: string; label: boolean }>;
+	nextId: number;
+}
+
 /** Set by our Markdown transformer while a transcript Markdown renders. */
-let renderScope: { frame: boolean; label: boolean; ordinal: number; blocks: { text: string; ordinal: number }[] } | undefined;
+let renderScope: { owner: MarkdownInternals; state: MarkdownState; active: boolean; frame: boolean; label: boolean } | undefined;
 let press: Press | undefined;
-const markdownRegions = new WeakMap<object, { lines: readonly string[]; regions: CopyRegion[] }>();
-const userRegions = new WeakMap<object, { region: CopyRegion; source: string; label: string; width: number; line: string }>();
+const regionTargets = new WeakMap<CopyRegion, string>();
 
 /**
- * Markdown transformer that only records the message kind; Pi calls it during Markdown.render.
+ * Pi calls the transform before consulting its native block cache, so policy changes can invalidate it in this pass.
  * Thinking blocks keep Pi's fences. Streaming replies get the frame but no label: it would copy unfinished code.
  */
 export function markCopyScope(markdown: string, context: MarkdownTransformContext): string {
 	if (renderScope) {
-		renderScope.frame = context.messageType !== "assistant-thinking";
+		renderScope.frame = renderScope.active && context.messageType !== "assistant-thinking";
 		renderScope.label = renderScope.frame && !context.isStreaming;
+		const previous = renderScope.state.policy;
+		if (previous && (previous.frame !== renderScope.frame || previous.label !== renderScope.label)) {
+			renderScope.owner.invalidate();
+		}
+		renderScope.state.policy = { frame: renderScope.frame, label: renderScope.label };
 	}
 	return markdown;
 }
@@ -98,6 +114,7 @@ export function renderFramedCode(
 	width: number,
 	label: string | undefined,
 	border: (text: string) => string = theme.codeBlockBorder,
+	marker = "",
 ): string[] {
 	const inner = width - 4;
 	const highlighted = theme.highlightCode?.(code, lang) ?? code.split("\n").map((line) => theme.codeBlock(line));
@@ -111,8 +128,8 @@ export function renderFramedCode(
 	const widest = Math.max(0, ...rows.map((row) => visibleWidth(row)));
 	const frameWidth = Math.min(width, Math.max(widest + 4, visibleWidth(prefix) + 3 + visibleWidth(suffix) + 1));
 	const fill = Math.max(0, frameWidth - visibleWidth(prefix) - visibleWidth(suffix) - 1);
-	const top = border("╭─ ") + theme.codeBlockBorder(`${name} `) + border("─".repeat(fill))
-		+ (label === undefined ? "" : ` ${MARKER}${label} `) + border("╮");
+	const top = (label === undefined ? marker : "") + border("╭─ ") + theme.codeBlockBorder(`${name} `) + border("─".repeat(fill))
+		+ (label === undefined ? "" : ` ${marker}${label} `) + border("╮");
 	const body = rows.map((row) => border("│ ") + row + " ".repeat(Math.max(0, frameWidth - 4 - visibleWidth(row))) + border(" │"));
 	return [top, ...body, border(`╰${"─".repeat(frameWidth - 2)}╯`)];
 }
@@ -150,7 +167,8 @@ function cancelStalePress(owner: object, regions: readonly CopyRegion[]): void {
 	if (press?.owner !== owner) return;
 	const previous = press.region;
 	if (!regions.some((region) => region.row === previous.row && region.col === previous.col
-		&& region.width === previous.width && region.text === previous.text)) {
+		&& region.width === previous.width && region.text === previous.text
+		&& regionTargets.get(region) === regionTargets.get(previous))) {
 		press = undefined;
 	}
 }
@@ -228,21 +246,29 @@ export function installCopyButtons(options: {
 	const altScreenProto = TuiAltScreen.prototype as unknown as AltScreenInternals;
 
 	const refresh = () => {
+		press = undefined;
 		const tui = options.getTui();
 		tui?.invalidate();
 		tui?.requestRender();
 	};
 	if (markdownProto[PATCH_KEY] || markdownProto[PRETTY_TUI_KEY]) return { cleanup: () => {}, refresh };
 
-	if (typeof altScreenProto.handleMouseEvent !== "function" || typeof altScreenProto.createMouseEvent !== "function") {
+	if (typeof markdownProto.render !== "function" || typeof markdownProto.renderToken !== "function"
+		|| typeof markdownProto.invalidate !== "function" || typeof altScreenProto.handleMouseEvent !== "function"
+		|| typeof altScreenProto.createMouseEvent !== "function") {
 		return { cleanup: () => {}, refresh };
 	}
 	let installed = true;
 	const active = () => installed && options.isEnabled() && options.getTui()?.mode === "fullscreen";
+	const codeActive = () => active() && !markdownProto[PRETTY_TUI_KEY];
+	let markdownRegions = new WeakMap<object, MarkdownState>();
+	let userRegions = new WeakMap<object, { region: CopyRegion; source: string; label: string; width: number; line: string }>();
+	const markerPrefix = `${MARKER_PREFIX}${randomUUID()}:`;
+	const markerPattern = new RegExp(`${markerPrefix}(\\d+):([01])\x07`, "g");
 	const copy = (text: string) => {
 		const tui = options.getTui();
 		const flash = (message: string) => {
-			if (tui instanceof TuiAltScreen) tui.flash(message);
+			if (installed && tui === options.getTui() && tui instanceof TuiAltScreen) tui.flash(message);
 		};
 		copyToClipboard(text).then(() => flash("Copied!"), () => flash("Copy failed"));
 	};
@@ -250,6 +276,7 @@ export function installCopyButtons(options: {
 
 	const originalRender = markdownProto.render;
 	const originalRenderToken = markdownProto.renderToken;
+	const originalInvalidate = markdownProto.invalidate;
 	const originalMarkdownMouse = markdownProto.handleMouse;
 	const originalUserRender = userProto.render;
 	const originalUserMouse = userProto.handleMouse;
@@ -257,7 +284,11 @@ export function installCopyButtons(options: {
 
 	const restores = [
 		patch(altScreenProto, "handleMouseEvent", function (this: AltScreenInternals, raw) {
-			if (!active() || this !== (options.getTui() as unknown)) return originalAltScreenMouse.call(this, raw);
+			if (!active() || this !== (options.getTui() as unknown)) {
+				press = undefined;
+				return originalAltScreenMouse.call(this, raw);
+			}
+			if (press?.owner instanceof Markdown && !codeActive()) press = undefined;
 			const motion = (raw.button & 32) !== 0;
 			if (!raw.release && !motion) press = undefined;
 			// Leave press/drag to Pi's selection; intercept only a qualifying release before copy-on-select runs.
@@ -273,63 +304,119 @@ export function installCopyButtons(options: {
 		}),
 		patch(markdownProto, "renderToken", function (this: MarkdownInternals, token, width, nextTokenType, styleContext) {
 			const scope = renderScope;
-			if (!installed || !scope || token.type !== "code") return originalRenderToken.call(this, token, width, nextTokenType, styleContext);
-			const ordinal = scope.ordinal++;
-			if (!scope.frame || !active() || width < MIN_FRAME_WIDTH) {
+			if (!installed || !scope?.active || scope.owner !== this || token.type !== "code") {
 				return originalRenderToken.call(this, token, width, nextTokenType, styleContext);
 			}
-			const theme = options.getTheme();
 			const showLabel = scope.label && width >= MIN_FRAME_WIDTH + LABEL.length + 2;
-			const lines = renderFramedCode(
-				this.theme,
-				token.text,
-				token.lang,
-				width,
-				showLabel ? label() : undefined,
-				(text) => theme.fg("borderMuted", text),
-			);
-			if (showLabel) scope.blocks.push({ text: token.text, ordinal });
-			// Same spacing rule as Pi's own code-block rendering.
-			if (nextTokenType && nextTokenType !== "space") lines.push("");
+			const id = scope.state.nextId++;
+			const marker = `${markerPrefix}${id}:${showLabel ? 1 : 0}\x07`;
+			let lines: string[];
+			if (scope.frame && width >= MIN_FRAME_WIDTH) {
+				const theme = options.getTheme();
+				lines = renderFramedCode(this.theme, token.text, token.lang, width, showLabel ? label() : undefined,
+					(text) => theme.fg("borderMuted", text), marker);
+				// Same spacing rule as Pi's own code-block rendering.
+				if (nextTokenType && nextTokenType !== "space") lines.push("");
+			} else {
+				lines = originalRenderToken.call(this, token, width, nextTokenType, styleContext);
+				// Unlabeled occurrences still count toward the current source ordinal.
+				lines[0] = marker + (lines[0] ?? "");
+			}
+			scope.state.descriptors.set(id, { text: token.text, label: showLabel });
 			return lines;
 		}),
 		patch(markdownProto, "render", function (this: MarkdownInternals, width) {
 			if (!installed) return originalRender.call(this, width);
-			const outer = renderScope;
-			const scope = { frame: false, label: false, ordinal: 0, blocks: [] as { text: string; ordinal: number }[] };
-			renderScope = scope;
-			let lines: string[];
+			if (markdownProto[PRETTY_TUI_KEY]) {
+				if (markdownRegions.has(this)) {
+					// Clear our old pixels without deleting a later owner's in-progress collection.
+					originalInvalidate.call(this);
+					markdownRegions.delete(this);
+					cancelStalePress(this, []);
+				}
+				return originalRender.call(this, width);
+			}
+			const enabled = codeActive();
+			const previous = markdownRegions.get(this);
+			const state: MarkdownState = previous ?? { active: enabled, regions: [], descriptors: new Map(), nextId: 0 };
+			if (!previous) {
+				markdownRegions.set(this, state);
+				// A component may already have cached native fences before this installation.
+				this.invalidate();
+			} else if (state.active !== enabled) {
+				this.invalidate();
+				cancelStalePress(this, []);
+				state.active = enabled;
+				state.policy = undefined;
+			}
+			const run = () => {
+				const outer = renderScope;
+				renderScope = { owner: this, state, active: enabled, frame: false, label: false };
+				try { return originalRender.call(this, width); }
+				finally { renderScope = outer; }
+			};
 			try {
-				lines = originalRender.call(this, width);
-			} finally {
-				renderScope = outer;
+				let lines = run();
+				if (state.lines === lines) return lines;
+				// A retained native block can outlive its description after a renderer change.
+				const missing = lines.some((line) => [...line.matchAll(markerPattern)].some((match) => !state.descriptors.has(Number(match[1]))));
+				if (missing) {
+					this.invalidate();
+					lines = run();
+				}
+				const source = typeof this.text === "string" ? this.text : "";
+				const regions: CopyRegion[] = [];
+				const live = new Set<number>();
+				let ordinal = 0;
+				for (let row = 0; row < lines.length; row++) {
+					const line = lines[row]!;
+					let clean = "";
+					let from = 0;
+					for (const match of line.matchAll(markerPattern)) {
+						clean += line.slice(from, match.index);
+						from = match.index + match[0].length;
+						const id = Number(match[1]);
+						const block = state.descriptors.get(id);
+						const currentOrdinal = ordinal++;
+						if (block) live.add(id);
+						if (match[2] !== "1") continue;
+						const suffix = line.slice(from);
+						const labelAt = suffix.indexOf(LABEL);
+						if (labelAt < 0 || stripAnsi(suffix.slice(0, labelAt)) !== "") continue;
+						if (!block?.label || !enabled) {
+							// Preserve styles and width while removing an unresolved extension label.
+							clean += suffix.slice(0, labelAt) + " ".repeat(LABEL.length);
+							from += labelAt + LABEL.length;
+							continue;
+						}
+						const region = { row, col: visibleWidth(clean), width: LABEL.length,
+							text: restoreTabs(source, currentOrdinal, block.text) };
+						regionTargets.set(region, `${currentOrdinal}\0${source}`);
+						regions.push(region);
+					}
+					// Only sanitize the final array; native block lines retain their descriptor IDs.
+					lines[row] = clean + line.slice(from);
+				}
+				for (const id of state.descriptors.keys()) if (!live.has(id)) state.descriptors.delete(id);
+				cancelStalePress(this, regions);
+				state.lines = lines;
+				state.regions = regions;
+				return lines;
+			} catch (error) {
+				cancelStalePress(this, []);
+				state.lines = undefined;
+				state.regions = [];
+				state.descriptors.clear();
+				state.policy = undefined;
+				this.invalidate();
+				throw error;
 			}
-			// A cache hit returns the array we already processed and skips renderToken.
-			if (markdownRegions.get(this)?.lines === lines) return lines;
-			const source = typeof this.text === "string" ? this.text : "";
-			const regions: CopyRegion[] = [];
-			let next = 0;
-			for (let row = 0; row < lines.length; row++) {
-				const line = lines[row]!;
-				const at = line.indexOf(MARKER);
-				if (at < 0) continue;
-				// The renderer caches this array, so stripping in place keeps the marker out of later frames.
-				lines[row] = line.split(MARKER).join("");
-				const block = scope.blocks[next++];
-				if (!block) continue;
-				regions.push({
-					row,
-					col: visibleWidth(line.slice(0, at)),
-					width: LABEL.length,
-					text: restoreTabs(source, block.ordinal, block.text),
-				});
-			}
-			cancelStalePress(this, regions);
-			markdownRegions.set(this, { lines, regions });
-			return lines;
 		}),
 		patch(markdownProto, "handleMouse", function (this: MarkdownInternals, event) {
-			if (!active()) return originalMarkdownMouse?.call(this, event);
+			if (!codeActive()) {
+				cancelStalePress(this, []);
+				return originalMarkdownMouse?.call(this, event);
+			}
 			const regions = markdownRegions.get(this)?.regions ?? [];
 			return handleCopyMouse(this, regions, event, copy) ?? originalMarkdownMouse?.call(this, event);
 		}),
@@ -365,7 +452,10 @@ export function installCopyButtons(options: {
 			return lines;
 		}),
 		patch(userProto, "handleMouse", function (this: UserMessageInternals, event) {
-			if (!active()) return originalUserMouse?.call(this, event);
+			if (!active()) {
+				cancelStalePress(this, []);
+				return originalUserMouse?.call(this, event);
+			}
 			const region = userRegions.get(this)?.region;
 			return handleCopyMouse(this, region ? [region] : [], event, copy) ?? originalUserMouse?.call(this, event);
 		}),
@@ -380,6 +470,8 @@ export function installCopyButtons(options: {
 			for (const restore of restores) restore();
 			delete markdownProto[PATCH_KEY];
 			press = undefined;
+			markdownRegions = new WeakMap();
+			userRegions = new WeakMap();
 			try {
 				refresh();
 			} catch {

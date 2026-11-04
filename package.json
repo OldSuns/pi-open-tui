@@ -26,7 +26,7 @@
     "LICENSE"
   ],
   "scripts": {
-    "test": "node --test tests/settings-command.test.ts tests/footer.test.ts tests/editor.test.ts tests/telemetry.test.ts tests/peek.test.ts tests/tool-view.test.ts tests/copy-buttons.test.ts",
+    "test": "node --test tests/settings-command.test.ts tests/footer.test.ts tests/editor.test.ts tests/telemetry.test.ts tests/peek.test.ts tests/tool-view.test.ts tests/copy-buttons.test.ts tests/copy-markdown.test.ts",
     "typecheck": "tsc --noEmit"
   },
   "pi": {
@@ -36,9 +36,9 @@
     "image": "https://raw.githubusercontent.com/OldSuns/pi-open-tui/main/assets/preview_dashboard_1.png"
   },
   "peerDependencies": {
-    "@earendil-works/pi-ai": ">=1.2.0",
-    "@earendil-works/pi-coding-agent": ">=1.2.0",
-    "@earendil-works/pi-tui": ">=1.2.0"
+    "@earendil-works/pi-ai": ">=1.5.0",
+    "@earendil-works/pi-coding-agent": ">=1.5.0",
+    "@earendil-works/pi-tui": ">=1.5.0"
   },
   "peerDependenciesMeta": {
     "@earendil-works/pi-coding-agent": {
@@ -52,9 +52,9 @@
     }
   },
   "devDependencies": {
-    "@earendil-works/pi-ai": "^1.2.0",
-    "@earendil-works/pi-coding-agent": "^1.2.0",
-    "@earendil-works/pi-tui": "^1.2.0",
+    "@earendil-works/pi-ai": "^1.5.0",
+    "@earendil-works/pi-coding-agent": "^1.5.0",
+    "@earendil-works/pi-tui": "^1.5.0",
     "@types/node": "^22.0.0",
     "typescript": "^5.5.0"
   },

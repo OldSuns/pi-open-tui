@@ -22,7 +22,7 @@ Live terminal screenshot with Pi 1.4.0.
 
 ## Requirements
 
-- Pi 1.2.0 or later
+- Pi 1.5.0 or later
 - Node.js 22.19.0 or later (Pi's minimum)
 - A terminal with UTF-8 and color support
 - A [Nerd Font](https://www.nerdfonts.com/font-downloads) for the full icon set (optional; portable Unicode icons are built in)
@@ -190,7 +190,7 @@ The ticker appears only once the model actually streams reasoning, so non-reason
 
 ## Copy buttons
 
-In fullscreen mode (Pi's `tuiMode: "fullscreen"`), every fenced code block is drawn in a rounded frame with its language and an always-visible `[Copy]` label in the top border, and every user message gets a `[Copy]` label too. Click it to put the source text on the clipboard; Pi flashes `Copied!`.
+In fullscreen mode (Pi's `tuiMode: "fullscreen"`), code blocks are drawn in rounded frames with their language. Completed code blocks show a `[Copy]` label in the top border when there is enough width, and every user message gets a `[Copy]` label too. Click it to put the source text on the clipboard; Pi flashes `Copied!`.
 
 ```text
 ╭─ sh ─────────────── [Copy] ╮
@@ -202,6 +202,7 @@ In fullscreen mode (Pi's `tuiMode: "fullscreen"`), every fenced code block is dr
 - User messages: the label sits on the bubble's last row and copies the message as you typed it.
 - Whole assistant replies have no label; use Pi's `/copy` for that.
 - While a reply streams, its code blocks are framed without a label, so you cannot copy unfinished code. The label is also dropped when the frame is too narrow; thinking blocks keep Pi's plain fences.
+- Labels appear when streaming ends without requiring a resize. Each label keeps its own code and click position when Markdown reuses cached blocks, including repeated identical blocks.
 - Regular mode has no mouse capture, so code blocks keep Pi's plain fences there.
 - Drag-selecting across a frame includes its border characters and the `[Copy]` text.
 - If pi-pretty-tui is installed, its own code-block frames and copy buttons are kept and these are not drawn.
@@ -217,7 +218,7 @@ npm run typecheck
 pi -e .
 ```
 
-CI checks Pi 1.2.0 and the latest release on Node.js 22.19.0 and 24, across Linux, Windows, and macOS. Keep Pi packages on the same version when checking compatibility. Automated tests do not replace checking terminal fonts, mouse interaction, and cursor support with `pi -e .`.
+CI checks Pi 1.5.0 and the latest release on Node.js 22.19.0 and 24, across Linux, Windows, and macOS. Keep Pi packages on the same version when checking compatibility. Automated tests do not replace checking terminal fonts, mouse interaction, and cursor support with `pi -e .`.
 
 ## Acknowledgements
 

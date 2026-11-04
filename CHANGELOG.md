@@ -1,5 +1,17 @@
 # Changelog
 
+## [Unreleased]
+
+### Breaking Changes
+
+- Require Pi 1.5.0 or later.
+
+### Fixed
+
+- Show code-block Copy labels as soon as streaming ends, without requiring a terminal resize, and hide them when streaming resumes.
+- Preserve each Copy button's code and click region across Markdown block reuse, repeated identical blocks, and mixed cached and new blocks; restore source tabs using the current block occurrence.
+- Cancel pending Copy clicks when buttons are disabled or another code-block renderer takes ownership, and suppress clipboard notifications from cleaned-up installations.
+
 ## [0.4.2] - 2026-11-03
 
 ### Changed
