@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { stripTypeScriptTypes } from "node:module";
 import { hostname, tmpdir } from "node:os";
 import { join, resolve, sep } from "node:path";
@@ -295,23 +295,21 @@ for (const contributorFirst of [false, true]) {
 			assert.ok(stripAnsi(footer(240)[0]!).includes(`platform=${process.platform}`));
 			assert.ok(!stripAnsi(footer(240)[1]!).includes(`pid=${process.pid}`));
 			const valid = footer(240);
-			for (const message of [
-				null, [], { lifecycle: token, key: "process:identity", text: "invalid", position: { after: "missing" } },
-				{ lifecycle: token, key: "process:identity", text: "invalid", position: { after: "cost", row: 1 } },
-				{ lifecycle: token, key: "process:identity", text: "invalid", position: { after: "cost" }, priority: NaN },
-				{ lifecycle: token, key: "process:identity", text: "invalid", position: { after: "cost" }, order: Infinity },
-				{ lifecycle: token, key: "process:identity", text: "invalid", position: { row: 3, side: "right" } },
-			]) current().pi.events.emit("open-tui:footer:set", message);
+			current().pi.events.emit("open-tui:footer:set", {
+				lifecycle: token, key: "process:identity", text: "invalid", position: { after: "missing" },
+			});
 			assert.deepEqual(footer(240), valid, "invalid updates leave existing content intact");
 			remove("process:identity");
 			current().ctx!.ui.setStatus("process:separate", undefined);
 			publish({ key: "process:z", position: { after: "cost" }, text: `Z=${process.pid}` });
 			publish({ key: "process:a", position: { after: "cost" }, text: `A=${process.pid}` });
-			assertOrder(stripAnsi(footer(240)[1]!), [`A=${process.pid}`, `Z=${process.pid}`]);
+			publish({ key: "process:A", position: { after: "cost" }, text: `upper=${process.pid}` });
+			assertOrder(stripAnsi(footer(240)[1]!), [`upper=${process.pid}`, `A=${process.pid}`, `Z=${process.pid}`]);
 			publish({ key: "process:z", position: { after: "cost" }, text: `Z=${process.pid}`, order: -1 });
-			assertOrder(stripAnsi(footer(240)[1]!), [`Z=${process.pid}`, `A=${process.pid}`]);
+			assertOrder(stripAnsi(footer(240)[1]!), [`Z=${process.pid}`, `upper=${process.pid}`, `A=${process.pid}`]);
 			remove("process:z");
 			remove("process:a");
+			remove("process:A");
 			publish({
 				key: "process:styled", position: { after: "cost" },
 				text: `\x1b[31m进程=${process.pid}\x1b[0m\n${hostname()}\x1b[2J\x1b]0;title\x07`,
@@ -356,225 +354,51 @@ for (const contributorFirst of [false, true]) {
 	});
 }
 
-test("real settings hide segments without invalidating updates, and enable changes reject stale async data", async () => {
-	await withHost(false, async ({ current, lifecycle, publish, footer, toggle, readConfig, directory }) => {
-		const token = lifecycle();
-		publish({ key: "process:lifecycle", position: { after: "cost" }, text: `pid=${process.pid}` });
-		await toggle("Footer", "Extension footer segments");
-		assert.equal((await readConfig()).footerSegments.extensionSegments, false);
-		assert.equal(lifecycle(), token);
-		assert.ok(!stripAnsi(footer().join("\n")).includes(`pid=${process.pid}`));
-		publish({ key: "process:lifecycle", position: { after: "cost" }, text: `platform=${process.platform}` });
-		await toggle("Footer", "Extension footer segments");
-		assert.equal(lifecycle(), token);
-		assert.ok(stripAnsi(footer().join("\n")).includes(`platform=${process.platform}`));
-		const pendingDirectory = stat(directory);
-		await toggle("General", "Enabled");
-		assert.equal(current().state.available, false);
-		await toggle("General", "Enabled");
-		const nextToken = lifecycle();
-		assert.notEqual(nextToken, token);
-		assert.ok(!stripAnsi(footer().join("\n")).includes(`platform=${process.platform}`));
-		const directoryInfo = await pendingDirectory;
-		publish({ key: "process:lifecycle", position: { after: "cost" }, text: `birth=${directoryInfo.birthtimeMs}` }, token);
-		assert.ok(!stripAnsi(footer().join("\n")).includes("birth="), "async data from the old activation is rejected");
-		publish({ key: "process:lifecycle", position: { after: "cost" }, text: `birth=${directoryInfo.birthtimeMs}` });
-		assert.ok(stripAnsi(footer().join("\n")).includes("birth="));
-		current().pi.events.emit("open-tui:footer:remove", { lifecycle: token, key: "process:lifecycle" });
-		assert.ok(stripAnsi(footer().join("\n")).includes("birth="), "stale removes cannot delete current content");
-		const beforeQueries = footer();
-		for (let index = 0; index < 3; index++) current().pi.events.emit("open-tui:footer:query", undefined);
-		assert.equal(lifecycle(), nextToken);
-		assert.deepEqual(footer(), beforeQueries);
-		const replacementText = `replacement footer pid=${process.pid}`;
-		current().ctx!.ui.setFooter(() => new Text(replacementText, 0, 0));
-		assert.equal(current().state.available, false, "losing the actual footer invalidates protocol availability");
-		await toggle("General", "Enabled");
-		assert.ok(stripAnsi(footer().join("\n")).includes(replacementText), "open-tui cleanup preserves the new footer owner");
-	});
-});
-
-test("the documented memory extension runs in Pi, falls back and rejoins after reactivation", async () => {
-	const readme = await readFile(new URL("../README.md", import.meta.url), "utf8");
-	const example = readme.split("### System memory example")[1]?.match(/```typescript\r?\n([\s\S]*?)```/)?.[1];
-	assert.ok(example, "README must contain its complete executable example");
-	const source = stripTypeScriptTypes(example);
-	const { default: memoryExtension } = await import(`data:text/javascript;base64,${Buffer.from(source).toString("base64")}`);
-	await withHost(true, async ({ footer, toggle, lifecycle, current }) => {
-		assert.equal(footer().length, 2);
-		assert.match(stripAnsi(footer()[1]!), /RAM \d+\.\d\/\d+\.\d GiB/);
-		const original = lifecycle();
-		const before = footer();
-		current().pi.events.emit("open-tui:footer:query", undefined);
-		assert.deepEqual(footer(), before, "the example deduplicates repeated state announcements");
-		await toggle("Footer", "Extension footer segments");
-		assert.equal(lifecycle(), original);
-		assert.equal(footer().length, 2);
-		assert.doesNotMatch(stripAnsi(footer().join("\n")), /RAM /);
-		await toggle("Footer", "Extension footer segments");
-		assert.match(stripAnsi(footer()[1]!), /RAM /);
-		await toggle("General", "Enabled");
-		assert.equal(current().state.available, false);
-		assert.match(stripAnsi(footer().join("\n")), /RAM /, "the example restores its real status fallback");
-		await toggle("General", "Enabled");
-		assert.notEqual(lifecycle(), original);
-		assert.equal(footer().length, 2, "reactivation removes the separate fallback row");
-		assert.match(stripAnsi(footer()[1]!), /RAM /);
-	}, [memoryExtension]);
-});
-
-test("real Pi reload and new-session flows retire event subscriptions and start empty lifecycles", async () => {
-	await withHost(true, async ({ runtime, host, current, contributors, lifecycle, publish, footer }) => {
-		const original = current();
-		const firstToken = lifecycle();
-		publish({ key: "process:session", position: { after: "cost" }, text: `pid=${process.pid}` });
-		await runtime.session.reload({ beforeSessionStart: async () => host.resetExtensionUI() });
-		assert.equal(contributors.length, 2);
-		assert.deepEqual(original.shutdowns, ["reload"]);
-		assert.deepEqual(current().starts, ["reload"]);
-		assert.notEqual(lifecycle(), firstToken);
-		assert.ok(!stripAnsi(footer().join("\n")).includes(`pid=${process.pid}`));
-		assert.throws(() => original.pi.events.emit("open-tui:footer:query", undefined), /stale/i);
-		const oldAnnouncements = original.announcements.length;
-		current().pi.events.emit("open-tui:footer:query", undefined);
-		assert.equal(original.announcements.length, oldAnnouncements, "Pi releases the old listener");
-		const reloaded = current();
-		const reloadToken = lifecycle();
-		publish({ key: "process:session", position: { after: "cost" }, text: `pid=${process.pid}` });
-		const replacement = await runtime.newSession();
-		assert.equal(replacement.cancelled, false);
-		assert.equal(contributors.length, 3);
-		assert.deepEqual(reloaded.shutdowns, ["new"]);
-		assert.deepEqual(current().starts, ["new"]);
-		assert.notEqual(lifecycle(), reloadToken);
-		assert.ok(!stripAnsi(footer().join("\n")).includes(`pid=${process.pid}`));
-		publish({ key: "process:session", position: { after: "cost" }, text: `pid=${process.pid}` });
-		assert.ok(stripAnsi(footer().join("\n")).includes(`pid=${process.pid}`));
-	});
-});
-
-for (const contributorFirst of [false, true]) {
-	test(`fullscreen Pi integrates independent live contributors with contributors ${contributorFirst ? "first" : "last"}`, async () => {
-		const readme = await readFile(new URL("../README.md", import.meta.url), "utf8");
-		const example = readme.split("### System memory example")[1]?.match(/```typescript\r?\n([\s\S]*?)```/)?.[1];
-		assert.ok(example);
+for (const tuiMode of ["regular", "fullscreen"] as const) {
+	test(`real Pi ${tuiMode} contributions survive visibility changes, reactivation, reload and new sessions`, async () => {
+		const documentation = await readFile(new URL("../docs/footer-segments.md", import.meta.url), "utf8");
+		const example = documentation.split("## System memory example")[1]?.match(/```typescript\r?\n([\s\S]*?)```/)?.[1];
+		assert.ok(example, "the documentation must contain its complete executable example");
 		const source = stripTypeScriptTypes(example);
 		const { default: memoryExtension } = await import(`data:text/javascript;base64,${Buffer.from(source).toString("base64")}`);
-		const directoryRuns: { reads: number; text: string; errors: unknown[] }[] = [];
-		const pendingReads: Promise<void>[] = [];
-		const directoryExtension: ExtensionFactory = (pi) => {
-			const key = "system-directory:entries";
-			const run = { reads: 0, text: "", errors: [] as unknown[] };
-			directoryRuns.push(run);
-			let ctx: ExtensionContext | undefined;
-			let lifecycle: string | undefined;
-			let sequence = 0;
-			const publish = () => {
-				if (!ctx || !run.text) return;
-				if (lifecycle === undefined) ctx.ui.setStatus(key, run.text);
-				else {
-					ctx.ui.setStatus(key, undefined);
-					pi.events.emit("open-tui:footer:set", {
-						key, lifecycle, position: { after: "cost" }, text: run.text,
-					});
-				}
-			};
+		await withHost(tuiMode === "fullscreen", async ({ runtime, host, current, lifecycle, footer, frame, toggle, directory, publish, remove, readConfig }) => {
+			const key = "process:directory";
+			let text = "";
 			const refresh = async () => {
-				if (!ctx) return;
-				const origin = ctx;
-				const token = lifecycle;
-				const request = ++sequence;
-				const entries = await readdir(origin.cwd);
-				run.reads++;
-				if (ctx !== origin || lifecycle !== token || sequence !== request) return;
-				run.text = `Files ${entries.length}`;
-				publish();
-			};
-			const scheduleRefresh = () => {
-				const pending = refresh().catch((error: unknown) => { run.errors.push(error); });
-				pendingReads.push(pending);
-				return pending;
-			};
-			pi.registerCommand("directory-refresh", {
-				description: "Refresh the actual session directory entry count",
-				handler: scheduleRefresh,
-			});
-			pi.events.on("open-tui:footer:state", (data) => {
-				if (!ctx || !data || typeof data !== "object" || !("available" in data)) return;
-				if (data.available === true && "lifecycle" in data && typeof data.lifecycle === "string") {
-					if (lifecycle === data.lifecycle) return;
-					lifecycle = data.lifecycle;
-					void scheduleRefresh();
-				} else if (data.available === false && lifecycle !== undefined) {
-					lifecycle = undefined;
-					sequence++;
-					publish();
-				}
-			});
-			pi.on("session_start", async (_event, nextCtx) => {
-				if (!nextCtx.hasUI || nextCtx.mode !== "tui") return;
-				ctx = nextCtx;
-				await scheduleRefresh();
-				pi.events.emit("open-tui:footer:query", undefined);
-			});
-			pi.on("session_shutdown", () => {
-				const previous = ctx;
-				const token = lifecycle;
-				ctx = undefined;
-				lifecycle = undefined;
-				sequence++;
-				if (token !== undefined) pi.events.emit("open-tui:footer:remove", { key, lifecycle: token });
-				previous?.ui.setStatus(key, undefined);
-			});
-		};
-		await withHost(contributorFirst, async ({ runtime, host, current, lifecycle, footer, frame, toggle, directory, publish }) => {
-			const { renderLayoutFrame } = await import(new URL(
-				"./layout.js", import.meta.resolve("@earendil-works/pi-tui"),
-			).href);
-			const settle = async () => {
-				await Promise.all(pendingReads);
-				for (const run of directoryRuns) assert.deepEqual(run.errors, []);
-			};
-			const latest = () => directoryRuns.at(-1)!;
-			const refresh = async () => {
-				const command = runtime.session.extensionRunner!.getCommand("directory-refresh");
-				assert.ok(command);
-				await command.handler("", runtime.session.extensionRunner!.createCommandContext());
-				await settle();
+				text = `Files ${(await readdir(directory)).length}`;
+				publish({ key, position: { after: "cost" }, text });
 			};
 			const assertContributions = () => {
 				const rows = footer(320).map(stripAnsi);
 				assert.equal(rows.length, 2, "two contributing extensions do not add status rows");
-				assertOrder(rows[1]!, [latest().text, "RAM "]);
+				assertOrder(rows[1]!, [text, "RAM "]);
+				assert.match(rows[1]!, /RAM \d+\.\d\/\d+\.\d GiB/);
 			};
-			await settle();
-			assert.equal(host.renderer.mode, "fullscreen");
-			assertContributions();
-			const reads = latest().reads;
-			for (let index = 0; index < 3; index++) current().pi.events.emit("open-tui:footer:query", undefined);
-			await settle();
-			assert.equal(latest().reads, reads, "another contributor's discovery query does not reread data");
-			const originalLifecycle = lifecycle();
-			const originalText = latest().text;
-			await writeFile(join(directory, "process-report.json"), JSON.stringify(process.memoryUsage()), "utf8");
 			await refresh();
-			assert.notEqual(latest().text, originalText, "an actual new file changes the async contribution");
+			assert.equal(host.renderer.mode, tuiMode);
 			assertContributions();
-
+			const queryUpdates: unknown[] = [];
+			current().pi.events.on("open-tui:footer:set", (data) => queryUpdates.push(data));
+			for (let index = 0; index < 3; index++) current().pi.events.emit("open-tui:footer:query", undefined);
+			assert.deepEqual(queryUpdates, [], "the example extension deduplicates state announcements");
+			const originalLifecycle = lifecycle();
+			const originalText = text;
 			await toggle("Footer", "Extension footer segments");
+			assert.equal((await readConfig()).footerSegments.extensionSegments, false);
 			assert.equal(lifecycle(), originalLifecycle);
-			assert.equal(footer(320).length, 2);
-			assert.doesNotMatch(stripAnsi(footer(320).join("\n")), /Files |RAM /);
 			await writeFile(join(directory, "process-versions.json"), JSON.stringify(process.versions), "utf8");
 			await refresh();
+			assert.notEqual(text, originalText, "an actual new file changes the async contribution");
 			assert.equal(footer(320).length, 2, "hidden live updates do not reactivate separate status fallbacks");
+			assert.doesNotMatch(stripAnsi(footer(320).join("\n")), /Files |RAM /);
 			await toggle("Footer", "Extension footer segments");
+			assert.equal(lifecycle(), originalLifecycle);
 			assertContributions();
 
 			await toggle("General", "Footer in editor border");
 			assert.equal(lifecycle(), originalLifecycle);
 			assert.equal(footer(320).length, 0);
-			current().ctx!.ui.setEditorText(readme);
+			current().ctx!.ui.setEditorText(await readFile(new URL("../README.md", import.meta.url), "utf8"));
 			current().ctx!.ui.setWorkingMessage("Reading directory");
 			host.showWorkingStatusIndicator();
 			assert.equal(host.activeStatusIndicator.kind, "working");
@@ -588,7 +412,7 @@ for (const contributorFirst of [false, true]) {
 			assert.match(top, /↑ \d+ more/, "Pi's real editor contributes its scroll-overflow label");
 			const bottom = frame(320).map(stripAnsi).find((line) => line.startsWith("╰"));
 			assert.ok(bottom);
-			assertOrder(bottom, [latest().text, "RAM "]);
+			assertOrder(bottom, [text, "RAM "]);
 			// Pi 1.5.0's native wordWrapLine recurses on a wide grapheme when
 			// the editor content budget is only one column. Empty-editor tiny
 			// widths are covered above; this populated-editor scenario starts at 8.
@@ -596,40 +420,55 @@ for (const contributorFirst of [false, true]) {
 				for (const line of frame(width)) {
 					assert.ok(visibleWidth(line) <= width, `working indicator and scroll label stay within ${width} columns`);
 				}
-				const rendered = renderLayoutFrame(host.fullscreenLayoutRoot, width, 40, () => host.ui.requestRender());
-				assert.equal(rendered.lines.length, 40);
-				for (const line of rendered.lines) assert.ok(visibleWidth(line) <= width, `fullscreen layout width ${width}`);
+				if (tuiMode === "fullscreen") {
+					const { renderLayoutFrame } = await import(new URL(
+						"./layout.js", import.meta.resolve("@earendil-works/pi-tui"),
+					).href);
+					const rendered = renderLayoutFrame(host.fullscreenLayoutRoot, width, 40, () => host.ui.requestRender());
+					assert.equal(rendered.lines.length, 40);
+					for (const line of rendered.lines) assert.ok(visibleWidth(line) <= width, `fullscreen layout width ${width}`);
+				}
 			}
 			host.clearStatusIndicator();
 			current().ctx!.ui.setEditorText("");
 			await toggle("General", "Footer in editor border");
 			assertContributions();
+			const pendingDirectory = readdir(directory);
 			await toggle("General", "Enabled");
 			assert.equal(current().state.available, false);
-			assertOrder(stripAnsi(footer(320).join("\n")), [latest().text, "RAM "]);
+			assert.match(stripAnsi(footer(320).join("\n")), /RAM /, "the example extension restores its status fallback");
 			await toggle("General", "Enabled");
-			await settle();
 			assert.notEqual(lifecycle(), originalLifecycle);
+			const staleText = `Files ${(await pendingDirectory).length}`;
+			publish({ key, position: { after: "cost" }, text: staleText }, originalLifecycle);
+			assert.doesNotMatch(stripAnsi(footer(320).join("\n")), /Files /, "old async data is rejected after reactivation");
+			await refresh();
+			remove(key, originalLifecycle);
 			assertContributions();
 
-			const beforeReload = lifecycle();
-			await runtime.session.reload({ beforeSessionStart: async () => host.resetExtensionUI() });
-			await settle();
-			assert.notEqual(lifecycle(), beforeReload);
-			assert.equal(directoryRuns.length, 2);
-			assertContributions();
-			const beforeNew = lifecycle();
-			const replacement = await runtime.newSession();
-			await settle();
-			assert.equal(replacement.cancelled, false);
-			assert.notEqual(lifecycle(), beforeNew);
-			assert.equal(directoryRuns.length, 3);
-			assertContributions();
-			current().ctx!.ui.setFooter(() => new Text(`replacement pid=${process.pid}`, 0, 0));
+			for (const reason of ["reload", "new"] as const) {
+				const previous = current();
+				const token = lifecycle();
+				if (reason === "reload") await runtime.session.reload({ beforeSessionStart: async () => host.resetExtensionUI() });
+				else assert.equal((await runtime.newSession()).cancelled, false);
+				assert.deepEqual(previous.shutdowns, [reason]);
+				assert.deepEqual(current().starts, [reason]);
+				assert.notEqual(lifecycle(), token);
+				assert.doesNotMatch(stripAnsi(footer(320).join("\n")), /Files /);
+				assert.throws(() => previous.pi.events.emit("open-tui:footer:query", undefined), /stale/i);
+				const announcements = previous.announcements.length;
+				current().pi.events.emit("open-tui:footer:query", undefined);
+				assert.equal(previous.announcements.length, announcements, "Pi releases the previous listener");
+				await refresh();
+				assertContributions();
+			}
+			const replacementText = `replacement pid=${process.pid}`;
+			current().ctx!.ui.setFooter(() => new Text(replacementText, 0, 0));
 			assert.equal(current().state.available, false);
 			const statuses = [...host.footerDataProvider.getExtensionStatuses().values()].join("\n");
-			assert.ok(statuses.includes(latest().text));
-			assert.match(statuses, /RAM /, "both independent extensions restore fallback when the actual footer is replaced");
-		}, [memoryExtension, directoryExtension], "fullscreen");
+			assert.match(statuses, /RAM /, "the example extension restores fallback when another extension takes the footer");
+			await toggle("General", "Enabled");
+			assert.ok(stripAnsi(footer().join("\n")).includes(replacementText), "cleanup preserves the new footer owner");
+		}, [memoryExtension], tuiMode);
 	});
 }

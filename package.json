@@ -19,6 +19,7 @@
   "license": "MIT",
   "files": [
     "extensions/",
+    "docs/",
     "assets/",
     "CHANGELOG.md",
     "README.md",
