@@ -11,19 +11,21 @@
 ## 功能亮点
 
 - **Pi 顶栏**：显示模型、思考等级、当前目录和常用斜杠命令提示
-- **自适应底栏**：集中展示 Git 状态、运行环境、上下文用量、Token、费用和扩展状态
-- **带边框的编辑器**：支持块状、竖线和下划线三种光标样式；保留其它扩展已安装的兼容编辑器
-- **项目环境感知**：识别 50 多种运行环境，并展示 ahead/behind、已暂存、已修改、未跟踪、stash 和 detached HEAD 等 Git 状态
-- **单轮遥测**：展示 TPS、首 Token 延迟（TTFT）、耗时、停顿、Token 数量和模型标价速率
-- **思考预览**：模型工作时，在 Pi 隐藏思考块的 `Thinking...` 位置显示实时字幕，展示推理内容的末尾片段
-- **交互式设置**：通过 `/open-tui` 配置，并支持英文和简体中文界面
+- **自适应底栏**：展示 Git 状态、运行环境、上下文用量、Token、费用和扩展状态
+- **带边框的编辑器**：支持块状、竖线和下划线光标，保留其他扩展的兼容编辑器
+- **项目环境感知**：识别 50 多种运行环境，并展示 ahead/behind、已暂存、已修改、未跟踪、stash 和分离 HEAD 等 Git 状态
+- **单轮遥测**：展示生成速度、首 Token 延迟、耗时、停顿、Token 数量和费用速率
+- **思考预览**：模型工作时实时预览隐藏的推理内容
+- **紧凑工具视图**：提供编辑/写入预览，可选支持扩展和 MCP 工具
+- **全屏复制按钮**：一键复制代码块和用户消息
+- **交互式设置**：通过 `/open-tui` 使用英文或简体中文界面
 
 ## 环境要求
 
 - Pi 1.5.0 或更高版本
 - Node.js 22.19.0 或更高版本（Pi 的最低要求）
 - 支持 UTF-8 和彩色输出的终端
-- 使用完整图标集时需要 [Nerd Font](https://www.nerdfonts.com/font-downloads)（可选；内置可移植 Unicode 图标）
+- 使用完整图标集时需要 [Nerd Font](https://www.nerdfonts.com/font-downloads)（可选，也可使用 Unicode 或 ASCII 模式）
 
 ## 安装
 
@@ -41,152 +43,64 @@ pi -e npm:pi-open-tui
 
 ## 字体与图标
 
-可从 [Nerd Fonts 下载页](https://www.nerdfonts.com/font-downloads)或 [GitHub 最新版本](https://github.com/ryanoasis/nerd-fonts/releases/latest)安装任意已修补字体，在终端配置中选中该字体并重启终端。使用 VS Code、Windows Terminal 等应用时，需要在对应的终端配置中选中字体，只在操作系统中安装还不够。
+使用完整图标集时，请安装 [Nerd Font](https://www.nerdfonts.com/font-downloads)，在终端配置中选中它并重启终端。使用 VS Code、Windows Terminal 等应用时，只在操作系统中安装字体还不够。
 
-默认的 `auto` 模式检查终端环境，而不是已安装的字体文件：
+`/open-tui` 的**外观 → 图标**提供 `auto`、`nerd`、`unicode` 和 `ascii`。默认 `auto` 检查终端环境，并不检查实际字体；图标显示为方框时可选 `unicode`，终端已配置 Nerd Font 时可强制选 `nerd`，SSH 会话同样适用。
 
-| 模式 | 行为 |
-| --- | --- |
-| `auto` | 支持 UTF-8 的交互式 TTY 中使用 Nerd Font 图标；SSH 会话使用可移植 Unicode 图标（客户端终端通常没有 Nerd Font）；非交互式输出、`TERM=dumb` 或非 UTF-8 locale 使用 ASCII |
-| `nerd` | 终端已配置 Nerd Font 时，强制使用 Nerd Font 图标 |
-| `unicode` | 可移植 Unicode 图标，无需修补字体；emoji 使用终端自身的 emoji 回退 |
-| `ascii` | 纯文本图标 |
-
-如果图标显示为方框或错误符号，请打开 `/open-tui`，在**外观 → 图标**中切换模式。如果已安装字体但 `auto` 仍选择 ASCII，请手动选为 `nerd`；SSH 客户端终端确实有 Nerd Font 时也选 `nerd`。
-
-如果较宽的 Nerd Font 图标占用了图标与文字之间的间隔（例如在 Kitty 中），可开启 `footerSegments.nerdIconSpacing`（`/open-tui` 中的 **底栏 → 其他**），在 Nerd Font 图标后额外预留一格空白；Unicode/ASCII 图标与紧凑 Git 状态标记不受影响。Kitty 用户也可以设置 `narrow_symbols U+E000-U+F8FF 1`。
+自动选择规则和 Kitty 的间距选项见[图标检测与间距](./docs/configuration.md#图标)。
 
 ## 配置
 
-运行 `/open-tui` 打开设置窗口，其中包含**常规**、**外观**、**底栏**和**遥测**四个页面，并会适应终端尺寸。设置保存在 Pi 的 agent 目录内的 `open-tui.json` 中；默认目录为 `~/.pi/agent`，可通过 `PI_CODING_AGENT_DIR` 覆盖。保存失败时会提示：修改仅在当前会话生效。
+运行 `/open-tui` 打开设置窗口，包含**常规**、**外观**、**底栏**和**遥测**四个页面，支持英文和简体中文，并适应终端尺寸。Tab/Shift+Tab 或 ←/→ 切页，↑/↓ 移动，Enter/Space 修改值，Esc/q 关闭。
 
-各页面用暗色分组标题归类相关设置：
+设置保存在 Pi 的 agent 目录内的 `open-tui.json` 中，默认目录是 `~/.pi/agent`，可通过 `PI_CODING_AGENT_DIR` 覆盖。保存失败时会提示：修改仅在当前会话生效。
 
-| 页面 | 分组 |
-| --- | --- |
-| 常规 | 扩展、界面、消息与工具、底栏 |
-| 外观 | 图标、输入框 |
-| 底栏 | 位置、Git、运行环境、用量、其他 |
-| 遥测 | 启用（独立总开关）、测量指标 |
-
-使用 Tab/Shift+Tab 或 ←/→ 切页，↑/↓ 或 Page Up/Page Down 移动到设置项，Enter/Space 修改值，Esc/q 关闭。分组标题各占一行，导航会跳过标题，点击标题也不会选中或修改设置。列表会在终端可用高度内滚动，位置提示按设置行和标题行一起计数。现有配置文件无需迁移。
-
-在**常规 → 消息与工具**中选择**工具视图：紧凑**后，才会显示缩进的子选项**紧凑显示扩展工具**。切回**原生**时会隐藏子选项，并保留其开关状态，下次选择**紧凑**时继续使用。**底栏嵌入输入框**位于**常规 → 底栏**。
-
-配置示例：
-
-```json
-{
-  "enabled": true,
-  "header": true,
-  "inlineFooter": false,
-  "copyButtons": true,
-  "settingsLanguage": "zh",
-  "cursorStyle": "block",
-  "icons": {
-    "mode": "auto"
-  },
-  "footerSegments": {
-    "cwd": true,
-    "hostname": false,
-    "sessionName": false,
-    "gitBranch": true,
-    "gitStatus": true,
-    "gitCommit": false,
-    "runtime": true,
-    "context": true,
-    "tokens": true,
-    "cost": true,
-    "liveTps": true,
-    "extensionStatuses": true,
-    "extensionSegments": true,
-    "capitalizeProviderName": true,
-    "nerdIconSpacing": false
-  },
-  "telemetry": {
-    "enabled": true,
-    "tps": true,
-    "ttft": true,
-    "duration": true,
-    "tokens": true,
-    "stalls": true,
-    "cost": true
-  },
-  "thinkingPeek": {
-    "lines": 1
-  },
-  "toolView": {
-    "mode": "native",
-    "extensionTools": false,
-    "exclude": []
-  }
-}
-```
-
-主要选项：
-
-| 选项 | 可选值 | 说明 |
+| 设置 | 位置 | 默认值 |
 | --- | --- | --- |
-| `settingsLanguage` | `en`、`zh` | 切换 `/open-tui` 设置界面的语言 |
-| `header` | `true`、`false` | 决定是否用 open-tui 顶部信息栏覆盖 Pi 的 Header；设为 `false` 时把顶部栏位置留给 Pi 或其他扩展 |
-| `inlineFooter` | `true`、`false` | 将两条主要 Footer 信息行移入编辑器上下边框以节省垂直空间，默认关闭；扩展状态行仍显示在编辑器外 |
-| `copyButtons` | `true`、`false` | 全屏模式下给代码块加圆角边框，并在代码块和用户消息上显示可点击的 `[Copy]` 标签，默认开启；见[复制按钮](#复制按钮) |
-| `cursorStyle` | `block`、`bar`、`underline` | `bar` 和 `underline` 需要终端支持光标形状转义序列 |
-| `icons.mode` | `auto`、`nerd`、`unicode`、`ascii` | 控制底栏和遥测通知使用的图标 |
-| `footerSegments` | 布尔开关 | 分别控制底栏中的各项数据 |
-| `footerSegments.capitalizeProviderName` | 布尔开关 | 将底栏中提供商名称的首字母大写；设为 `false` 时保留原始大小写 |
-| `footerSegments.nerdIconSpacing` | 布尔开关 | 在底栏 Nerd Font 图标后额外留一格空白；默认 `false` |
-| `telemetry` | 布尔开关 | 控制遥测总开关和各项指标 |
-| `thinkingPeek.lines` | `0`、`1`、`2` | 关闭、单行或双行思考预览 |
-| `toolView.mode` | `native`、`compact` | Pi 原生卡片（默认），或带编辑/写入成功预览的紧凑调用与摘要行。只对切换后新建的行生效 |
-| `toolView.extensionTools` | `true`、`false` | 紧凑模式下，把扩展工具、MCP 工具和替换内置同名工具的扩展也折叠成通用行；默认 `false`。见[工具视图](#工具视图) |
-| `toolView.exclude` | 工具名列表 | 始终保持原生渲染的工具，例如 `["subagent_wait"]`；默认 `[]` |
+| 顶栏与设置语言 | 常规 → 界面 | 顶栏开启、英文 |
+| 思考预览 | 常规 → 消息与工具 | 单行 |
+| 复制按钮 | 常规 → 消息与工具 | 开启，仅全屏模式 |
+| 工具视图 | 常规 → 消息与工具 | 原生 |
+| 底栏嵌入输入框 | 常规 → 底栏 | 关闭 |
+| 图标与光标样式 | 外观 | 自动图标、块状光标 |
+| 底栏字段与遥测指标 | 底栏 / 遥测 | 可分别设置 |
 
-`sessionName` 仅在会话有名称时显示；`hostname` 会显示主机名的短名称并使用服务器图标；处于分离 HEAD（detached HEAD）状态时，`gitBranch` 显示 `HEAD` 和短提交哈希，`gitCommit` 会在其后追加指向该提交的标签（仅在开启 `gitBranch` 时生效）；关闭 `extensionStatuses` 会隐藏整行扩展状态，其中也包括 MCP 状态。每条状态会保留其扩展通过 `ctx.ui.theme.fg()` 设置的颜色。
+选择**工具视图：紧凑**后，才会显示子选项**紧凑显示扩展工具**；切回原生时隐藏该选项并保留其值。完整 JSON 默认配置、所有选项和工具排除列表见[配置参考](./docs/configuration.md#简体中文)。
 
-底栏的 Token 和费用总计包含助手回复、工具报告的用量、压缩与分支摘要以及缓存预热；缓存命中百分比表示最近一条助手回复，而非整个会话的累计比例。底栏第一行宽度不足时，先隐藏运行环境和上下文条，然后依次隐藏 Git、会话名称、主机名和计时器；当前目录保留到最后，并缩短为文件夹名。
+## 顶栏、底栏与编辑器
 
-开启 `inlineFooter` 后，两条常规 Footer 信息行会移入编辑器边框以节省垂直空间：顶部边框左侧显示 Git 分支和会话标题，右侧信息组以当前目录开头。Header 和扩展状态行保持独立显示，终端较窄时优先截断低优先级 Footer 数据。
+顶栏提供模型、项目环境和命令提示。两条主底栏集中显示位置、Git 状态、运行环境、工作/完成计时器、上下文用量、模型详情、Token 和费用。可单独开关各项字段；终端变窄时，布局会缩短或隐藏低优先级信息。
 
-open-tui 会给保留 Pi 原生编辑器布局及光标、鼠标、内边距接口的编辑器加边框，包括基于 `CustomEditor` 的扩展。装饰直接作用于同一实例，因此灰字建议、按键处理、补全和提交回调能够保留。通过当前 `ctx.ui.setEditorComponent()` 接口注册的编辑器可以在 `pi-open-tui` 之前或之后注册，运行时替换的编辑器也会自动加框；临时对话框保持原样。装饰前，open-tui 会按终端宽度渲染一次编辑器，检查是否存在可识别的原生上下边界，之后每次加框也会复查。缺少这些能力或边界、或在布局检测时抛出异常的编辑器保持原样，即使开启 `inlineFooter`，底栏也会独立显示。关闭 open-tui 会撤销装饰、恢复注册接口，并保留最新的编辑器工厂。
+底栏 Token 和费用总计包含助手回复、工具报告的用量、压缩与分支摘要以及缓存预热；缓存命中率表示最近一条助手回复。其他扩展可以使用独立状态行，也可以[直接向主底栏添加内容](./docs/footer-segments.md)。
 
-顺序无关的保证针对编辑器注册，不包含顶栏或底栏的替换。
-
-扩展底栏接口见[接入文档（英文）](docs/footer-segments.md)。
+开启**底栏嵌入输入框**，可把两条主信息行移入编辑器上下边框，扩展状态行仍显示在编辑器下方。兼容编辑器会保留输入行为、补全和灰字建议；无法加框的编辑器继续使用独立底栏。集成边界见[编辑器兼容性与布局](./docs/implementation.md#编辑器与布局)。
 
 ## 单轮遥测
 
-每次 Agent 完整运行结束后，pi-open-tui 会显示一条临时结果，并将其中的多个工具调用轮次合并统计：
+每次 Agent 完整运行结束后，pi-open-tui 会合并其中的助手轮次，显示一条临时结果：
 
 ```text
 > TPS 42.5 tok/s | ~ TTFT 1.2s | + 29.7s | ↑ 567 | ↓ 1.2k | ! stall 1x / 4.3s | $ $3.60/M
 ```
 
-TPS 是本次运行中服务商报告的全部 Assistant 输出 Token 除以各个生成轮次的总耗时，从 `turn_start` 计到 Assistant 的 `message_end`，包含 TTFT、隐藏推理、缓冲和停顿，但不包含轮次之间的工具执行时间。没有输出 Token 或无法测得生成时间时显示 `TPS —`。
+TPS 用服务商报告的输出 Token 除以生成时间，包含等待和停顿，不包含轮次之间的工具执行时间。流式输出期间，工作计时器还会显示 `~54 tok/s` 这样的实时估算速度。`$ / M` 表示本次运行每百万 Token 的综合费率，底栏则显示会话累计费用。
 
-回复流式输出时，工作计时器还会显示估算速度，例如 `working 12.3s · ~54 tok/s`。`~` 表示基于最近 2 秒流式输出的估算值；停顿时数值会降低，工具执行期间以暗色保留上一个值。它由**底栏 → 运行环境 → 实时 TPS**（`footerSegments.liveTps`）控制，运行结束后不再显示，以上面的精确 TPS 为准。
-
-`$ / M` 表示根据 `usage.cost.total` 得到的模型标价速率，不是底栏中的会话累计费用。所有遥测字段都可以在**遥测 → 测量指标**中单独开关，**启用**作为独立总开关。
+可在**遥测 → 测量指标**中开关通知字段，在**底栏 → 运行环境 → 实时 TPS**中控制实时速度。计算公式、计时边界和缓存统计见[指标定义](./docs/implementation.md#用量与遥测)。
 
 ## 思考预览
 
-开启 Pi 的 **Hide thinking** 后，任务运行期间 pi-open-tui 会在原生隐藏思考块的 `Thinking...` 位置显示紧凑的实时字幕。`/open-tui` 中提供**关闭、单行、双行**三种模式：
-
-- 模型推理时，思考内容的末尾片段随 spinner 滚动（`~ think ⠋ …`）；
-- 开始输出正文时定格为对勾（`~ think ✓`）；
-- 双行模式中两行使用相同缩进，并持续显示最新一行；
-- 任务结束后恢复原生 `Thinking...` 标签。
+开启 Pi 的 **Hide thinking** 后，模型工作时 pi-open-tui 会用最新推理片段替换隐藏思考块的 `Thinking...` 标签：
 
 ```text
 ~ think ⠋ 上一条思考
           最新一条思考
 ```
 
-该字幕仅在模型真正输出推理内容后出现，非推理模型不会显示。可见性由 Pi 自身的 Hide thinking 开关控制，切换后立即生效；每一行都按*显示宽度*截断（全角字符计 2 列），因此中文思考文本也不会溢出终端。可在 `/open-tui` 的**常规 → 消息与工具 → 思考预览**中切换，或直接修改 `open-tui.json` 中的 `thinkingPeek.lines`。
+在**常规 → 消息与工具 → 思考预览**中选择**关闭、单行或双行**。字幕仅在模型真正输出推理时出现，正文开始后变为对勾，任务结束后恢复原生标签。可见性随 Pi 的 Hide thinking 开关立即变化，文字会按可用宽度截断。
 
 ## 工具视图
 
-默认仍为**原生**模式。将**常规 → 消息与工具 → 工具视图**设为**紧凑**（`toolView.mode: "compact"`）后，Pi 内置工具（`read`、`bash`、`powershell`、`edit`、`write`、`grep`、`find`、`ls`）显示为一行调用加一行摘要，编辑和写入成功时附带预览：
+默认使用**原生**模式。在**常规 → 消息与工具 → 工具视图**中选择**紧凑**后，Pi 内置工具（`read`、`bash`、`powershell`、`edit`、`write`、`grep`、`find`、`ls`）显示为调用行和摘要行：
 
 ```text
 ● Read(extensions/open-tui/footer.ts:1-120)
@@ -197,20 +111,17 @@ TPS 是本次运行中服务商报告的全部 Assistant 输出 Token 除以各�
   └  Done · 131 lines · 6.4s
 ```
 
-- 成功后调用与摘要文字变暗，圆点为绿色；等待时圆点变暗，运行时圆点每秒在主题强调色与暗色之间切换。错误继续显示红色圆点与摘要。Shell 失败摘要保留最后一行输出；运行中显示最新 3 行输出和已用时间。
-- `edit` 成功预览解析 Pi 的真实 diff，分别对旧代码和新代码做语法高亮，删除/新增行使用红/绿背景色带。没有有效 diff 时保留摘要。
-- `write` 成功预览在正常背景上显示行号和语法高亮；新建与覆盖写入显示相同，部分结果和错误不显示预览。
-- 预览正文最多显示 16 行，超过时显示隐藏行数与 `Ctrl+O` 提示。仅紧凑模式下，长行以 `…` 横向截断，不自动换行。
-- 点击某行只展开这一行为 Pi 原生卡片，`Ctrl+O` 展开全部行；原生展开视图的完整输出、diff 和截断提示保持不变。各次调用独立显示，不分组。
-- 只改变显示：工具、参数、结果以及模型看到的内容都不受影响。默认仅接管 Pi 确认来源为内置的工具；第三方和 MCP 工具保持各自的渲染。
-- 开启**紧凑显示扩展工具**（`toolView.extensionTools: true`）后，其余工具也会折叠，包括 MCP 工具和替换内置同名工具的扩展。它们的输出格式未知，摘要只显示文字行数、图片数量、耗时和第一行，没有编辑/写入预览；截断根据 `details.truncation.truncated: true` 等明确标记判断。依靠原生渲染器显示实时进度的工具可列入 `toolView.exclude`，内置工具同样适用。
-- 对识别到的 `@ff-labs/pi-fff` 安装，使用搜索摘要：`ffgrep` 和 `fff-multi-grep` 显示当前页匹配数，`fffind` 显示总匹配文件数；展开保留 FFF 原生输出。
-- 展开的行使用 Pi 解析出的渲染器；结果里的内联图片折叠时仍会显示，因为 Pi 会把图片画在这一行下方。
-- 模式在 Pi 创建某行时确定，因此切换只影响新建的行；执行 `/reload` 或新开会话后整个记录都会应用。
+- `edit` 和 `write` 成功后显示带语法高亮的预览，最多 16 行，较长输出会提示展开。
+- Shell 运行时显示近期输出和已用时间；出错时保留错误摘要。
+- 点击某行展开其原生卡片，`Ctrl+O` 展开全部行。工具、参数、结果和模型看到的内容都不改变。
+- 开启**紧凑显示扩展工具**可包含扩展和 MCP 工具；需要保留原生显示的工具可写入配置文件中的 `toolView.exclude`。识别到的 `@ff-labs/pi-fff` 工具使用专门的搜索摘要。
+- 切换模式只影响新建的行；执行 `/reload` 或新开会话后，整个记录都会应用。
+
+预览规则、扩展摘要和渲染器兼容性见[工具渲染细节](./docs/implementation.md#工具渲染)。
 
 ## 复制按钮
 
-全屏模式（Pi 的 `tuiMode: "fullscreen"`）下，代码块会画在圆角边框里，顶边显示语言。已完成的代码块在宽度足够时显示 `[Copy]` 标签；每条用户消息也有 `[Copy]` 标签。点击即可把原始文本放入剪贴板，Pi 会短暂提示 `Copied!`。
+全屏模式（Pi 的 `tuiMode: "fullscreen"`）下，完成的代码块会在宽度足够时，在圆角边框中显示可点击的 `[Copy]` 标签；用户消息也有复制标签。点击后复制原文，Pi 会短暂提示 `Copied!`。
 
 ```text
 ╭─ sh ─────────────── [Copy] ╮
@@ -218,13 +129,16 @@ TPS 是本次运行中服务商报告的全部 Assistant 输出 Token 除以各�
 ╰────────────────────────────╯
 ```
 
-- 代码块：边框替代上下两行围栏，代码块高度不变；过长的行在边框内换行。标签复制不含围栏的代码，保留缩进和制表符，用户消息和助手回复里的代码块都适用。
-- 用户消息：标签位于气泡最后一行，复制你输入的原文。
-- 整条助手回复没有标签，请使用 Pi 的 `/copy`。
-- 回复输出过程中代码块只有边框、没有标签，避免复制到不完整的代码；边框太窄时也不显示标签；思考块保留 Pi 原生的围栏。输出结束后标签会直接出现，无需调整窗口大小。
-- 普通模式不捕获鼠标，代码块保留 Pi 原生的围栏。
+代码标签复制不含围栏的代码，保留缩进和制表符；用户消息标签复制输入原文。流式代码块会在输出结束后显示标签；普通模式和思考块保留 Pi 原生围栏。复制整条助手回复请使用 Pi 的 `/copy`。
 
-可在 `/open-tui` 的**常规 → 消息与工具 → 复制按钮**中切换，或直接修改 `open-tui.json` 中的 `copyButtons`。
+可在**常规 → 消息与工具 → 复制按钮**中开关此功能。宽度限制、代码块缓存和与其他渲染器共存的细节见[复制按钮说明](./docs/implementation.md#复制按钮行为)。
+
+## 文档
+
+- [配置参考](./docs/configuration.md#简体中文) — 完整默认值、配置项和图标选择规则
+- [实现与兼容性](./docs/implementation.md#简体中文) — 指标公式、布局、渲染和生命周期
+- [扩展底栏接口（英文）](./docs/footer-segments.md) — 面向扩展开发者的公开事件和接入示例
+- [更新日志](./CHANGELOG.md) — 已发布和待发布的改动
 
 ## 本地开发
 
@@ -235,7 +149,7 @@ npm run typecheck
 pi -e .
 ```
 
-CI 在 Linux、Windows、macOS 上，使用 Node.js 22.19.0 和 24，检查 Pi 1.5.0 及最新版本。核对兼容性时应让各个 Pi 包保持同一版本。自动化测试不能替代通过 `pi -e .` 检查终端字体、鼠标交互和光标支持。
+CI 在 Linux、Windows、macOS 上，使用 Node.js 22.19.0 和 24 检查 Pi 1.5.0 及最新版本。核对兼容性时应让所有 Pi 包保持同一版本。终端字体、鼠标交互和光标支持可通过 `pi -e .` 实际检查。
 
 ## 致谢
 
