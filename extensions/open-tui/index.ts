@@ -3,6 +3,7 @@ import { type OpenTuiConfig, DEFAULT_CONFIG, ensureConfigExists, loadConfig, sav
 import { installCopyButtons, markCopyScope } from "./copy-buttons.ts";
 import { installEditor } from "./editor.ts";
 import { installFooter } from "./footer.ts";
+import { createFooterSegments } from "./footer-segments.ts";
 import { installHeader } from "./header.ts";
 import { emptyGitStatus, readGitStatus } from "./git.ts";
 import { readRuntimeInfo } from "./runtime.ts";
@@ -52,6 +53,7 @@ export default function (pi: ExtensionAPI) {
 	let editor: ReturnType<typeof installEditor> | undefined;
 	let copyButtons: ReturnType<typeof installCopyButtons> | undefined;
 	let pendingUiChange: PendingUiChange | undefined;
+	const footerSegments = createFooterSegments(pi.events, () => requestFooterRender?.());
 
 	// thinking-peek state (rendered by Pi inside its hidden-thinking block)
 	const peek: PeekState = createPeekState();
@@ -114,11 +116,14 @@ export default function (pi: ExtensionAPI) {
 				{
 					setRequestRender: (fn) => {
 						requestFooterRender = fn ?? undefined;
+						if (!fn) footerSegments.deactivate();
+						else if (active && sessionLifecycle.isCurrent()) footerSegments.activate();
 					},
 					scheduleGitRefresh: () => {
 						void scheduleGitRefresh(ctx);
 					},
 					getLiveTps: () => turnTelemetry.getLiveTps(),
+					getExtensionSegments: footerSegments.getSegments,
 					canEmbedInEditor: () => editor?.isFramed() ?? false,
 				},
 			);
@@ -138,6 +143,7 @@ export default function (pi: ExtensionAPI) {
 				isEnabled: () => config.copyButtons,
 			});
 			active = true;
+			if (requestFooterRender) footerSegments.activate();
 		}
 	};
 
@@ -237,6 +243,7 @@ export default function (pi: ExtensionAPI) {
 	pi.on("session_shutdown", async (_event, ctx) => {
 		sessionLifecycle.shutdown();
 		stopWorkingTimer();
+		footerSegments.deactivate();
 		if (active) {
 			uninstallUi(ctx);
 		}

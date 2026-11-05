@@ -76,6 +76,7 @@ const COPY = {
 			tokens: "Session tokens",
 			cost: "Session cost",
 			extensionStatuses: "Extension status line",
+			extensionSegments: "Extension footer segments",
 			capitalizeProviderName: "Capitalize provider name",
 			nerdIconSpacing: "Extra space after Nerd icons",
 			liveTps: "Live TPS",
@@ -134,6 +135,7 @@ const COPY = {
 			tokens: "会话 Token",
 			cost: "会话费用",
 			extensionStatuses: "扩展状态行",
+			extensionSegments: "扩展底栏片段",
 			capitalizeProviderName: "提供商名称首字母大写",
 			nerdIconSpacing: "Nerd 图标后额外留空",
 			liveTps: "实时 TPS",
@@ -292,6 +294,7 @@ function buildSegmentsItems(config: OpenTuiConfig, copy: SettingsCopy): SettingG
 			label: copy.sections.other,
 			items: [
 				{ id: "extensionStatuses", label: copy.labels.extensionStatuses, currentValue: flag(segs.extensionStatuses) },
+				{ id: "extensionSegments", label: copy.labels.extensionSegments, currentValue: flag(segs.extensionSegments) },
 				{ id: "capitalizeProviderName", label: copy.labels.capitalizeProviderName, currentValue: flag(segs.capitalizeProviderName) },
 				{ id: "nerdIconSpacing", label: copy.labels.nerdIconSpacing, currentValue: flag(segs.nerdIconSpacing) },
 			],

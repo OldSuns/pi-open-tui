@@ -4,6 +4,7 @@
 
 ### New Features
 
+- Let extensions contribute text to either main footer row through the public `open-tui:footer:*` events, with placement, width priorities, lifecycle cleanup, and a separate visibility setting.
 - Allow selected tools, such as `edit`, to keep their native rendering in compact mode through `toolView.exclude`.
 
 ### Breaking Changes

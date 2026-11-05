@@ -99,6 +99,7 @@ Example configuration:
     "cost": true,
     "liveTps": true,
     "extensionStatuses": true,
+    "extensionSegments": true,
     "capitalizeProviderName": true,
     "nerdIconSpacing": false
   },
@@ -150,6 +151,8 @@ With `inlineFooter`, the two main Footer rows are rendered inside the editor fra
 open-tui frames editors that keep Pi’s native editor layout and its cursor, mouse, and padding APIs, including `CustomEditor` extensions. It decorates the same instance, preserving ghost text, key handling, completion, and submit callbacks. Editors using the current `ctx.ui.setEditorComponent()` API can register before or after `pi-open-tui`, and runtime replacements are framed too; temporary dialogs are left alone. Before decorating, open-tui renders the editor once at the terminal width to check for native top and bottom borders, and every framed render is re-checked. Editors without those capabilities or borders remain unchanged, with the footer displayed separately even when `inlineFooter` is enabled. Disabling open-tui removes its decoration, restores the registration methods, and keeps the latest editor factory.
 
 This ordering guarantee applies to editor registration, not header or footer replacements.
+
+For the extension footer API, see [Extension footer segments](docs/footer-segments.md).
 
 ## Turn telemetry
 

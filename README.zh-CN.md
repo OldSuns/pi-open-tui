@@ -99,6 +99,7 @@ pi -e npm:pi-open-tui
     "cost": true,
     "liveTps": true,
     "extensionStatuses": true,
+    "extensionSegments": true,
     "capitalizeProviderName": true,
     "nerdIconSpacing": false
   },
@@ -150,6 +151,8 @@ pi -e npm:pi-open-tui
 open-tui 会给保留 Pi 原生编辑器布局及光标、鼠标、内边距接口的编辑器加边框，包括基于 `CustomEditor` 的扩展。装饰直接作用于同一实例，因此灰字建议、按键处理、补全和提交回调能够保留。通过当前 `ctx.ui.setEditorComponent()` 接口注册的编辑器可以在 `pi-open-tui` 之前或之后注册，运行时替换的编辑器也会自动加框；临时对话框保持原样。装饰前，open-tui 会按终端宽度渲染一次编辑器，检查是否存在可识别的原生上下边界，之后每次加框也会复查。缺少这些能力或边界、或在布局检测时抛出异常的编辑器保持原样，即使开启 `inlineFooter`，底栏也会独立显示。关闭 open-tui 会撤销装饰、恢复注册接口，并保留最新的编辑器工厂。
 
 顺序无关的保证针对编辑器注册，不包含顶栏或底栏的替换。
+
+扩展底栏接口见[接入文档（英文）](docs/footer-segments.md)。
 
 ## 单轮遥测
 

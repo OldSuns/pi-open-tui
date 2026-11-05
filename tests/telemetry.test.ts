@@ -6,6 +6,7 @@ import test from "node:test";
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 import {
 	AssistantMessageComponent,
+	createEventBus,
 	type ExtensionAPI,
 	type ExtensionContext,
 	initTheme,
@@ -426,6 +427,7 @@ test("open-tui notifies once after a complete agent run", () => {
 		registerCommand() {},
 		registerToolRenderer() {},
 		registerMarkdownTransformer() {},
+		events: createEventBus(),
 		getThinkingLevel: () => "off",
 	} as unknown as ExtensionAPI;
 	const ctx = {
@@ -486,6 +488,7 @@ test("open-tui keeps a bounded peek scoped to the current assistant", async () =
 		registerCommand() {},
 		registerToolRenderer() {},
 		registerMarkdownTransformer() {},
+		events: createEventBus(),
 		getThinkingLevel: () => "high",
 	} as unknown as ExtensionAPI;
 	let editorFactory: unknown;
