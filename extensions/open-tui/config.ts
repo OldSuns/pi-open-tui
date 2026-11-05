@@ -19,6 +19,8 @@ export interface FooterSegments {
 	gitCommit: boolean;
 	runtime: boolean;
 	context: boolean;
+	/** Context progress bar and its icon; off keeps the percentage and token usage. */
+	contextBar: boolean;
 	tokens: boolean;
 	cost: boolean;
 	liveTps: boolean;
@@ -87,6 +89,7 @@ export const DEFAULT_CONFIG: OpenTuiConfig = {
 		gitCommit: false,
 		runtime: true,
 		context: true,
+		contextBar: true,
 		tokens: true,
 		cost: true,
 		liveTps: true,

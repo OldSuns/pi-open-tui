@@ -73,6 +73,7 @@ const COPY = {
 			gitCommit: "Git tag (detached HEAD)",
 			runtime: "Project runtime",
 			context: "Context usage",
+			contextBar: "Context bar",
 			tokens: "Session tokens",
 			cost: "Session cost",
 			extensionStatuses: "Extension status line",
@@ -132,6 +133,7 @@ const COPY = {
 			gitCommit: "Git 标签（分离 HEAD）",
 			runtime: "项目运行环境",
 			context: "上下文用量",
+			contextBar: "上下文进度条",
 			tokens: "会话 Token",
 			cost: "会话费用",
 			extensionStatuses: "扩展状态行",
@@ -280,6 +282,7 @@ function buildSegmentsItems(config: OpenTuiConfig, copy: SettingsCopy): SettingG
 			items: [
 				{ id: "runtime", label: copy.labels.runtime, currentValue: flag(segs.runtime) },
 				{ id: "context", label: copy.labels.context, currentValue: flag(segs.context) },
+				{ id: "contextBar", label: copy.labels.contextBar, currentValue: flag(segs.contextBar) },
 				{ id: "liveTps", label: copy.labels.liveTps, currentValue: flag(segs.liveTps) },
 			],
 		},

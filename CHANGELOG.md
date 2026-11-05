@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- Add `footerSegments.contextBar` to hide the context progress bar and its icon while keeping the percentage and token usage.
+
 ## [0.4.3] - 2026-11-05
 
 ### New Features

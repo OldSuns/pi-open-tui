@@ -366,6 +366,20 @@ test("narrow footer sheds the context bar before left segments", () => {
 	assert.match(tiny, /^@ /);
 });
 
+test("hides the context bar while keeping percentage and token usage", () => {
+	const { component, config } = footerFixture({ contextTokens: 250 });
+
+	const wide = component.render(120)[0]!;
+	assert.ok(wide.includes("["), `context bar missing\n${wide}`);
+	assert.ok(wide.includes("25.0%"), wide);
+
+	config.footerSegments.contextBar = false;
+	const text = component.render(120)[0]!;
+	assert.match(text, /25\.0% · 250\/1\.0k/);
+	assert.ok(!text.includes("["), `bar should be hidden\n${text}`);
+	assert.ok(!text.includes("#"), `icon should be hidden\n${text}`);
+});
+
 test("provides inline footer content without duplicating native rows", () => {
 	let canEmbed = true;
 	const { component, config, handle } = footerFixture({

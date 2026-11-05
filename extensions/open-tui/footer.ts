@@ -56,13 +56,14 @@ function renderBar(theme: Theme, pct: number, barWidth: number, ascii: boolean):
 	);
 }
 
-/** Compact context form: icon + percentage, no bar or token counts. */
-function renderContextCompact(theme: Theme, ctx: ExtensionContext, glyphs: IconGlyphs): string {
+/** Compact context form: percentage only, no bar, token counts, or icon when the bar is off. */
+function renderContextCompact(theme: Theme, ctx: ExtensionContext, glyphs: IconGlyphs, showBar: boolean): string {
 	const contextUsage = ctx.getContextUsage();
 	const contextWindow = contextUsage?.contextWindow ?? ctx.model?.contextWindow ?? 0;
 	if (contextWindow <= 0) return "";
 	const contextPct = contextUsage?.percent ?? 0;
-	return `${theme.fg(stressColor(contextPct), glyphs.context)} ${theme.fg(stressColor(contextPct), `${contextPct.toFixed(1)}%`)}`;
+	const pctText = theme.fg(stressColor(contextPct), `${contextPct.toFixed(1)}%`);
+	return showBar ? `${theme.fg(stressColor(contextPct), glyphs.context)} ${pctText}` : pctText;
 }
 
 function renderGitSegment(
@@ -149,6 +150,7 @@ function renderContextBar(
 	width: number,
 	glyphs: IconGlyphs,
 	iconMode: OpenTuiConfig["icons"]["mode"],
+	showBar: boolean,
 ): string {
 	const contextUsage = ctx.getContextUsage();
 	const contextWindow = contextUsage?.contextWindow ?? ctx.model?.contextWindow ?? 0;
@@ -161,6 +163,7 @@ function renderContextBar(
 
 	const pctText = theme.fg(stressColor(contextPct), `${contextPct.toFixed(1)}%`);
 	const ctxText = `${theme.fg("text", fmtTokens(contextTokens))}${theme.fg("dim", "/")}${theme.fg("text", fmtTokens(contextWindow))}`;
+	if (!showBar) return `${pctText} ${theme.fg("dim", "·")} ${ctxText}`;
 	const contextIcon = theme.fg(stressColor(contextPct), glyphs.context);
 	// Cap the bar at `width - reserved` (with a floor of 4) so the full form
 	// never forces the left segments out before compact/drop logic kicks in.
@@ -474,8 +477,8 @@ function renderFooterContent(
 	let contextText = "";
 	let contextCompact: string | undefined;
 	if (segments.context) {
-		contextText = renderContextBar(theme, ctx, width, glyphs, config.icons.mode);
-		const compact = renderContextCompact(theme, ctx, glyphs);
+		contextText = renderContextBar(theme, ctx, width, glyphs, config.icons.mode, segments.contextBar);
+		const compact = renderContextCompact(theme, ctx, glyphs, segments.contextBar);
 		if (compact && visibleWidth(compact) < visibleWidth(contextText)) {
 			contextCompact = compact;
 		}

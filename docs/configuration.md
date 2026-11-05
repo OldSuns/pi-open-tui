@@ -57,6 +57,7 @@ All keys below are booleans inside `footerSegments`.
 | `gitCommit` | `false` | Tag pointing at the detached HEAD commit; only used when `gitBranch` is on |
 | `runtime` | `true` | Detected project runtime and its version when available |
 | `context` | `true` | Context bar, percentage, and token usage |
+| `contextBar` | `true` | Progress bar and its icon; `false` keeps only the percentage and token usage |
 | `tokens` | `true` | Cumulative input/output tokens and the latest assistant cache-hit percentage |
 | `cost` | `true` | Cumulative session cost reported by Pi |
 | `liveTps` | `true` | Estimated streaming speed beside the working timer |
@@ -151,6 +152,7 @@ Tab/Shift+Tab 或 ←/→ 切页，↑/↓ 或 Page Up/Page Down 移动，Enter/
 | `gitCommit` | `false` | 指向分离 HEAD 提交的标签，仅在 `gitBranch` 开启时使用 |
 | `runtime` | `true` | 检测到的项目运行环境，以及可获取时的版本号 |
 | `context` | `true` | 上下文进度条、百分比和 Token 用量 |
+| `contextBar` | `true` | 进度条及其图标；关闭后仅保留百分比和 Token 用量 |
 | `tokens` | `true` | 累计输入/输出 Token，以及最新助手回复的缓存命中率 |
 | `cost` | `true` | Pi 报告的会话累计费用 |
 | `liveTps` | `true` | 工作计时器旁的流式速度估算 |
@@ -216,6 +218,7 @@ The complete default configuration is shared by both language references. Set `s
     "gitCommit": false,
     "runtime": true,
     "context": true,
+    "contextBar": true,
     "tokens": true,
     "cost": true,
     "liveTps": true,

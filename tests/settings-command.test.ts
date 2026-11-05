@@ -240,7 +240,7 @@ test("toggles live TPS from the Footer tab", async () => {
 	const settings = await openSettings();
 
 	settings.press("\t", 2);
-	settings.press("\x1b[B", 8);
+	settings.press("\x1b[B", 9);
 	assert.match(selectedLine(settings.component), /Live TPS/);
 
 	settings.component.handleInput("\r");
@@ -385,7 +385,7 @@ test("configures the extension status line with Space", async () => {
 	const settings = await openSettings();
 	settings.component.handleInput("\x1b[C");
 	settings.component.handleInput("\x1b[C");
-	for (let i = 0; i < 11; i++) settings.component.handleInput("\x1b[B");
+	for (let i = 0; i < 12; i++) settings.component.handleInput("\x1b[B");
 	assert.match(selectedLine(settings.component), /Extension status line/);
 
 	settings.component.handleInput(" ");
@@ -421,7 +421,7 @@ test("keeps every Footer selection visible in short terminals", async () => {
 			settings.terminal.columns = width;
 			settings.terminal.rows = 12;
 			settings.press("\t", 2);
-			for (let i = 0; i < 15; i++) {
+			for (let i = 0; i < 16; i++) {
 				const lines = settings.component.render(width);
 				assert.ok(lines.length <= 12, `${language} ${width}x12: ${lines.length} rows`);
 				assert.ok(lines.slice(0, 12).some((line) => line.includes("→ ")));
@@ -435,7 +435,7 @@ test("keeps every Footer selection visible in short terminals", async () => {
 test("relayouts on height and width changes without losing the selection", async () => {
 	const settings = await openSettings();
 	settings.press("\t", 2);
-	settings.press("\x1b[B", 13);
+	settings.press("\x1b[B", 14);
 	assert.match(selectedLine(settings.component), /Capitalize provider name/);
 
 	for (const [width, rows] of [[80, 12], [80, 24], [48, 12], [24, 12], [36, 12], [80, 24]] as const) {
@@ -456,7 +456,7 @@ test("preserves long Footer labels' current values at narrow widths", async () =
 		config.settingsLanguage = language;
 		const settings = await openSettings(config);
 		settings.press("\t", 2);
-		settings.press("\x1b[B", 11);
+		settings.press("\x1b[B", 12);
 		for (const id of ["extensionStatuses", "extensionSegments", "capitalizeProviderName", "nerdIconSpacing"] as const) {
 			for (const toggle of [false, true]) {
 				if (toggle) settings.component.handleInput(" ");
