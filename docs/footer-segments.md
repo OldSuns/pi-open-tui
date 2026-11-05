@@ -1,5 +1,7 @@
 # Extension footer segments
 
+[Project overview](../README.md) · [Configuration](./configuration.md#english) · [Implementation and compatibility](./implementation.md#english)
+
 Extensions use `pi.events` to add text to either main footer row, including the editor borders when `inlineFooter` is enabled. No additional status row is created.
 
 ## Events

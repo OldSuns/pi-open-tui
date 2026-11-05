@@ -11,19 +11,21 @@ A polished terminal interface for the [Pi](https://pi.dev) coding agent.
 ## Highlights
 
 - **Pi header** with model, thinking level, working directory, and useful slash-command hints
-- **Responsive footer** with Git state, detected runtime, context usage, token counts, cost, and extension status
-- **Framed editor** with block, bar, and underline cursor styles; keeps compatible editors from other extensions
-- **Project awareness** for 50+ runtimes and detailed Git state (ahead/behind, staged, modified, untracked, stash, detached HEAD)
-- **Turn telemetry** for TPS, time to first token (TTFT), duration, stalls, tokens, and list-price rate
-- **Thinking peek**: an inline ticker replaces Pi's hidden `Thinking...` label with the tail of the model's reasoning while it works
-- **Interactive settings** through `/open-tui`, available in English and Simplified Chinese
+- **Responsive footer** with Git state, detected runtime, context usage, tokens, cost, and extension status
+- **Framed editor** with block, bar, and underline cursors, preserving compatible editors from other extensions
+- **Project awareness** for 50+ runtimes and detailed Git state, including ahead/behind, staged, modified, untracked, stash, and detached HEAD
+- **Turn telemetry** with generation speed, time to first token, duration, stalls, tokens, and cost rate
+- **Thinking peek** with a live preview of hidden reasoning while the model works
+- **Compact tool view** with edit/write previews and optional support for extension and MCP tools
+- **Fullscreen Copy buttons** for code blocks and user messages
+- **Interactive settings** in English and Simplified Chinese through `/open-tui`
 
 ## Requirements
 
 - Pi 1.5.0 or later
 - Node.js 22.19.0 or later (Pi's minimum)
 - A terminal with UTF-8 and color support
-- A [Nerd Font](https://www.nerdfonts.com/font-downloads) for the full icon set (optional; portable Unicode icons are built in)
+- A [Nerd Font](https://www.nerdfonts.com/font-downloads) for the full icon set (optional; Unicode and ASCII modes are available)
 
 ## Install
 
@@ -41,152 +43,64 @@ pi -e npm:pi-open-tui
 
 ## Font and icons
 
-Install any patched font from the [Nerd Fonts downloads page](https://www.nerdfonts.com/font-downloads) or the [latest release](https://github.com/ryanoasis/nerd-fonts/releases/latest), select it in your terminal profile, and restart the terminal. In VS Code, Windows Terminal, and similar apps, set the font in the terminal profile; installing it in the OS is not enough.
+For the full icon set, install a [Nerd Font](https://www.nerdfonts.com/font-downloads), select it in your terminal profile, and restart the terminal. Installing the font in the OS alone is not enough for apps such as VS Code or Windows Terminal.
 
-The default `auto` mode checks the terminal environment, not the installed font file:
+In `/open-tui`, **Appearance → Icons** offers `auto`, `nerd`, `unicode`, and `ascii`. The default `auto` mode checks the terminal environment, not the installed font. If icons appear as boxes, choose `unicode`; if your terminal has a Nerd Font, you can force `nerd`, including over SSH.
 
-| Mode | Behavior |
-| --- | --- |
-| `auto` | Nerd Font icons in interactive UTF-8 TTYs; portable Unicode for SSH sessions (the client terminal usually has no Nerd Font); ASCII for non-interactive output, `TERM=dumb`, or a non-UTF-8 locale |
-| `nerd` | Force Nerd Font icons after configuring a Nerd Font in the terminal |
-| `unicode` | Portable Unicode icons that render without a patched font; emoji use the terminal's emoji fallback |
-| `ascii` | Plain-text icons |
-
-If icons appear as boxes or wrong symbols, open `/open-tui` and change the mode under **Appearance → Icons**. If the font is installed but `auto` still picks ASCII, select `nerd`; select `nerd` over SSH too when the client terminal has a Nerd Font.
-
-If wide Nerd Font icons eat the gap before their labels (for example in Kitty), enable `footerSegments.nerdIconSpacing` (**Footer → Other** in `/open-tui`) to reserve an extra blank cell after Nerd Font icons; Unicode/ASCII icons and compact Git flags are unaffected. `narrow_symbols U+E000-U+F8FF 1` in `kitty.conf` is an alternative.
+See [icon detection and spacing](./docs/configuration.md#icons) for automatic selection rules and the Kitty spacing option.
 
 ## Configuration
 
-Run `/open-tui` to open the settings dialog. It provides **General**, **Appearance**, **Footer**, and **Telemetry** tabs and adapts to the terminal size. Settings are stored in `open-tui.json` inside Pi's agent directory, which defaults to `~/.pi/agent`; `PI_CODING_AGENT_DIR` overrides that directory. If saving fails, a warning explains that the change applies only to the current session.
+Run `/open-tui` to open the settings dialog. Its **General**, **Appearance**, **Footer**, and **Telemetry** tabs are available in English and Simplified Chinese and adapt to the terminal size. Use Tab/Shift+Tab or ←/→ to switch tabs, ↑/↓ to move, Enter/Space to change a value, and Esc/q to close.
 
-Each tab groups related settings under dim section headings:
+Settings are stored in `open-tui.json` inside Pi's agent directory (default: `~/.pi/agent`; overridden by `PI_CODING_AGENT_DIR`). If saving fails, a warning explains that the change applies only to the current session.
 
-| Tab | Sections |
-| --- | --- |
-| General | Extension, Interface, Messages & tools, Footer |
-| Appearance | Icons, Editor |
-| Footer | Location, Git, Runtime, Usage, Other |
-| Telemetry | Enabled (standalone master switch), Measurements |
-
-Use Tab/Shift+Tab or ←/→ to switch tabs, ↑/↓ or Page Up/Page Down to move between settings, Enter/Space to change a value, and Esc/q to close. Section headings occupy one row, are skipped by navigation, and cannot be selected or changed by clicking. The list scrolls within the available terminal height; its position indicator counts settings and headings. Existing configuration files need no migration.
-
-In **General → Messages & tools**, selecting **Tool view: Compact** reveals **Compact extension tools** as an indented child setting. Switching back to **Native** hides the child setting and retains its value for the next time you select **Compact**. **Footer in editor border** is in **General → Footer**.
-
-Example configuration:
-
-```json
-{
-  "enabled": true,
-  "header": true,
-  "inlineFooter": false,
-  "copyButtons": true,
-  "settingsLanguage": "en",
-  "cursorStyle": "block",
-  "icons": {
-    "mode": "auto"
-  },
-  "footerSegments": {
-    "cwd": true,
-    "hostname": false,
-    "sessionName": false,
-    "gitBranch": true,
-    "gitStatus": true,
-    "gitCommit": false,
-    "runtime": true,
-    "context": true,
-    "tokens": true,
-    "cost": true,
-    "liveTps": true,
-    "extensionStatuses": true,
-    "extensionSegments": true,
-    "capitalizeProviderName": true,
-    "nerdIconSpacing": false
-  },
-  "telemetry": {
-    "enabled": true,
-    "tps": true,
-    "ttft": true,
-    "duration": true,
-    "tokens": true,
-    "stalls": true,
-    "cost": true
-  },
-  "thinkingPeek": {
-    "lines": 1
-  },
-  "toolView": {
-    "mode": "native",
-    "extensionTools": false,
-    "exclude": []
-  }
-}
-```
-
-Key options:
-
-| Option | Values | Notes |
+| Setting | Where to find it | Default |
 | --- | --- | --- |
-| `settingsLanguage` | `en`, `zh` | Changes the `/open-tui` interface language |
-| `header` | `true`, `false` | Overrides Pi's header with the open-tui header; set it to `false` to leave the header slot to Pi or another extension |
-| `inlineFooter` | `true`, `false` | Moves the two main Footer rows into the editor's top and bottom borders; defaults to `false`. Extension status rows remain below the editor |
-| `copyButtons` | `true`, `false` | Frames code blocks and shows a clickable `[Copy]` label on code blocks and user messages in fullscreen mode; defaults to `true`. See [Copy buttons](#copy-buttons) |
-| `cursorStyle` | `block`, `bar`, `underline` | `bar` and `underline` require terminal cursor-shape support |
-| `icons.mode` | `auto`, `nerd`, `unicode`, `ascii` | Controls footer and telemetry icons |
-| `footerSegments` | Boolean flags | Shows or hides individual footer data |
-| `footerSegments.capitalizeProviderName` | Boolean | Capitalizes the first character of the provider name in the footer; set it to `false` to keep the provider's original casing |
-| `footerSegments.nerdIconSpacing` | Boolean | Adds an extra blank cell after Nerd Font icons in the footer; defaults to `false` |
-| `telemetry` | Boolean flags | Enables telemetry and its individual measurements |
-| `thinkingPeek.lines` | `0`, `1`, `2` | Off, one-line, or two-line hidden thinking preview |
-| `toolView.mode` | `native`, `compact` | Pi's native cards (default) or compact call/summary rows with successful edit/write previews. Applies to rows created after the change |
-| `toolView.extensionTools` | `true`, `false` | In compact mode, also collapses extension, MCP, and replacement tools into generic rows; defaults to `false`. See [Tool view](#tool-view) |
-| `toolView.exclude` | Tool names | Tools that always keep their native rendering, for example `["subagent_wait"]`; defaults to `[]` |
+| Header and settings language | General → Interface | Header on, English |
+| Thinking peek | General → Messages & tools | 1 line |
+| Copy buttons | General → Messages & tools | On, fullscreen only |
+| Tool view | General → Messages & tools | Native |
+| Footer in editor border | General → Footer | Off |
+| Icons and cursor style | Appearance | Auto icons, block cursor |
+| Footer fields and telemetry measurements | Footer / Telemetry | Individually configurable |
 
-`sessionName` appears only when the session has a name. `hostname` shows the short host name with a server icon. In detached HEAD state, `gitBranch` shows `HEAD` with the short commit hash, and `gitCommit` appends the tag pointing at that commit (only while `gitBranch` is on). Disabling `extensionStatuses` hides the whole extension status line, including MCP status; each status keeps the colour its extension applied with `ctx.ui.theme.fg()`.
+Selecting **Tool view: Compact** reveals **Compact extension tools** as a child setting. Switching back to Native hides it and retains its value. The [configuration reference](./docs/configuration.md#english) contains the complete JSON defaults, every option, and tool exclusions.
 
-Footer token and cost totals include assistant responses, tool-reported usage, compaction and branch summaries, and cache warming. The cache-hit percentage describes the most recent assistant response, not the cumulative session. When the first Footer row is too narrow, the runtime and context bar are hidden first, then Git, the session name, and the host name and timer; the CWD stays longest, shortened to its folder name.
+## Header, footer, and editor
 
-With `inlineFooter`, the two main Footer rows are rendered inside the editor frame to save vertical space: the Git branch and session title on the left of the top border, the CWD first in the right-hand group. The Header and extension status rows remain separate, and narrow terminals truncate lower-priority Footer data first.
+The header provides model and project context with command hints. The two main footer rows keep location, Git state, runtime, a working/done timer, context usage, model details, tokens, and cost visible as space allows. Fields can be toggled individually; the layout shortens or hides lower-priority information in narrow terminals.
 
-open-tui frames editors that keep Pi’s native editor layout and its cursor, mouse, and padding APIs, including `CustomEditor` extensions. It decorates the same instance, preserving ghost text, key handling, completion, and submit callbacks. Editors using the current `ctx.ui.setEditorComponent()` API can register before or after `pi-open-tui`, and runtime replacements are framed too; temporary dialogs are left alone. Before decorating, open-tui renders the editor once at the terminal width to check for native top and bottom borders, and every framed render is re-checked. Editors without those capabilities or borders remain unchanged, with the footer displayed separately even when `inlineFooter` is enabled. Disabling open-tui removes its decoration, restores the registration methods, and keeps the latest editor factory.
+Footer token and cost totals include assistant responses, tool-reported usage, compaction and branch summaries, and cache warming. The cache-hit percentage describes the latest assistant response. Other extensions can use separate status rows or [contribute text directly to the main footer](./docs/footer-segments.md).
 
-This ordering guarantee applies to editor registration, not header or footer replacements.
-
-For the extension footer API, see [Extension footer segments](docs/footer-segments.md).
+Enable **Footer in editor border** to move the two main rows into the editor's top and bottom borders. Extension status rows remain below the editor. Compatible editors keep their input behavior, completion, and ghost text; editors that cannot be framed retain a separate footer. See [editor compatibility and layout](./docs/implementation.md#editor-and-layout) for the integration boundaries.
 
 ## Turn telemetry
 
-After each complete agent run, pi-open-tui shows one transient result. Tool-call turns are combined into it:
+After each complete agent run, pi-open-tui shows one transient result, combining its assistant turns:
 
 ```text
 > TPS 42.5 tok/s | ~ TTFT 1.2s | + 29.7s | ↑ 567 | ↓ 1.2k | ! stall 1x / 4.3s | $ $3.60/M
 ```
 
-TPS is the provider-reported assistant output tokens divided by the total generation time from `turn_start` to the assistant `message_end`, so it includes TTFT, hidden reasoning, buffering, and stalls but excludes tool execution between turns. Runs without output tokens or measurable time show `TPS —`.
+TPS measures provider-reported output tokens over generation time, including waiting and stalls but excluding tool execution between turns. The working timer also shows an estimated live speed such as `~54 tok/s` during streaming. The `$ / M` field is the effective rate per million tokens for the run; the footer shows cumulative session cost.
 
-While a response streams, the working timer also shows the estimated speed, for example `working 12.3s · ~54 tok/s`. The `~` marks it as an estimate over the last 2 seconds of streamed text, thinking, and tool-call arguments; it drops toward zero during stalls and stays dimmed at its last value during tool execution. It is controlled by **Footer → Runtime → Live TPS** (`footerSegments.liveTps`) and disappears when the run ends, where the exact TPS above is authoritative.
-
-The `$ / M` value is the model's list-price rate from `usage.cost.total`, not the cumulative session cost shown in the footer. Every telemetry field can be toggled from **Telemetry → Measurements**, with **Enabled** as the separate master switch.
+Toggle notification fields under **Telemetry → Measurements**, or live speed under **Footer → Runtime → Live TPS**. See [measurement definitions](./docs/implementation.md#usage-and-telemetry) for formulas, timing boundaries, and cache accounting.
 
 ## Thinking peek
 
-With Pi's **Hide thinking** setting enabled, pi-open-tui shows a compact ticker in the native hidden thinking block's `Thinking...` position. The `/open-tui` setting offers **Off**, **1 line**, and **2 lines**:
-
-- while the model reasons, the thinking tail streams by with a spinner (`~ think ⠋ …`);
-- when the answer starts, it settles on a check mark (`~ think ✓`);
-- in 2-line mode both rows follow the newest tail with the same indentation;
-- after the task settles, the native `Thinking...` label is restored.
+With Pi's **Hide thinking** enabled, pi-open-tui replaces the hidden block's `Thinking...` label with the latest reasoning tail while the model works:
 
 ```text
 ~ think ⠋ previous thought
           latest thought
 ```
 
-The ticker appears only once the model actually streams reasoning, so non-reasoning models never show it. Visibility follows Pi's own Hide thinking toggle and takes effect immediately, and each row is truncated by *visible* width, so CJK text cannot overflow. Configure it from **General → Messages & tools → Thinking peek**, or via `thinkingPeek.lines` in `open-tui.json`.
+Choose **Off**, **1 line**, or **2 lines** under **General → Messages & tools → Thinking peek**. The ticker appears only when the model streams reasoning, settles on a check mark when the answer begins, and returns to Pi's native label after the task settles. It follows Pi's Hide thinking toggle immediately and clips text to fit the available width.
 
 ## Tool view
 
-**Native** remains the default. With **General → Messages & tools → Tool view** set to **Compact** (`toolView.mode: "compact"`), Pi's built-in tools (`read`, `bash`, `powershell`, `edit`, `write`, `grep`, `find`, `ls`) render as one call line and one summary line, with previews for successful edits and writes:
+**Native** remains the default. Select **General → Messages & tools → Tool view → Compact** to display Pi's built-in tools (`read`, `bash`, `powershell`, `edit`, `write`, `grep`, `find`, `ls`) as call and summary rows:
 
 ```text
 ● Read(extensions/open-tui/footer.ts:1-120)
@@ -197,20 +111,17 @@ The ticker appears only once the model actually streams reasoning, so non-reason
   └  Done · 131 lines · 6.4s
 ```
 
-- Successful calls have dim call/summary text and a green dot. Pending dots are dim; running dots alternate between accent and dim once per second. Errors keep the red dot and summary. Failed shell summaries keep the last output line; while running, shell commands show the newest 3 output lines and elapsed time.
-- Successful `edit` previews parse Pi's actual diff and syntax-highlight old and new code separately, with red/green background bands for removed/added rows. No valid diff means no preview.
-- Successful `write` previews show syntax-highlighted, line-numbered content on the normal background. New files and overwrites look the same; partial results and errors get no preview.
-- Preview bodies show at most 16 rows, then a hidden-row count and `Ctrl+O` hint. In compact mode only, long lines truncate with `…` instead of wrapping.
-- Clicking a row expands only that row into Pi's native card, and `Ctrl+O` expands all rows; native expanded output, diffs, and truncation notices are unchanged. Calls are never grouped.
-- Only the display changes. Tools, arguments, results, and what the model sees are untouched. By default only tools confirmed by Pi as built-in are wrapped; third-party and MCP tools keep their own rendering.
-- With **Compact extension tools** (`toolView.extensionTools: true`), every other tool collapses too, including MCP tools and replacements with built-in names. Their unknown output format means summaries show text/image counts, duration, and the first line, with no edit/write previews. Truncation is recognised from explicit markers such as `details.truncation.truncated: true`. Tools that depend on native progress displays belong in `toolView.exclude`, which also applies to built-ins.
-- Recognized `@ff-labs/pi-fff` installations use search summaries: `ffgrep` and `fff-multi-grep` show this page's match count, `fffind` the total matching file count. Expansion keeps FFF's native output.
-- Expanded rows use the renderers Pi resolves, and inline images stay visible while collapsed, since Pi draws them below the row.
-- The mode is chosen when Pi creates a row, so switching it affects new rows; `/reload` or a new session applies it to the whole transcript.
+- Successful `edit` and `write` calls show syntax-highlighted previews of up to 16 rows, with a hint to expand longer output.
+- Running shell calls show recent output and elapsed time; errors retain their error summary.
+- Click a row to expand its native card, or use `Ctrl+O` to expand all rows. Tools, arguments, results, and model-visible content are unchanged.
+- Enable **Compact extension tools** to include extension and MCP tools. Use `toolView.exclude` in the config file for tools that should keep native rendering. Recognized `@ff-labs/pi-fff` tools receive search-specific summaries.
+- Changing the mode affects newly created rows. Use `/reload` or a new session to apply it to the whole transcript.
+
+See [tool rendering details](./docs/implementation.md#tool-rendering) for preview rules, extension summaries, and renderer compatibility.
 
 ## Copy buttons
 
-In fullscreen mode (Pi's `tuiMode: "fullscreen"`), code blocks are drawn in rounded frames with their language. Completed code blocks show a `[Copy]` label in the top border when there is enough width, and every user message gets a `[Copy]` label too. Click it to put the source text on the clipboard; Pi flashes `Copied!`.
+In fullscreen mode (Pi's `tuiMode: "fullscreen"`), completed code blocks show a clickable `[Copy]` label in their rounded frame when there is enough width. User messages have a Copy label too. Clicking copies the source text and Pi flashes `Copied!`.
 
 ```text
 ╭─ sh ─────────────── [Copy] ╮
@@ -218,13 +129,16 @@ In fullscreen mode (Pi's `tuiMode: "fullscreen"`), code blocks are drawn in roun
 ╰────────────────────────────╯
 ```
 
-- Code blocks: the frame replaces the two fence rows, so a block keeps its height; long lines wrap inside the frame. The label copies the code without the fences, preserving indentation and tabs. Applies to code in both user and assistant messages.
-- User messages: the label sits on the bubble's last row and copies the message as you typed it.
-- Whole assistant replies have no label; use Pi's `/copy` for that.
-- While a reply streams, its code blocks are framed without a label, so unfinished code cannot be copied. The label is also dropped when the frame is too narrow; thinking blocks keep Pi's plain fences. Labels appear as soon as streaming ends, without a resize.
-- Regular mode has no mouse capture, so code blocks keep Pi's plain fences there.
+Code labels copy code without fences, preserving indentation and tabs. User-message labels copy the original message. Streaming code blocks gain their label when streaming finishes; regular mode and thinking blocks keep Pi's plain fences. Use Pi's `/copy` to copy a whole assistant reply.
 
-Toggle it from **General → Messages & tools → Copy buttons** in `/open-tui`, or via `copyButtons` in `open-tui.json`.
+Toggle **General → Messages & tools → Copy buttons** to enable or disable this feature. [Copy-button details](./docs/implementation.md#copy-button-behavior) cover width limits, cached blocks, and interaction with other renderers.
+
+## Documentation
+
+- [Configuration reference](./docs/configuration.md#english) — complete defaults, options, and icon selection
+- [Implementation and compatibility](./docs/implementation.md#english) — measurement formulas, layout, rendering, and lifecycle
+- [Extension footer segments](./docs/footer-segments.md) — public events and an integration example for extension authors
+- [Changelog](./CHANGELOG.md) — released and upcoming changes
 
 ## Local development
 
@@ -235,7 +149,7 @@ npm run typecheck
 pi -e .
 ```
 
-CI checks Pi 1.5.0 and the latest release on Node.js 22.19.0 and 24, across Linux, Windows, and macOS. Keep Pi packages on the same version when checking compatibility. Automated tests do not replace checking terminal fonts, mouse interaction, and cursor support with `pi -e .`.
+CI checks Pi 1.5.0 and the latest release on Node.js 22.19.0 and 24 across Linux, Windows, and macOS. Keep all Pi packages on the same version. Use `pi -e .` to check terminal fonts, mouse interaction, and cursor support interactively.
 
 ## Acknowledgements
 
