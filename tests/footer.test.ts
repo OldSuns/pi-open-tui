@@ -378,6 +378,12 @@ test("hides the context bar while keeping percentage and token usage", () => {
 	assert.match(text, /25\.0% · 250\/1\.0k/);
 	assert.ok(!text.includes("["), `bar should be hidden\n${text}`);
 	assert.ok(!text.includes("#"), `icon should be hidden\n${text}`);
+
+	// Narrow width still sheds the token counts first, without restoring the icon.
+	const narrow = component.render(20)[0]!;
+	assert.match(narrow, /25\.0%/);
+	assert.ok(!narrow.includes("250/1.0k"), narrow);
+	assert.ok(!narrow.includes("#"), `icon should stay hidden\n${narrow}`);
 });
 
 test("provides inline footer content without duplicating native rows", () => {
