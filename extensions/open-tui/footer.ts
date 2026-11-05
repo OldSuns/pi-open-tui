@@ -352,6 +352,11 @@ function fitContributedRow(
 	};
 }
 
+function alignContributedRow(line: InlineFooterLine, width: number, theme: Theme): string {
+	if (!line.right) return truncateToWidth(line.left, width, theme.fg("dim", "..."));
+	return alignRight(line.left, line.right, width, theme);
+}
+
 function renderFooterContent(
 	ctx: ExtensionContext,
 	getState: () => FooterState,
@@ -488,7 +493,7 @@ function renderFooterContent(
 	const fittedContext = contextText ? fitted.pop() ?? "" : "";
 	const contributedTop = fitContributedRow(1, "plain", builtins, contributions, width, theme);
 	const line1 = contributedTop
-		? alignRight(contributedTop.left, contributedTop.right, width, theme)
+		? alignContributedRow(contributedTop, width, theme)
 		: alignRight(fitted.filter(Boolean).join(" "), fittedContext, width, theme);
 
 	const inlineLeftBudget = Math.floor(width * 0.45);
@@ -514,9 +519,11 @@ function renderFooterContent(
 	builtins.model = { text: modelBlock, priority: 0 };
 	builtins.tokens = { text: stats.tokens, priority: 2 };
 	builtins.cost = { text: stats.cost, priority: 1 };
-	const inlineBottom = fitContributedRow(2, "plain", builtins, contributions, width, theme)
-		?? fitInlineLine(modelBlock, statsBlock, width, theme);
-	const line2 = alignRight(inlineBottom.left, inlineBottom.right, width, theme);
+	const contributedBottom = fitContributedRow(2, "plain", builtins, contributions, width, theme);
+	const inlineBottom = contributedBottom ?? fitInlineLine(modelBlock, statsBlock, width, theme);
+	const line2 = contributedBottom
+		? alignContributedRow(contributedBottom, width, theme)
+		: alignRight(inlineBottom.left, inlineBottom.right, width, theme);
 	const mainLines: [string, string] = [line1, line2]
 		.map((line) => truncateToWidth(line, width, theme.fg("dim", "..."))) as [string, string];
 	const extensionLines = segments.extensionStatuses

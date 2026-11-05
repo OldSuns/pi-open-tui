@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { stripTypeScriptTypes } from "node:module";
 import { hostname, tmpdir } from "node:os";
 import { join, resolve, sep } from "node:path";
@@ -40,13 +40,14 @@ async function withHost(
 	contributorFirst: boolean,
 	run: (fixture: Awaited<ReturnType<typeof createHost>>) => Promise<void>,
 	additionalExtensions: ExtensionFactory[] = [],
+	tuiMode: "regular" | "fullscreen" = "regular",
 ): Promise<void> {
 	const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
 	const directory = await mkdtemp(join(tmpdir(), "pi-footer-segments-"));
 	process.env.PI_CODING_AGENT_DIR = directory;
 	let fixture: Awaited<ReturnType<typeof createHost>> | undefined;
 	try {
-		fixture = await createHost(directory, contributorFirst, additionalExtensions);
+		fixture = await createHost(directory, contributorFirst, additionalExtensions, tuiMode);
 		await run(fixture);
 		assert.deepEqual(fixture.errors, [], "real Pi extension handlers must not fail");
 	} finally {
@@ -68,7 +69,12 @@ async function withHost(
 	}
 }
 
-async function createHost(directory: string, contributorFirst: boolean, additionalExtensions: ExtensionFactory[]) {
+async function createHost(
+	directory: string,
+	contributorFirst: boolean,
+	additionalExtensions: ExtensionFactory[],
+	tuiMode: "regular" | "fullscreen",
+) {
 	const { InteractiveMode } = await import(new URL(
 		"./modes/interactive/interactive-mode.js",
 		import.meta.resolve("@earendil-works/pi-coding-agent"),
@@ -107,7 +113,7 @@ async function createHost(directory: string, contributorFirst: boolean, addition
 		});
 	};
 	const settingsManager = SettingsManager.inMemory({
-		tuiMode: "regular", showHardwareCursor: false, theme: "dark",
+		tuiMode, showHardwareCursor: false, theme: "dark",
 	});
 	settingsManager.setShowTerminalProgress(false);
 	const runtime: AgentSessionRuntime = await createAgentSessionRuntime(async (options) => {
@@ -118,8 +124,9 @@ async function createHost(directory: string, contributorFirst: boolean, addition
 			resourceLoaderOptions: {
 				noExtensions: true, noSkills: true, noThemes: true, noPromptTemplates: true, noContextFiles: true,
 				extensionFactories: [
-					...(contributorFirst ? [contributorFactory, openTui] : [openTui, contributorFactory]),
-					...additionalExtensions,
+					...(contributorFirst
+						? [contributorFactory, ...additionalExtensions, openTui]
+						: [openTui, contributorFactory, ...additionalExtensions]),
 				],
 			},
 		});
@@ -130,10 +137,30 @@ async function createHost(directory: string, contributorFirst: boolean, addition
 		return { ...result, services, diagnostics: services.diagnostics };
 	}, { cwd: directory, agentDir: directory, sessionManager: SessionManager.inMemory(directory) });
 	initTheme("dark");
-	const host = new InteractiveMode(runtime, { tuiMode: "regular", initialThemeSetting: "dark" });
+	const host = new InteractiveMode(runtime, { tuiMode, initialThemeSetting: "dark" });
 	// Follow Pi's real mounting/binding sequence without reading terminal input
 	// or submitting a model prompt. Rendering still uses Pi's actual components.
-	host.mountInteractiveTui(host.renderer, [host.editorContainer, host.statusContainer, host.footerContainer]);
+	if (tuiMode === "fullscreen") {
+		const { createChatViewport } = await import(new URL(
+			"./modes/interactive/chat-viewport.js",
+			import.meta.resolve("@earendil-works/pi-coding-agent"),
+		).href);
+		const viewport = createChatViewport({
+			document: host.documentContainer,
+			pendingMessages: host.pendingMessagesContainer,
+			status: host.statusContainer,
+			widgetsAbove: host.widgetContainerAbove,
+			editor: host.editorContainer,
+			widgetsBelow: host.widgetContainerBelow,
+			footer: host.footerContainer,
+		});
+		host.transcriptScrollView = viewport.transcript;
+		host.fullscreenLayoutRoot = viewport.root;
+	}
+	host.mountInteractiveTui(host.renderer, [
+		host.documentContainer, host.pendingMessagesContainer, host.statusContainer,
+		host.widgetContainerAbove, host.editorContainer, host.widgetContainerBelow, host.footerContainer,
+	]);
 	host.setupKeyHandlers();
 	host.setupEditorSubmitHandler();
 	const bind = async (session: AgentSession) => {
@@ -316,6 +343,13 @@ for (const contributorFirst of [false, true]) {
 			publish({ key: "process:compact", position: { after: "cost" }, text: "PID", priority: 100 });
 			assert.ok(stripAnsi(footer(6)[1]!).includes("PID"), "explicit high priority survives built-in content");
 			remove("process:compact");
+			for (const row of [1, 2] as const) {
+				const exactText = `pid=${process.pid}`;
+				publish({ key: "process:exact", position: { row, side: "left", edge: "start" }, text: exactText, priority: 100 });
+				assert.equal(stripAnsi(footer(visibleWidth(exactText))[row - 1]!), exactText,
+					"a left-only contribution uses the whole row without reserving an empty right-side gap");
+				remove("process:exact");
+			}
 			publish({ key: "process:empty", position: { after: "cwd" }, text: "\x1b[31m\x1b[0m" });
 			assert.deepEqual(footer(600), baseline, "style-only contributions keep the original layout");
 		});
@@ -418,3 +452,184 @@ test("real Pi reload and new-session flows retire event subscriptions and start 
 		assert.ok(stripAnsi(footer().join("\n")).includes(`pid=${process.pid}`));
 	});
 });
+
+for (const contributorFirst of [false, true]) {
+	test(`fullscreen Pi integrates independent live contributors with contributors ${contributorFirst ? "first" : "last"}`, async () => {
+		const readme = await readFile(new URL("../README.md", import.meta.url), "utf8");
+		const example = readme.split("### System memory example")[1]?.match(/```typescript\r?\n([\s\S]*?)```/)?.[1];
+		assert.ok(example);
+		const source = stripTypeScriptTypes(example);
+		const { default: memoryExtension } = await import(`data:text/javascript;base64,${Buffer.from(source).toString("base64")}`);
+		const directoryRuns: { reads: number; text: string; errors: unknown[] }[] = [];
+		const pendingReads: Promise<void>[] = [];
+		const directoryExtension: ExtensionFactory = (pi) => {
+			const key = "system-directory:entries";
+			const run = { reads: 0, text: "", errors: [] as unknown[] };
+			directoryRuns.push(run);
+			let ctx: ExtensionContext | undefined;
+			let lifecycle: string | undefined;
+			let sequence = 0;
+			const publish = () => {
+				if (!ctx || !run.text) return;
+				if (lifecycle === undefined) ctx.ui.setStatus(key, run.text);
+				else {
+					ctx.ui.setStatus(key, undefined);
+					pi.events.emit("open-tui:footer:set", {
+						key, lifecycle, position: { after: "cost" }, text: run.text,
+					});
+				}
+			};
+			const refresh = async () => {
+				if (!ctx) return;
+				const origin = ctx;
+				const token = lifecycle;
+				const request = ++sequence;
+				const entries = await readdir(origin.cwd);
+				run.reads++;
+				if (ctx !== origin || lifecycle !== token || sequence !== request) return;
+				run.text = `Files ${entries.length}`;
+				publish();
+			};
+			const scheduleRefresh = () => {
+				const pending = refresh().catch((error: unknown) => { run.errors.push(error); });
+				pendingReads.push(pending);
+				return pending;
+			};
+			pi.registerCommand("directory-refresh", {
+				description: "Refresh the actual session directory entry count",
+				handler: scheduleRefresh,
+			});
+			pi.events.on("open-tui:footer:state", (data) => {
+				if (!ctx || !data || typeof data !== "object" || !("available" in data)) return;
+				if (data.available === true && "lifecycle" in data && typeof data.lifecycle === "string") {
+					if (lifecycle === data.lifecycle) return;
+					lifecycle = data.lifecycle;
+					void scheduleRefresh();
+				} else if (data.available === false && lifecycle !== undefined) {
+					lifecycle = undefined;
+					sequence++;
+					publish();
+				}
+			});
+			pi.on("session_start", async (_event, nextCtx) => {
+				if (!nextCtx.hasUI || nextCtx.mode !== "tui") return;
+				ctx = nextCtx;
+				await scheduleRefresh();
+				pi.events.emit("open-tui:footer:query", undefined);
+			});
+			pi.on("session_shutdown", () => {
+				const previous = ctx;
+				const token = lifecycle;
+				ctx = undefined;
+				lifecycle = undefined;
+				sequence++;
+				if (token !== undefined) pi.events.emit("open-tui:footer:remove", { key, lifecycle: token });
+				previous?.ui.setStatus(key, undefined);
+			});
+		};
+		await withHost(contributorFirst, async ({ runtime, host, current, lifecycle, footer, frame, toggle, directory, publish }) => {
+			const { renderLayoutFrame } = await import(new URL(
+				"./layout.js", import.meta.resolve("@earendil-works/pi-tui"),
+			).href);
+			const settle = async () => {
+				await Promise.all(pendingReads);
+				for (const run of directoryRuns) assert.deepEqual(run.errors, []);
+			};
+			const latest = () => directoryRuns.at(-1)!;
+			const refresh = async () => {
+				const command = runtime.session.extensionRunner!.getCommand("directory-refresh");
+				assert.ok(command);
+				await command.handler("", runtime.session.extensionRunner!.createCommandContext());
+				await settle();
+			};
+			const assertContributions = () => {
+				const rows = footer(320).map(stripAnsi);
+				assert.equal(rows.length, 2, "two contributing extensions do not add status rows");
+				assertOrder(rows[1]!, [latest().text, "RAM "]);
+			};
+			await settle();
+			assert.equal(host.renderer.mode, "fullscreen");
+			assertContributions();
+			const reads = latest().reads;
+			for (let index = 0; index < 3; index++) current().pi.events.emit("open-tui:footer:query", undefined);
+			await settle();
+			assert.equal(latest().reads, reads, "another contributor's discovery query does not reread data");
+			const originalLifecycle = lifecycle();
+			const originalText = latest().text;
+			await writeFile(join(directory, "process-report.json"), JSON.stringify(process.memoryUsage()), "utf8");
+			await refresh();
+			assert.notEqual(latest().text, originalText, "an actual new file changes the async contribution");
+			assertContributions();
+
+			await toggle("Footer", "Extension footer segments");
+			assert.equal(lifecycle(), originalLifecycle);
+			assert.equal(footer(320).length, 2);
+			assert.doesNotMatch(stripAnsi(footer(320).join("\n")), /Files |RAM /);
+			await writeFile(join(directory, "process-versions.json"), JSON.stringify(process.versions), "utf8");
+			await refresh();
+			assert.equal(footer(320).length, 2, "hidden live updates do not reactivate separate status fallbacks");
+			await toggle("Footer", "Extension footer segments");
+			assertContributions();
+
+			await toggle("General", "Footer in editor border");
+			assert.equal(lifecycle(), originalLifecycle);
+			assert.equal(footer(320).length, 0);
+			current().ctx!.ui.setEditorText(readme);
+			current().ctx!.ui.setWorkingMessage("Reading directory");
+			host.showWorkingStatusIndicator();
+			assert.equal(host.activeStatusIndicator.kind, "working");
+			assert.equal(host.activeWorkingIndicatorEmbedded, true);
+			publish({
+				key: "process:wide", position: { row: 1, side: "left" },
+				text: `\x1b[31m目录 ${hostname()} pid=${process.pid}\x1b[0m`, compactText: `进程 ${process.pid}`, priority: 5,
+			});
+			const top = stripAnsi(frame(240)[0]!);
+			assert.match(top, /Reading directory/);
+			assert.match(top, /↑ \d+ more/, "Pi's real editor contributes its scroll-overflow label");
+			const bottom = frame(320).map(stripAnsi).find((line) => line.startsWith("╰"));
+			assert.ok(bottom);
+			assertOrder(bottom, [latest().text, "RAM "]);
+			// Pi 1.5.0's native wordWrapLine recurses on a wide grapheme when
+			// the editor content budget is only one column. Empty-editor tiny
+			// widths are covered above; this populated-editor scenario starts at 8.
+			for (const width of [8, 20, 40, 80, 120, 240]) {
+				for (const line of frame(width)) {
+					assert.ok(visibleWidth(line) <= width, `working indicator and scroll label stay within ${width} columns`);
+				}
+				const rendered = renderLayoutFrame(host.fullscreenLayoutRoot, width, 40, () => host.ui.requestRender());
+				assert.equal(rendered.lines.length, 40);
+				for (const line of rendered.lines) assert.ok(visibleWidth(line) <= width, `fullscreen layout width ${width}`);
+			}
+			host.clearStatusIndicator();
+			current().ctx!.ui.setEditorText("");
+			await toggle("General", "Footer in editor border");
+			assertContributions();
+			await toggle("General", "Enabled");
+			assert.equal(current().state.available, false);
+			assertOrder(stripAnsi(footer(320).join("\n")), [latest().text, "RAM "]);
+			await toggle("General", "Enabled");
+			await settle();
+			assert.notEqual(lifecycle(), originalLifecycle);
+			assertContributions();
+
+			const beforeReload = lifecycle();
+			await runtime.session.reload({ beforeSessionStart: async () => host.resetExtensionUI() });
+			await settle();
+			assert.notEqual(lifecycle(), beforeReload);
+			assert.equal(directoryRuns.length, 2);
+			assertContributions();
+			const beforeNew = lifecycle();
+			const replacement = await runtime.newSession();
+			await settle();
+			assert.equal(replacement.cancelled, false);
+			assert.notEqual(lifecycle(), beforeNew);
+			assert.equal(directoryRuns.length, 3);
+			assertContributions();
+			current().ctx!.ui.setFooter(() => new Text(`replacement pid=${process.pid}`, 0, 0));
+			assert.equal(current().state.available, false);
+			const statuses = [...host.footerDataProvider.getExtensionStatuses().values()].join("\n");
+			assert.ok(statuses.includes(latest().text));
+			assert.match(statuses, /RAM /, "both independent extensions restore fallback when the actual footer is replaced");
+		}, [memoryExtension, directoryExtension], "fullscreen");
+	});
+}
