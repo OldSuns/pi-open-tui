@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### New Features
+
+- Allow selected tools, such as `edit`, to keep their native rendering in compact mode through `toolView.exclude`.
+
 ### Breaking Changes
 
 - Require Pi 1.5.0 or later.
