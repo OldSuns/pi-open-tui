@@ -99,6 +99,7 @@ pi -e npm:pi-open-tui
     "cost": true,
     "liveTps": true,
     "extensionStatuses": true,
+    "extensionSegments": true,
     "capitalizeProviderName": true,
     "nerdIconSpacing": false
   },
@@ -133,6 +134,7 @@ pi -e npm:pi-open-tui
 | `cursorStyle` | `block`、`bar`、`underline` | `bar` 和 `underline` 需要终端支持光标形状转义序列 |
 | `icons.mode` | `auto`、`nerd`、`unicode`、`ascii` | 控制底栏和遥测通知使用的图标 |
 | `footerSegments` | 布尔开关 | 分别控制底栏中的各项数据 |
+| `footerSegments.extensionSegments` | 布尔开关 | 在两条主要底栏行中显示扩展贡献的内容，默认 `true`；独立于 `extensionStatuses` 控制的扩展状态行，见[扩展底栏内容](#扩展底栏内容) |
 | `footerSegments.capitalizeProviderName` | 布尔开关 | 将底栏中提供商名称的首字母大写；设为 `false` 时保留原始大小写 |
 | `footerSegments.nerdIconSpacing` | 布尔开关 | 在底栏 Nerd Font 图标后额外留一格空白；默认 `false` |
 | `telemetry` | 布尔开关 | 控制遥测总开关和各项指标 |
@@ -150,6 +152,55 @@ pi -e npm:pi-open-tui
 open-tui 会给保留 Pi 原生编辑器布局及光标、鼠标、内边距接口的编辑器加边框，包括基于 `CustomEditor` 的扩展。装饰直接作用于同一实例，因此灰字建议、按键处理、补全和提交回调能够保留。通过当前 `ctx.ui.setEditorComponent()` 接口注册的编辑器可以在 `pi-open-tui` 之前或之后注册，运行时替换的编辑器也会自动加框；临时对话框保持原样。装饰前，open-tui 会按终端宽度渲染一次编辑器，检查是否存在可识别的原生上下边界，之后每次加框也会复查。缺少这些能力或边界、或在布局检测时抛出异常的编辑器保持原样，即使开启 `inlineFooter`，底栏也会独立显示。关闭 open-tui 会撤销装饰、恢复注册接口，并保留最新的编辑器工厂。
 
 顺序无关的保证针对编辑器注册，不包含顶栏或底栏的替换。
+
+## 扩展底栏内容
+
+扩展可以通过 Pi 的公开 `pi.events` 接口，向任意一条主要底栏行发布文字。常规底栏和 `inlineFooter` 模式均支持，不会增加状态行。既有 `ctx.ui.setStatus()` 内容仍显示在独立的扩展状态行中。没有可见贡献内容时，保留原有底栏布局。
+
+协议使用以下事件通道：
+
+| 通道 | 消息内容与行为 |
+| --- | --- |
+| `open-tui:footer:set` | `{ lifecycle, key, position, text, compactText?, order?, priority? }`；新增或完整替换相同 key 的内容，包括位置和可选字段 |
+| `open-tui:footer:remove` | `{ lifecycle, key }`；移除该内容；key 不存在时不执行操作 |
+| `open-tui:footer:query` | `undefined`；请求广播当前状态 |
+| `open-tui:footer:state` | `{ available: true, lifecycle: string }` 或 `{ available: false }`；可用性变化及收到查询时广播 |
+
+`key` 必须是非空字符串，建议使用 `system-memory:usage` 这样的扩展专属前缀，避免相互覆盖。`text` 必须是字符串，`compactText` 可以提供更短的字符串。两种文字都会保留支持的 ANSI 颜色，并过滤终端控制指令和换行。空文字或只有样式指令的文字不会产生可见片段。
+
+位置只能选择以下一种形式：
+
+| 位置 | 显示位置 |
+| --- | --- |
+| `{ row: 1, side: "left" }` | 第一行左侧区域 |
+| `{ row: 1, side: "right" }` | 第一行右侧区域 |
+| `{ row: 2, side: "left" }` | 第二行左侧区域 |
+| `{ row: 2, side: "right" }` | 第二行右侧区域 |
+| `{ before: "git" }` | 指定内置内容之前 |
+| `{ after: "cost" }` | 指定内置内容之后 |
+
+指定区域时可添加 `edge: "start" | "end"`，默认 `"end"`。两种底栏模式下，行号与左右侧保持固定；嵌入输入框时，第一、二行分别对应上下边框。相对位置会跟随内置内容在两种模式中的位置变化。支持的锚点为 `cwd`、`hostname`、`sessionName`、`git`、`runtime`、`timer`、`context`、`model`、`tokens` 和 `cost`。内置内容被关闭、暂时不存在或因宽度不足而隐藏时，其锚点位置仍然保留。`tokens` 对应完整的 Token 统计组。
+
+每个区域的排列顺序为：区域开头的贡献内容，然后依次排列各锚点之前的贡献、内置内容及其后的贡献，最后排列区域末尾的贡献。同一位置内按 `order` 从小到大排列，默认值为 `0`；相同时按 key 作确定性的字符串比较，不受系统语言和扩展加载顺序影响。
+
+`priority` 控制宽度不足时的缩减顺序，不改变显示顺序，默认值为 `-1`，数值越大保留越久。`order` 和 `priority` 都必须是有限数字。内置优先级如下：
+
+| 行 | 内置优先级 |
+| --- | --- |
+| 1 | `cwd: 4`；`hostname`、`timer: 3`；`sessionName: 2`；`git: 1`；`runtime`、`context: 0` |
+| 2 | `tokens: 2`；`cost: 1`；`model: 0` |
+
+左右两侧共享该行的宽度预算，计算包含分隔符和文字在终端中的实际显示宽度。先尝试紧凑文字，再截断或隐藏低优先级内容。默认优先级的扩展内容先于内置内容缩减；显式设置更高优先级可以改变这一顺序。嵌入输入框时，预算使用扣除边框、工作指示器和滚动提示后的剩余宽度。
+
+可用表示 open-tui 底栏已实际挂载到 TUI 会话。每次新挂载都会生成新的 `lifecycle` 字符串；将它视为不需要解析的标识即可。卸载底栏、关闭 open-tui 或结束会话时，会清空贡献内容并使该标识失效。扩展收到新的生命周期公告后，需要重新发布内容。应在扩展初始化时注册状态监听，在自身 `session_start` 取得上下文后查询；取得上下文之前忽略状态公告，并忽略相同生命周期的重复公告。这样可以兼容任意扩展加载顺序。Pi 替换扩展运行时会自动释放事件订阅。
+
+`footerSegments.extensionSegments` 只控制显示：关闭后隐藏贡献内容，但继续接收更新，不改变可用性或生命周期。`footerSegments.extensionStatuses` 独立控制既有的扩展状态行。扩展可以在 open-tui 不可用时自行通过 `setStatus()` 回退显示，下方示例采用了这一行为；仅隐藏贡献内容不会触发该回退。
+
+格式错误的消息、未知锚点和过期生命周期标识会被忽略，已有贡献内容不受影响。额外的未知字段会被忽略。通道名没有版本后缀，后续扩展必须保持现有消息结构、默认值及语义兼容。接入扩展也应容忍状态公告中出现未知字段。
+
+异步取数时，应在请求开始**之前**保存当时的生命周期，只在它仍然有效时发布结果。数据与提供商或模型有关时，还应保存相应身份和请求序号：仅比较生命周期，无法阻止同一会话中旧提供商的慢请求覆盖较新的结果。会话结束时取消未完成的任务，扩展运行时被替换后，不要再通过旧的 Pi 实例发送事件。
+
+完整可运行的[系统内存示例](./README.md#system-memory-example)读取真实的操作系统内存数据，每五秒更新一次，显示在费用之后，并提供紧凑文字和独立状态行回退。将该代码保存为 `system-memory.ts`，在已安装 pi-open-tui 的环境中运行 `pi -e ./system-memory.ts` 即可使用。示例包含加载顺序处理、同生命周期公告去重、查询、内容移除和定时器清理；定时器仅在 TUI 会话开始后启动，并在退出或重载时停止。
 
 ## 单轮遥测
 

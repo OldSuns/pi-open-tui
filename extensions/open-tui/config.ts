@@ -22,6 +22,7 @@ export interface FooterSegments {
 	tokens: boolean;
 	cost: boolean;
 	liveTps: boolean;
+	extensionSegments: boolean;
 	extensionStatuses: boolean;
 	capitalizeProviderName: boolean;
 	nerdIconSpacing: boolean;
@@ -89,6 +90,7 @@ export const DEFAULT_CONFIG: OpenTuiConfig = {
 		tokens: true,
 		cost: true,
 		liveTps: true,
+		extensionSegments: true,
 		extensionStatuses: true,
 		capitalizeProviderName: true,
 		nerdIconSpacing: false,

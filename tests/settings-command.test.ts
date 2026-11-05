@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
-import type { ExtensionAPI, ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
+import { createEventBus, type ExtensionAPI, type ExtensionContext, type Theme } from "@earendil-works/pi-coding-agent";
 import { visibleWidth, type Component, type KeybindingsManager, type TUI } from "@earendil-works/pi-tui";
 import { DEFAULT_CONFIG, loadConfig, saveConfig, type OpenTuiConfig } from "../extensions/open-tui/config.ts";
 import { installEditor } from "../extensions/open-tui/editor.ts";
@@ -330,6 +330,7 @@ test("toggles the header without resetting a disabled slot and warns when persis
 	const notifications: Array<{ message: string; level: string }> = [];
 	const pi = {
 		on: (event: string, handler: (event: unknown, ctx: ExtensionContext) => unknown) => handlers.set(event, handler),
+		events: createEventBus(),
 		registerCommand: (_name: string, options: { handler: typeof command }) => (command = options.handler),
 		registerToolRenderer() {},
 		registerMarkdownTransformer() {},
@@ -420,7 +421,7 @@ test("keeps every Footer selection visible in short terminals", async () => {
 			settings.terminal.columns = width;
 			settings.terminal.rows = 12;
 			settings.press("\t", 2);
-			for (let i = 0; i < 14; i++) {
+			for (let i = 0; i < 15; i++) {
 				const lines = settings.component.render(width);
 				assert.ok(lines.length <= 12, `${language} ${width}x12: ${lines.length} rows`);
 				assert.ok(lines.slice(0, 12).some((line) => line.includes("→ ")));
@@ -434,7 +435,7 @@ test("keeps every Footer selection visible in short terminals", async () => {
 test("relayouts on height and width changes without losing the selection", async () => {
 	const settings = await openSettings();
 	settings.press("\t", 2);
-	settings.press("\x1b[B", 12);
+	settings.press("\x1b[B", 13);
 	assert.match(selectedLine(settings.component), /Capitalize provider name/);
 
 	for (const [width, rows] of [[80, 12], [80, 24], [48, 12], [24, 12], [36, 12], [80, 24]] as const) {
@@ -456,7 +457,7 @@ test("preserves long Footer labels' current values at narrow widths", async () =
 		const settings = await openSettings(config);
 		settings.press("\t", 2);
 		settings.press("\x1b[B", 11);
-		for (const id of ["extensionStatuses", "capitalizeProviderName", "nerdIconSpacing"] as const) {
+		for (const id of ["extensionStatuses", "extensionSegments", "capitalizeProviderName", "nerdIconSpacing"] as const) {
 			for (const toggle of [false, true]) {
 				if (toggle) settings.component.handleInput(" ");
 				const enabled = settings.getConfig().footerSegments[id];

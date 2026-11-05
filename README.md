@@ -99,6 +99,7 @@ Example configuration:
     "cost": true,
     "liveTps": true,
     "extensionStatuses": true,
+    "extensionSegments": true,
     "capitalizeProviderName": true,
     "nerdIconSpacing": false
   },
@@ -133,6 +134,7 @@ Key options:
 | `cursorStyle` | `block`, `bar`, `underline` | `bar` and `underline` require terminal cursor-shape support |
 | `icons.mode` | `auto`, `nerd`, `unicode`, `ascii` | Controls footer and telemetry icons |
 | `footerSegments` | Boolean flags | Shows or hides individual footer data |
+| `footerSegments.extensionSegments` | Boolean | Shows extension contributions within the two main footer rows; defaults to `true`. Independent of the separate `extensionStatuses` rows; see [Extension footer segments](#extension-footer-segments) |
 | `footerSegments.capitalizeProviderName` | Boolean | Capitalizes the first character of the provider name in the footer; set it to `false` to keep the provider's original casing |
 | `footerSegments.nerdIconSpacing` | Boolean | Adds an extra blank cell after Nerd Font icons in the footer; defaults to `false` |
 | `telemetry` | Boolean flags | Enables telemetry and its individual measurements |
@@ -150,6 +152,125 @@ With `inlineFooter`, the two main Footer rows are rendered inside the editor fra
 open-tui frames editors that keep Pi’s native editor layout and its cursor, mouse, and padding APIs, including `CustomEditor` extensions. It decorates the same instance, preserving ghost text, key handling, completion, and submit callbacks. Editors using the current `ctx.ui.setEditorComponent()` API can register before or after `pi-open-tui`, and runtime replacements are framed too; temporary dialogs are left alone. Before decorating, open-tui renders the editor once at the terminal width to check for native top and bottom borders, and every framed render is re-checked. Editors without those capabilities or borders remain unchanged, with the footer displayed separately even when `inlineFooter` is enabled. Disabling open-tui removes its decoration, restores the registration methods, and keeps the latest editor factory.
 
 This ordering guarantee applies to editor registration, not header or footer replacements.
+
+## Extension footer segments
+
+Extensions can publish text into either main footer row through Pi's public `pi.events` interface. This works in the regular footer and with `inlineFooter`, without adding a status row. Existing `ctx.ui.setStatus()` content stays in the separate extension status rows. With no visible contributions, the existing footer layout is preserved.
+
+The protocol uses these channels:
+
+| Channel | Payload and behavior |
+| --- | --- |
+| `open-tui:footer:set` | `{ lifecycle, key, position, text, compactText?, order?, priority? }`; insert or fully replace the contribution with this key, including its position and optional fields |
+| `open-tui:footer:remove` | `{ lifecycle, key }`; remove this contribution; removing an absent key has no effect |
+| `open-tui:footer:query` | `undefined`; request a state announcement |
+| `open-tui:footer:state` | `{ available: true, lifecycle: string }` or `{ available: false }`; announced on availability changes and in response to queries |
+
+`key` must be a nonempty string; use an extension-specific prefix such as `system-memory:usage` to avoid collisions. `text` must be a string, and `compactText` may supply a shorter string. Both preserve supported ANSI colors while filtering terminal controls and line breaks. Empty or style-only text adds no visible segment.
+
+Choose exactly one position form:
+
+| Position | Placement |
+| --- | --- |
+| `{ row: 1, side: "left" }` | First row, left region |
+| `{ row: 1, side: "right" }` | First row, right region |
+| `{ row: 2, side: "left" }` | Second row, left region |
+| `{ row: 2, side: "right" }` | Second row, right region |
+| `{ before: "git" }` | Immediately before the named built-in segment |
+| `{ after: "cost" }` | Immediately after the named built-in segment |
+
+Explicit regions accept `edge: "start" | "end"`, defaulting to `"end"`. They keep their row and side in both footer modes; row 1/2 become the top/bottom editor borders in inline mode. Relative positions follow their anchor when it moves between modes. Anchors are `cwd`, `hostname`, `sessionName`, `git`, `runtime`, `timer`, `context`, `model`, `tokens`, and `cost`. Their positions remain available when the built-in content is disabled, absent, or hidden for lack of space. `tokens` covers the complete token statistics group.
+
+Each region orders its content as: start contributions, then each anchor's before contributions, built-in content and after contributions, then end contributions. Within the same placement, `order` sorts ascending and defaults to `0`; ties sort by key using deterministic string comparison, independent of locale and extension load order.
+
+`priority` controls shrinking rather than display order. It defaults to `-1`; larger values survive longer. Both `order` and `priority` must be finite numbers. The built-in priorities are:
+
+| Row | Built-in priorities |
+| --- | --- |
+| 1 | `cwd: 4`; `hostname` and `timer: 3`; `sessionName: 2`; `git: 1`; `runtime` and `context: 0` |
+| 2 | `tokens: 2`; `cost: 1`; `model: 0` |
+
+The two sides share the row's width budget, including separators and terminal display widths. Compact forms are tried before truncating or dropping lower-priority content. Default-priority contributions yield to built-in content; an explicit higher priority can change that. Inline mode uses the width remaining after editor borders, the working indicator and scroll hints.
+
+Availability means the open-tui footer is mounted in a TUI session. Each new mount receives a fresh opaque `lifecycle` string; unmounting, disabling open-tui or ending the session clears contributions and invalidates it. Contributors must republish after a new lifecycle announcement. Register the state listener during extension initialization, then query after your own `session_start`; ignore announcements until you have that session's context, and deduplicate repeated announcements for the same lifecycle. This supports either extension load order. Pi releases event subscriptions when it replaces the extension runtime.
+
+`footerSegments.extensionSegments` is a display switch: disabling it hides contributions while continuing to accept updates, without changing availability or the lifecycle. `footerSegments.extensionStatuses` independently controls the existing separate status rows. An extension may fall back to `setStatus()` when open-tui is unavailable; the example below does so. Hiding contributions does not activate that fallback.
+
+Malformed messages, unknown anchors and stale lifecycle identifiers are ignored without changing an existing contribution. Unknown additional fields are ignored. Channel names have no version suffix; future additions must preserve these payloads, defaults and meanings. Extensions should tolerate unknown fields in state announcements.
+
+For asynchronous data, capture the lifecycle **before** starting the request and only publish if it is still current. Also capture the provider/model identity and a request sequence number when the data depends on them: lifecycle checks alone do not prevent a slow request for the previous provider from overwriting a newer result in the same session. Cancel pending work on shutdown and never emit through a captured Pi instance after its runtime has been replaced.
+
+### System memory example
+
+Save this complete extension as `system-memory.ts` and run `pi -e ./system-memory.ts` with pi-open-tui installed. It reads real operating-system memory data every five seconds and places it after cost, with a compact form and a separate status fallback. The timer starts only in a TUI session and is stopped on shutdown or reload.
+
+```typescript
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { freemem, totalmem } from "node:os";
+
+export default function (pi: ExtensionAPI) {
+	const key = "system-memory:usage";
+	let ctx: ExtensionContext | undefined;
+	let lifecycle: string | undefined;
+	let timer: ReturnType<typeof setInterval> | undefined;
+
+	const publish = () => {
+		if (!ctx) return;
+		const total = totalmem();
+		const used = total - freemem();
+		const text = `RAM ${(used / 2 ** 30).toFixed(1)}/${(total / 2 ** 30).toFixed(1)} GiB`;
+		if (lifecycle === undefined) {
+			ctx.ui.setStatus(key, text);
+			return;
+		}
+		ctx.ui.setStatus(key, undefined);
+		pi.events.emit("open-tui:footer:set", {
+			lifecycle,
+			key,
+			position: { after: "cost" },
+			text,
+			compactText: `RAM ${Math.round(used / total * 100)}%`,
+		});
+	};
+
+	pi.events.on("open-tui:footer:state", (data) => {
+		if (!ctx || data === null || typeof data !== "object" || !("available" in data)) return;
+		if (data.available === true && "lifecycle" in data
+			&& typeof data.lifecycle === "string" && data.lifecycle.length > 0) {
+			if (lifecycle === data.lifecycle) return;
+			lifecycle = data.lifecycle;
+		} else if (data.available === false) {
+			if (lifecycle === undefined) return;
+			lifecycle = undefined;
+		} else {
+			return;
+		}
+		publish();
+	});
+
+	pi.on("session_start", (_event, nextCtx) => {
+		if (!nextCtx.hasUI || nextCtx.mode !== "tui") return;
+		ctx = nextCtx;
+		publish();
+		pi.events.emit("open-tui:footer:query", undefined);
+		timer = setInterval(publish, 5_000);
+		timer.unref();
+	});
+
+	pi.on("session_shutdown", () => {
+		if (timer) clearInterval(timer);
+		timer = undefined;
+		const previousCtx = ctx;
+		const previousLifecycle = lifecycle;
+		ctx = undefined;
+		lifecycle = undefined;
+		if (previousLifecycle !== undefined) {
+			pi.events.emit("open-tui:footer:remove", { key, lifecycle: previousLifecycle });
+		}
+		previousCtx?.ui.setStatus(key, undefined);
+	});
+}
+```
 
 ## Turn telemetry
 

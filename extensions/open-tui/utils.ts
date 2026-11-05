@@ -133,6 +133,13 @@ export type PrioritizedSegment = {
 	truncate?: (text: string, maxWidth: number, ellipsis: string) => string;
 };
 
+export interface SegmentFitOptions {
+	/** Gap between adjacent surviving segments, using their original indices. */
+	gapWidth?: (previousIndex: number, nextIndex: number) => number;
+	/** Keep existing callers' compact order unless the row opts into priorities. */
+	compactOrder?: "input" | "priority";
+}
+
 /**
  * Pack segments into maxWidth: compact segments first, then shrink/drop the
  * lowest-priority segments (higher priority = survives longer). Returns one
@@ -142,8 +149,10 @@ export function fitSegmentsByPriority(
 	segs: readonly PrioritizedSegment[],
 	maxW: number,
 	ellipsis = "...",
+	options: SegmentFitOptions = {},
 ): string[] {
-	const items = segs.map((s) => ({
+	const items = segs.map((s, index) => ({
+		index,
 		text: s.text,
 		compactText: s.compactText,
 		priority: s.priority,
@@ -152,11 +161,16 @@ export function fitSegmentsByPriority(
 	}));
 	const totalW = () => {
 		const active = items.filter((it) => it.text !== "");
-		return active.reduce((a, it) => a + it.w, 0) + Math.max(0, active.length - 1);
+		return active.reduce((width, item, index) => width + item.w + (index === 0
+			? 0
+			: options.gapWidth?.(active[index - 1]!.index, item.index) ?? 1), 0);
 	};
 	// Compact (e.g. cwd -> basename) before sacrificing any segment content.
 	if (totalW() > maxW) {
-		for (const item of items) {
+		const compactItems = options.compactOrder === "priority"
+			? [...items].sort((a, b) => a.priority - b.priority || a.index - b.index)
+			: items;
+		for (const item of compactItems) {
 			if (!item.compactText || visibleWidth(item.compactText) >= item.w) continue;
 			item.text = item.compactText;
 			item.w = visibleWidth(item.text);
@@ -189,9 +203,7 @@ export function fitSegmentsByPriority(
 			}
 		}
 		if (target === -1) break;
-		const others = items.filter((_, i) => i !== target && items[i].text !== "");
-		const otherW = others.reduce((a, it) => a + it.w, 0) + Math.max(0, others.length - 1);
-		const avail = maxW - otherW - (others.length > 0 ? 1 : 0);
+		const avail = maxW - (nowTotal - items[target].w);
 		if (avail <= visibleWidth(ellipsis)) {
 			items[target].text = "";
 			items[target].w = 0;
