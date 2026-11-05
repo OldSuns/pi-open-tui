@@ -8,7 +8,7 @@ Feature examples and everyday controls are in the [README](../README.md). All se
 
 ### Lifecycle and data sources
 
-[index.ts](../extensions/open-tui/index.ts) connects Pi events to the UI. At session start it loads settings and installs the header, footer, editor decoration, and Copy-button integration in a TUI context when enabled. Tool renderers are registered separately; configuration is loaded early when Pi rebuilds a resumed transcript before `session_start`.
+[index.ts](../extensions/open-tui/index.ts) connects Pi events to the UI. At session start it loads settings and, when enabled in a TUI context, installs the footer, editor decoration, Copy-button integration, and the header if `header` is also enabled. Tool renderers are registered separately; configuration is loaded early when Pi rebuilds a resumed transcript before `session_start`.
 
 The working timer requests a redraw every 250 ms while an agent run is active. Git and runtime reads capture a session generation; their results are discarded if the session has changed or shut down. Shutdown stops the timer, deactivates footer contributions, and removes the installed UI. Compact tool activity timers are stopped when execution ends or the session shuts down. See [session-lifecycle.ts](../extensions/open-tui/session-lifecycle.ts) for the generation guard.
 
@@ -47,7 +47,7 @@ The cache-hit percentage uses the latest assistant response: `cacheRead / (input
 | Stalls | Gaps of at least one second between nonempty stream updates after output begins. Consecutive qualifying gaps form one stall until a shorter gap occurs. The entire gap contributes to stall time; shown only when detected |
 | `$ / M` | `sum(usage.cost.total) / (sum(usage.totalTokens) / 1,000,000)`. An effective rate combining the reported input, output, and cache prices, not the session's total spend. Omitted without positive cost and token totals |
 
-Turns without any observed output and completed assistant message do not produce a measurement; a run with no measured turns produces no notification. Provider buffering and missing usage data limit what the extension can report. The notification covers assistant turns, whereas footer totals include the additional session usage sources above.
+A turn produces no measurement when it lacks a completed assistant message or observed output. Observed output means a nonempty streamed text, thinking, or tool-call delta, or a positive final output usage value. A run with no measured turns produces no notification. Provider buffering and missing usage data limit what the extension can report. The notification covers assistant turns, whereas footer totals include the additional session usage sources above.
 
 Live TPS uses streamed text, thinking, and tool-call arguments over a trailing two-second window. It estimates roughly four characters per token for Latin text/code and one token per CJK character. A stream pause makes the rate fall toward zero; during tool execution and between messages the last rate remains dimmed. It resets when the run settles. This estimate has its own `footerSegments.liveTps` switch and can differ from the provider-based final TPS.
 
@@ -59,7 +59,7 @@ In two-line mode, a long latest logical line can occupy both rows; otherwise the
 
 ### Tool rendering
 
-[tool-view.ts](../extensions/open-tui/tool-view.ts) registers rendering wrappers, leaving execution, arguments, results, and model-visible content unchanged. Built-in summaries are selected only when Pi reports the tool source as `builtin`; a replacement with the same name uses extension handling. `toolView.exclude` takes precedence over either category.
+[tool-view.ts](../extensions/open-tui/tool-view.ts) registers rendering wrappers, leaving execution, arguments, results, and model-visible content unchanged. Built-in summaries are selected only when Pi reports the tool source as `builtin`. A same-name replacement keeps its native renderer unless compact mode and `toolView.extensionTools` are both enabled, in which case it uses extension handling. `toolView.exclude` takes precedence over either category.
 
 Successful rows have dim text and a green dot. Pending dots are dim; running dots alternate between accent and dim once per second. Errors retain a red dot and summary. Shell output shows the latest three nonempty lines while running; failures retain the closing status and last output line. Known tool truncation notices are summarized without discarding arbitrary bracketed text or error messages.
 
@@ -99,7 +99,7 @@ Some integrations use Pi component internals: Copy buttons check required Markdo
 
 ### 生命周期与数据来源
 
-[index.ts](../extensions/open-tui/index.ts) 将 Pi 事件接入界面。会话开始时读取配置，在已启用的 TUI 环境中安装顶栏、底栏、编辑器装饰和复制按钮。工具渲染器单独注册；恢复会话时，Pi 可能在 `session_start` 之前重建记录，因此会提前读取配置。
+[index.ts](../extensions/open-tui/index.ts) 将 Pi 事件接入界面。会话开始时读取配置；在已启用的 TUI 环境中安装底栏、编辑器装饰和复制按钮，并在 `header` 也开启时安装顶栏。工具渲染器单独注册；恢复会话时，Pi 可能在 `session_start` 之前重建记录，因此会提前读取配置。
 
 Agent 运行期间，工作计时器每 250 毫秒请求一次重绘。Git 和运行环境读取会记录发起时的会话代次，如果会话已切换或关闭，结果会被丢弃。关闭会话会停止计时器、停用底栏贡献并移除已安装的界面；紧凑工具的动画计时器会在执行结束或会话关闭时停止。代次保护见 [session-lifecycle.ts](../extensions/open-tui/session-lifecycle.ts)。
 
@@ -138,7 +138,7 @@ Agent 运行期间，工作计时器每 250 毫秒请求一次重绘。Git 和�
 | 停顿 | 输出开始后，非空流式更新之间至少一秒的间隔。连续满足条件的间隔归为一次停顿，直到出现更短间隔；停顿时长包含整个间隔，仅检测到时显示 |
 | `$ / M` | `sum(usage.cost.total) / (sum(usage.totalTokens) / 1,000,000)`，综合输入、输出和缓存报告价格的费率，不是会话总费用；缺少正数费用或 Token 总量时不显示 |
 
-没有观测到输出及完成的助手消息时，该轮不会产生统计；没有可统计轮次的运行不显示通知。服务商缓冲输出和用量字段缺失会限制可测结果。通知统计助手轮次，底栏还包含前述其他会话用量来源。
+缺少完成的助手消息或可识别的输出时，该轮不会产生统计。输出包括非空的流式文本、思考或工具调用增量，也包括正数的最终输出用量。没有可统计轮次的运行不显示通知。服务商缓冲输出和用量字段缺失会限制可测结果。通知统计助手轮次，底栏还包含前述其他会话用量来源。
 
 实时 TPS 根据最近两秒的流式正文、思考和工具调用参数估算，拉丁文本/代码按约四个字符一个 Token，中日韩字符按每字一个 Token。流式停顿时速度降向零，工具执行期间和消息之间以暗色保留上一数值，任务结束后重置。它使用独立的 `footerSegments.liveTps` 开关，数值可能与基于服务商用量的最终 TPS 不同。
 
@@ -150,7 +150,7 @@ Agent 运行期间，工作计时器每 250 毫秒请求一次重绘。Git 和�
 
 ### 工具渲染
 
-[tool-view.ts](../extensions/open-tui/tool-view.ts) 注册渲染包装，不修改执行、参数、结果或模型可见内容。仅在 Pi 将工具来源标记为 `builtin` 时使用内置摘要；同名替换工具走扩展处理。`toolView.exclude` 优先于这两类规则。
+[tool-view.ts](../extensions/open-tui/tool-view.ts) 注册渲染包装，不修改执行、参数、结果或模型可见内容。仅在 Pi 将工具来源标记为 `builtin` 时使用内置摘要。同名替换工具默认保留原生渲染；只有紧凑模式和 `toolView.extensionTools` 同时开启时才使用扩展处理。`toolView.exclude` 优先于这两类规则。
 
 成功行使用暗色文字和绿色圆点，等待圆点变暗，运行圆点每秒在强调色与暗色间切换，错误保留红色圆点和摘要。Shell 运行中显示最新三条非空输出行，失败时保留结束状态与最后一行输出。已知的工具截断通知会归纳为提示，不会把任意方括号正文或错误信息一并删除。
 
