@@ -67,6 +67,14 @@ const theme = {
 } as unknown as Theme;
 const glyphs = () => resolveGlyphs("unicode");
 
+test("uses Claude Code tool markers only for the Claude Code preset", () => {
+	const claude = resolveGlyphs("unicode", true);
+	assert.equal(claude.toolCall, "⏺");
+	assert.equal(claude.toolResult, "⎿");
+	assert.equal(resolveGlyphs("unicode").toolCall, "●");
+	assert.equal(resolveGlyphs("ascii", true).toolCall, resolveGlyphs("ascii").toolCall);
+});
+
 const text = (value: string, details?: unknown): ToolResult => ({ content: [{ type: "text", text: value }], details });
 
 function context(overrides: Partial<RenderContext> = {}): RenderContext {

@@ -167,10 +167,12 @@ export function resolveIconMode(mode: IconMode): "nerd" | "unicode" | "ascii" {
 	return "nerd";
 }
 
-export function resolveGlyphs(mode: IconMode): IconGlyphs {
+export function resolveGlyphs(mode: IconMode, claudeCodeStyle = false): IconGlyphs {
 	const resolved = resolveIconMode(mode);
-	if (resolved === "unicode") return UNICODE_GLYPHS;
-	return resolved === "nerd" ? NERD_GLYPHS : ASCII_GLYPHS;
+	const glyphs = resolved === "unicode" ? UNICODE_GLYPHS : resolved === "nerd" ? NERD_GLYPHS : ASCII_GLYPHS;
+	return claudeCodeStyle && resolved !== "ascii"
+		? { ...glyphs, toolCall: "⏺", toolResult: "⎿" }
+		: glyphs;
 }
 
 const RUNTIME_SYMBOLS: Record<string, string> = {

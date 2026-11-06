@@ -265,7 +265,7 @@ test("supports localized settings and keyboard shortcuts", async () => {
 	const settings = await openSettings();
 	assert.match(settings.component.render(80).join("\n"), /Open TUI Settings.*General.*Language/s);
 
-	settings.press("\x1b[B", 2);
+	settings.press("\x1b[B", 3);
 	settings.component.handleInput(" ");
 	assert.equal(settings.getConfig().settingsLanguage, "zh");
 	assert.match(settings.component.render(80).join("\n"), /Open TUI 设置.*常规.*语言.*简体中文/s);
@@ -274,7 +274,7 @@ test("supports localized settings and keyboard shortcuts", async () => {
 	const reopened = await openSettings(structuredClone(settings.getConfig()));
 	assert.match(reopened.component.render(80).join("\n"), /Open TUI 设置.*简体中文/s);
 
-	reopened.press("\x1b[B", 2);
+	reopened.press("\x1b[B", 3);
 	reopened.component.handleInput("\x1b[C");
 	assert.match(reopened.component.render(80).join("\n"), /\[外观\].*图标模式.*光标样式/s);
 	reopened.component.handleInput("\x1b[D");
@@ -285,8 +285,8 @@ test("supports localized settings and keyboard shortcuts", async () => {
 
 test("configures inline footer from General settings", async () => {
 	const settings = await openSettings();
-	// Headers are skipped: Enabled → Header → Language → Thinking peek → Copy buttons → Tool view → Footer in editor border.
-	settings.press("\x1b[B", 6);
+	// Headers are skipped: Enabled → Header → Appearance preset → Language → Thinking peek → Copy buttons → Tool view → Footer in editor border.
+	settings.press("\x1b[B", 7);
 	assert.match(selectedLine(settings.component), /Footer in editor border/);
 	settings.component.handleInput(" ");
 	assert.equal(settings.getConfig().inlineFooter, true);
@@ -295,8 +295,8 @@ test("configures inline footer from General settings", async () => {
 test("toggles copy buttons from General settings", async () => {
 	const settings = await openSettings();
 	assert.equal(settings.getConfig().copyButtons, true);
-	// Enabled → Header → Language → Thinking peek → Copy buttons
-	settings.press("\x1b[B", 4);
+	// Enabled → Header → Appearance preset → Language → Thinking peek → Copy buttons
+	settings.press("\x1b[B", 5);
 	assert.match(selectedLine(settings.component), /Copy buttons/);
 	settings.component.handleInput(" ");
 	assert.equal(settings.getConfig().copyButtons, false);
@@ -306,8 +306,8 @@ test("toggling tool view settings keeps the other tool view options", async () =
 	const config = structuredClone(DEFAULT_CONFIG);
 	config.toolView.exclude = ["subagent_wait"];
 	const settings = await openSettings(config);
-	// Enabled → Header → Language → Thinking peek → Copy buttons → Tool view
-	for (let i = 0; i < 5; i++) settings.component.handleInput("\x1b[B");
+	// Enabled → Header → Appearance preset → Language → Thinking peek → Copy buttons → Tool view
+	for (let i = 0; i < 6; i++) settings.component.handleInput("\x1b[B");
 	assert.match(selectedLine(settings.component), /Tool view/);
 	settings.component.handleInput(" ");
 	settings.component.handleInput("\x1b[B");
@@ -315,6 +315,51 @@ test("toggling tool view settings keeps the other tool view options", async () =
 	settings.component.handleInput(" ");
 	assert.equal(settings.getConfig().toolView.extensionTools, true);
 	assert.deepEqual(settings.getConfig().toolView, { mode: "compact", extensionTools: true, exclude: ["subagent_wait"] });
+});
+
+test("applies and resets the Claude Code appearance preset", async () => {
+	const config = structuredClone(DEFAULT_CONFIG);
+	config.enabled = false;
+	config.settingsLanguage = "zh";
+	config.icons.mode = "unicode";
+	config.toolView.extensionTools = true;
+	config.toolView.exclude = ["edit"];
+	config.footerSegments.cwd = false;
+	const settings = await openSettings(config);
+
+	settings.press("\x1b[B", 2);
+	assert.match(selectedLine(settings.component), /外观预设.*OpenTUI/);
+	settings.component.handleInput("\r");
+	const claude = settings.getConfig();
+	assert.equal(claude.appearancePreset, "claude-code");
+	assert.equal(claude.header, false);
+	assert.equal(claude.inlineFooter, true);
+	assert.equal(claude.thinkingPeek.lines, 0);
+	assert.equal(claude.toolView.mode, "compact");
+	assert.equal(claude.telemetry.enabled, false);
+	for (const key of ["runtime", "tokens", "cost", "liveTps", "extensionSegments", "extensionStatuses"] as const) {
+		assert.equal(claude.footerSegments[key], false, key);
+	}
+	assert.equal(claude.enabled, false);
+	assert.equal(claude.settingsLanguage, "zh");
+	assert.equal(claude.icons.mode, "unicode");
+	assert.equal(claude.toolView.extensionTools, true);
+	assert.deepEqual(claude.toolView.exclude, ["edit"]);
+	assert.equal(claude.footerSegments.cwd, false);
+
+	settings.component.handleInput("\r");
+	const openTui = settings.getConfig();
+	assert.equal(openTui.appearancePreset, "open-tui");
+	assert.equal(openTui.header, DEFAULT_CONFIG.header);
+	assert.equal(openTui.inlineFooter, DEFAULT_CONFIG.inlineFooter);
+	assert.equal(openTui.thinkingPeek.lines, DEFAULT_CONFIG.thinkingPeek.lines);
+	assert.equal(openTui.toolView.mode, DEFAULT_CONFIG.toolView.mode);
+	assert.equal(openTui.telemetry.enabled, DEFAULT_CONFIG.telemetry.enabled);
+	assert.equal(openTui.footerSegments.runtime, DEFAULT_CONFIG.footerSegments.runtime);
+	assert.equal(openTui.enabled, false);
+	assert.equal(openTui.icons.mode, "unicode");
+	assert.equal(openTui.toolView.extensionTools, true);
+	assert.deepEqual(openTui.toolView.exclude, ["edit"]);
 });
 
 test("toggles the header without resetting a disabled slot and warns when persistence fails", async (t) => {
@@ -406,9 +451,9 @@ test("keeps localized settings and values within narrow widths", async () => {
 		}
 		const output = lines.join("\n");
 		assert.match(output, /开启/);
-		settings.press("\x1b[B", 2);
+		settings.press("\x1b[B", 3);
 		assert.match(selectedLine(settings.component, width), /简体中文/);
-		settings.press("\x1b[A", 2);
+		settings.press("\x1b[A", 3);
 	}
 });
 
@@ -484,6 +529,7 @@ test("normalizes invalid settings values", (t) => {
 		inlineFooter: "yes",
 		copyButtons: "no",
 		thinkingPeek: { lines: 9 },
+		appearancePreset: "unexpected",
 		toolView: { mode: "hidden", extensionTools: "yes", exclude: ["keep", 1, null] },
 		fullscreen: { wheelScrollLines: 10 },
 	}), "utf8");
@@ -493,6 +539,7 @@ test("normalizes invalid settings values", (t) => {
 	assert.equal(loaded.header, true);
 	assert.equal(loaded.inlineFooter, false);
 	assert.equal(loaded.copyButtons, true);
+	assert.equal(loaded.appearancePreset, "open-tui");
 	assert.equal(loaded.thinkingPeek.lines, 1);
 	assert.deepEqual(loaded.toolView, { mode: "native", extensionTools: false, exclude: ["keep"] });
 	assert.equal("fullscreen" in loaded, true);
@@ -501,8 +548,8 @@ test("normalizes invalid settings values", (t) => {
 test("cycles the thinking peek line count from General settings", async () => {
 	const config = structuredClone(DEFAULT_CONFIG);
 	const settings = await openSettings(config);
-	// Enabled → Header → Language → Thinking peek
-	settings.press("\x1b[B", 3);
+	// Enabled → Header → Appearance preset → Language → Thinking peek
+	settings.press("\x1b[B", 4);
 	assert.match(selectedLine(settings.component), /Thinking peek/);
 	assert.match(selectedLine(settings.component), /1 line/);
 	settings.component.handleInput("\r");

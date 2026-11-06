@@ -14,7 +14,7 @@ import {
 	truncateToWidth,
 	visibleWidth,
 } from "@earendil-works/pi-tui";
-import type { CursorStyle, IconMode, OpenTuiConfig, SettingsLanguage, ThinkingPeekLines } from "./config.ts";
+import { applyAppearancePreset, type CursorStyle, type IconMode, type OpenTuiConfig, type SettingsLanguage, type ThinkingPeekLines } from "./config.ts";
 
 interface SettingItem {
 	id: string;
@@ -57,6 +57,7 @@ const COPY = {
 		labels: {
 			enabled: "Enabled",
 			header: "Override header",
+			appearancePreset: "Appearance preset",
 			inlineFooter: "Footer in editor border",
 			copyButtons: "Copy buttons",
 			thinkingPeek: "Thinking peek",
@@ -91,6 +92,7 @@ const COPY = {
 			off: "Off",
 			thinkingPeek: { off: "Off", one: "1 line", two: "2 lines" },
 			toolView: { native: "Native", compact: "Compact" },
+			appearancePreset: { "open-tui": "OpenTUI", "claude-code": "Claude Code" },
 			languages: { en: "English", zh: "简体中文" },
 			cursorStyles: { block: "Block", bar: "Bar", underline: "Underline" },
 			icons: { auto: "Auto", nerd: "Nerd", unicode: "Unicode", ascii: "ASCII" },
@@ -117,6 +119,7 @@ const COPY = {
 		labels: {
 			enabled: "启用",
 			header: "覆盖顶部信息栏",
+			appearancePreset: "外观预设",
 			inlineFooter: "底栏嵌入输入框",
 			copyButtons: "复制按钮",
 			thinkingPeek: "思考预览",
@@ -151,6 +154,7 @@ const COPY = {
 			off: "关闭",
 			thinkingPeek: { off: "关闭", one: "单行", two: "双行" },
 			toolView: { native: "原生", compact: "紧凑" },
+			appearancePreset: { "open-tui": "OpenTUI", "claude-code": "Claude Code" },
 			languages: { en: "English", zh: "简体中文" },
 			cursorStyles: { block: "块", bar: "竖线", underline: "下划线" },
 			icons: { auto: "自动", nerd: "Nerd", unicode: "Unicode", ascii: "ASCII" },
@@ -223,6 +227,7 @@ function buildFeaturesItems(config: OpenTuiConfig, copy: SettingsCopy): SettingG
 			label: copy.sections.interface,
 			items: [
 				{ id: "header", label: copy.labels.header, currentValue: flag(config.header) },
+				{ id: "appearancePreset", label: copy.labels.appearancePreset, currentValue: copy.values.appearancePreset[config.appearancePreset] },
 				{ id: "settingsLanguage", label: copy.labels.language, currentValue: copy.values.languages[config.settingsLanguage] },
 			],
 		},
@@ -349,6 +354,10 @@ function handleSettingChange(
 	if (tab === "features") {
 		if (itemId === "enabled") return toggleEnabled(config);
 		if (itemId === "header") return { ...config, header: !config.header };
+		if (itemId === "appearancePreset") {
+			const preset = config.appearancePreset === "claude-code" ? "open-tui" : "claude-code";
+			return applyAppearancePreset(config, preset);
+		}
 		if (itemId === "inlineFooter") return { ...config, inlineFooter: !config.inlineFooter };
 		if (itemId === "copyButtons") return { ...config, copyButtons: !config.copyButtons };
 		if (itemId === "settingsLanguage") return toggleLanguage(config);

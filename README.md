@@ -58,6 +58,7 @@ Settings are stored in `open-tui.json` inside Pi's agent directory (default: `~/
 | Setting | Where to find it | Default |
 | --- | --- | --- |
 | Header and settings language | General → Interface | Header on, English |
+| Appearance preset | General → Interface | OpenTUI (existing default) |
 | Thinking peek | General → Messages & tools | 1 line |
 | Copy buttons | General → Messages & tools | On, fullscreen only |
 | Tool view | General → Messages & tools | Native |
@@ -65,7 +66,7 @@ Settings are stored in `open-tui.json` inside Pi's agent directory (default: `~/
 | Icons and cursor style | Appearance | Auto icons, block cursor |
 | Footer fields and telemetry measurements | Footer / Telemetry | Individually configurable |
 
-Selecting **Tool view: Compact** reveals **Compact extension tools** as a child setting. Switching back to Native hides it and retains its value. The [configuration reference](./docs/configuration.md#english) contains the complete JSON defaults, every option, and tool exclusions.
+Selecting **Tool view: Compact** reveals **Compact extension tools** as a child setting. Switching back to Native hides it and retains its value. Choose **Claude Code** under **General → Interface → Appearance preset** for a compact Claude Code-inspired layout: it hides the OpenTUI header, places the footer in the editor border, uses compact tool cards with `⏺` / `⎿` markers, hides thinking peek and extra runtime/token/cost/extension footer details, and turns off turn telemetry. It keeps Pi's active theme and your icon, cursor, language, and extension-tool preferences. Selecting **OpenTUI** restores the preset-controlled options to their package defaults; you can still adjust individual settings afterward. The [configuration reference](./docs/configuration.md#english) contains the complete JSON defaults, every option, and tool exclusions.
 
 ## Header, footer, and editor
 

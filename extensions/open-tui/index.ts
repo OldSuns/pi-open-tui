@@ -382,7 +382,7 @@ export default function (pi: ExtensionAPI) {
 			}
 			return config.enabled ? config.toolView : { ...config.toolView, mode: "native" };
 		},
-		() => resolveGlyphs(config.icons.mode),
+		() => resolveGlyphs(config.icons.mode, config.appearancePreset === "claude-code"),
 	);
 
 	pi.registerMarkdownTransformer(markCopyScope);

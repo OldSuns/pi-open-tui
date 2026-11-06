@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- Add a selectable Claude Code-inspired appearance preset in `/open-tui` without changing the existing defaults.
+
 ## [0.4.4] - 2026-11-06
 
 ### Added

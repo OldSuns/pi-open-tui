@@ -7,6 +7,7 @@ export type SettingsLanguage = "en" | "zh";
 export type CursorStyle = "block" | "bar" | "underline";
 export type ThinkingPeekLines = 0 | 1 | 2;
 export type ToolViewMode = "native" | "compact";
+export type AppearancePreset = "open-tui" | "claude-code";
 
 export type { IconMode } from "./icons.ts";
 
@@ -57,6 +58,7 @@ export interface OpenTuiConfig {
 	/** Override Pi's header with the open-tui header. When false, the header slot is left to Pi or another extension. */
 	header: boolean;
 	inlineFooter: boolean;
+	appearancePreset: AppearancePreset;
 	/** Clickable `Copy` labels on code blocks and user messages (fullscreen mode only). */
 	copyButtons: boolean;
 	settingsLanguage: SettingsLanguage;
@@ -74,6 +76,7 @@ export const DEFAULT_CONFIG: OpenTuiConfig = {
 	enabled: true,
 	header: true,
 	inlineFooter: false,
+	appearancePreset: "open-tui",
 	copyButtons: true,
 	settingsLanguage: "en",
 	cursorStyle: "block",
@@ -116,6 +119,28 @@ export const DEFAULT_CONFIG: OpenTuiConfig = {
 		exclude: [],
 	},
 };
+
+export function applyAppearancePreset(config: OpenTuiConfig, preset: AppearancePreset): OpenTuiConfig {
+	const claudeCode = preset === "claude-code";
+	return {
+		...config,
+		appearancePreset: preset,
+		header: claudeCode ? false : DEFAULT_CONFIG.header,
+		inlineFooter: claudeCode ? true : DEFAULT_CONFIG.inlineFooter,
+		thinkingPeek: { ...config.thinkingPeek, lines: claudeCode ? 0 : DEFAULT_CONFIG.thinkingPeek.lines },
+		toolView: { ...config.toolView, mode: claudeCode ? "compact" : DEFAULT_CONFIG.toolView.mode },
+		footerSegments: {
+			...config.footerSegments,
+			runtime: claudeCode ? false : DEFAULT_CONFIG.footerSegments.runtime,
+			tokens: claudeCode ? false : DEFAULT_CONFIG.footerSegments.tokens,
+			cost: claudeCode ? false : DEFAULT_CONFIG.footerSegments.cost,
+			liveTps: claudeCode ? false : DEFAULT_CONFIG.footerSegments.liveTps,
+			extensionSegments: claudeCode ? false : DEFAULT_CONFIG.footerSegments.extensionSegments,
+			extensionStatuses: claudeCode ? false : DEFAULT_CONFIG.footerSegments.extensionStatuses,
+		},
+		telemetry: { ...config.telemetry, enabled: claudeCode ? false : DEFAULT_CONFIG.telemetry.enabled },
+	};
+}
 
 export function getConfigPath(): string {
 	const agentDir = getAgentDir();
@@ -202,6 +227,9 @@ export function loadConfig(notify?: (msg: string, level: "warning" | "info") => 
 		}
 		if (typeof config.inlineFooter !== "boolean") {
 			config.inlineFooter = DEFAULT_CONFIG.inlineFooter;
+		}
+		if (config.appearancePreset !== "open-tui" && config.appearancePreset !== "claude-code") {
+			config.appearancePreset = DEFAULT_CONFIG.appearancePreset;
 		}
 		if (typeof config.copyButtons !== "boolean") {
 			config.copyButtons = DEFAULT_CONFIG.copyButtons;

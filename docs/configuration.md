@@ -31,6 +31,7 @@ Tab/Shift+Tab or ←/→ switches tabs; ↑/↓ or Page Up/Page Down moves betwe
 | --- | --- | --- |
 | `enabled` | `true` | Master switch for open-tui |
 | `header` | `true` | Replaces the header; disable to leave that slot to Pi or another extension |
+| `appearancePreset` | `"open-tui"` | `"open-tui"` or `"claude-code"`; apply a Claude Code-inspired compact layout from General → Interface |
 | `inlineFooter` | `false` | Moves the two main footer rows into a compatible editor's borders; extension status rows remain separate |
 | `copyButtons` | `true` | Code-block and user-message Copy labels in fullscreen mode |
 | `settingsLanguage` | `"en"` | `"en"` or `"zh"`; changes the settings interface language |
@@ -40,6 +41,8 @@ Tab/Shift+Tab or ←/→ switches tabs; ↑/↓ or Page Up/Page Down moves betwe
 | `toolView.mode` | `"native"` | `"native"` or `"compact"`; selected when Pi creates each tool row |
 | `toolView.extensionTools` | `false` | In compact mode, includes extension, MCP, and replacement tools |
 | `toolView.exclude` | `[]` | Exact tool names that keep native rendering, including built-ins; edited in the JSON file only |
+
+The **Claude Code** appearance preset hides the OpenTUI header, enables the inline footer and compact tool cards, hides thinking peek and extra runtime/token/cost/extension footer details, and disables turn telemetry. It uses `⏺` / `⎿` tool markers when the selected icon mode supports Unicode, while retaining Pi's active theme and your icon, cursor, language, and extension-tool preferences. Selecting **OpenTUI** restores the preset-controlled options to their package defaults; individual settings can still be changed afterward.
 
 For example, `"toolView": { "mode": "compact", "extensionTools": true, "exclude": ["edit", "subagent_wait"] }` enables compact rendering while preserving those two tools' native cards. Use `/reload` or a new session to rebuild existing rows with the new tool-view settings.
 
@@ -126,6 +129,7 @@ Tab/Shift+Tab 或 ←/→ 切页，↑/↓ 或 Page Up/Page Down 移动，Enter/
 | --- | --- | --- |
 | `enabled` | `true` | open-tui 总开关 |
 | `header` | `true` | 替换顶栏；关闭后把位置留给 Pi 或其他扩展 |
+| `appearancePreset` | `"open-tui"` | `"open-tui"` 或 `"claude-code"`；在常规 → 界面中应用 Claude Code 风格的紧凑布局 |
 | `inlineFooter` | `false` | 将两条主底栏行移入兼容编辑器的边框，扩展状态行保持独立 |
 | `copyButtons` | `true` | 全屏模式中代码块和用户消息的复制标签 |
 | `settingsLanguage` | `"en"` | `"en"` 或 `"zh"`，控制设置界面的语言 |
@@ -135,6 +139,8 @@ Tab/Shift+Tab 或 ←/→ 切页，↑/↓ 或 Page Up/Page Down 移动，Enter/
 | `toolView.mode` | `"native"` | `"native"` 或 `"compact"`，每条工具行创建时确定 |
 | `toolView.extensionTools` | `false` | 紧凑模式下包含扩展、MCP 和替换内置工具的扩展 |
 | `toolView.exclude` | `[]` | 保持原生渲染的完整工具名，可包含内置工具；仅在 JSON 文件中编辑 |
+
+**Claude Code** 外观预设会隐藏 OpenTUI 顶栏、启用内嵌底栏和紧凑工具卡片、关闭思考预览，并隐藏额外的运行环境/Token/费用/扩展底栏信息及单次运行遥测。所选图标模式支持 Unicode 时，工具标记使用 `⏺` / `⎿`；同时保留 Pi 当前主题和用户的图标、光标、语言及扩展工具设置。选择 **OpenTUI** 会将预设控制的选项恢复为包内默认值；之后仍可单独调整各项设置。
 
 例如 `"toolView": { "mode": "compact", "extensionTools": true, "exclude": ["edit", "subagent_wait"] }` 会启用紧凑模式，并让这两个工具保留原生卡片。执行 `/reload` 或新开会话，可让已有工具行按新设置重建。
 
@@ -202,6 +208,7 @@ The complete default configuration is shared by both language references. Set `s
 {
   "enabled": true,
   "header": true,
+  "appearancePreset": "open-tui",
   "inlineFooter": false,
   "copyButtons": true,
   "settingsLanguage": "en",
