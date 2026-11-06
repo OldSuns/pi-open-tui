@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Add `footerSegments.contextBar` to hide the context progress bar and its icon while keeping the percentage and token usage.
+
 ### Fixed
 
 - Restore fullscreen Copy clicks when Pi exposes the active renderer through its stable TUI reference, including after switching display modes (#93).
