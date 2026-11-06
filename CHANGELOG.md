@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+
+- Restore fullscreen Copy clicks when Pi exposes the active renderer through its stable TUI reference, including after switching display modes (#93).
+
 ## [0.4.3] - 2026-11-05
 
 ### New Features

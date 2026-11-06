@@ -48,6 +48,7 @@ interface RawMouseEvent {
 }
 
 interface AltScreenInternals {
+	children: TUI["children"];
 	handleMouseEvent(event: RawMouseEvent): void;
 	createMouseEvent(type: TuiMouseEvent["type"], button: number, x: number, y: number): TuiMouseEvent;
 	resetTextSelection(): void;
@@ -280,7 +281,9 @@ export function installCopyButtons(options: {
 
 	const restores = [
 		patch(altScreenProto, "handleMouseEvent", function (this: AltScreenInternals, raw) {
-			if (!active() || this !== (options.getTui() as unknown)) {
+			// Pi's stable TUI Proxy binds methods to the real renderer and forwards fields.
+			// The child list identifies that renderer, even when mode switches reuse a terminal.
+			if (!active() || this.children !== options.getTui()?.children) {
 				press = undefined;
 				return originalAltScreenMouse.call(this, raw);
 			}

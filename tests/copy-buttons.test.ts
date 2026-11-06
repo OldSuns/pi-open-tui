@@ -4,6 +4,7 @@ import { dirname, join } from "node:path";
 import test from "node:test";
 import { initTheme, UserMessageComponent, type MarkdownTransformContext, type Theme } from "@earendil-works/pi-coding-agent";
 import { Markdown, TuiAltScreen, visibleWidth, type Component, type MarkdownTheme, type Terminal, type TUI, type TuiMouseEvent } from "@earendil-works/pi-tui";
+import { createInteractiveTuiReference } from "../node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/tui-renderer.js";
 import {
 	handleCopyMouse,
 	installCopyButtons,
@@ -275,6 +276,10 @@ test("cleanup disables render wrappers retained by other extensions", () => {
 test("fullscreen mouse routing preserves selection and copies only clicks", () => {
 	const terminal = { columns: 40, rows: 10, write() {} } as unknown as Terminal;
 	const tui = new TuiAltScreen(terminal, false, undefined, { copyOnSelect: false });
+	// Pi 1.5.0 gives extensions a stable Proxy whose methods are bound to the
+	// current renderer, so the patched prototype method still receives `tui` as
+	// `this` while getTui() returns a different object.
+	const tuiReference = createInteractiveTuiReference(() => tui);
 	tui.requestRender = () => {};
 	const internals = tui as unknown as {
 		stopped: boolean;
@@ -291,7 +296,7 @@ test("fullscreen mouse routing preserves selection and copies only clicks", () =
 		invalidate() {},
 		handleMouse: (event) => handleCopyMouse(component, regions, event, (text) => copied.push(text)),
 	};
-	const copy = installCopyButtons({ getTui: () => tui, getTheme: () => theme, isEnabled: () => true });
+	const copy = installCopyButtons({ getTui: () => tuiReference, getTheme: () => theme, isEnabled: () => true });
 	const send = (button: number, x: number, y: number, release = false) => internals.handleMouseEvent({ button, x, y, release });
 	try {
 		tui.setLayoutRoot(component);
