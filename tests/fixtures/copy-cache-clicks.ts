@@ -3,8 +3,9 @@ import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { getMarkdownTheme, initTheme, UserMessageComponent } from "@earendil-works/pi-coding-agent";
-import { Markdown, ProcessTerminal, TuiAltScreen, visibleWidth, type TuiMouseEvent, type TuiMouseEventResult } from "@earendil-works/pi-tui";
+import { Markdown, ProcessTerminal, TuiAltScreen, TuiMainScreen, visibleWidth, type TUI, type TuiMouseEvent, type TuiMouseEventResult } from "@earendil-works/pi-tui";
 import { theme } from "../../node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/theme/theme.js";
+import { createInteractiveTuiReference } from "../../node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/tui-renderer.js";
 import { installCopyButtons, markCopyScope } from "../../extensions/open-tui/copy-buttons.ts";
 import { stripAnsi } from "../../extensions/open-tui/utils.ts";
 import { assertMarkdownCopy, copyMarkdown, blockA, blockB, textA, textB, nestedCode, nestedText, readMarkdownCopyState } from "./copy-test-helpers.ts";
@@ -14,8 +15,12 @@ process.env.PI_CODING_AGENT_DIR = join(tmpdir(), `open-tui-copy-${randomUUID()}`
 initTheme("dark", false);
 const terminal = new ProcessTerminal();
 const tui = new TuiAltScreen(terminal, false, undefined, { copyOnSelect: false });
+let renderer: TUI = tui;
+const tuiReference = createInteractiveTuiReference(() => renderer);
+assert.notEqual(tuiReference, tui);
+assert.equal(tuiReference.children, tui.children);
 let enabled = true;
-let copy = installCopyButtons({ getTui: () => tui, getTheme: () => theme, isEnabled: () => enabled });
+let copy = installCopyButtons({ getTui: () => tuiReference, getTheme: () => theme, isEnabled: () => enabled });
 const text = "长消息 🙂 " + "A real user message that wraps when the terminal gets narrower. ".repeat(3);
 const message = new UserMessageComponent(text, undefined, 1, [markCopyScope]);
 tui.addChild(message);
@@ -226,6 +231,13 @@ try {
 	const nativeButton = readMarkdownCopyState(cachedMarkdown).regions[0]!;
 	assert.ok(nativeButton);
 	const send = (button: number, x: number, y: number, release = false) => native.handleMouseEvent({ button, x, y, release });
+	// A stationary click through the real Proxy must copy exactly once and show the native flash.
+	send(0, nativeButton.col, nativeButton.row);
+	send(0, nativeButton.col, nativeButton.row, true);
+	expectedCopies.push(textA);
+	await new Promise<void>((resolve) => setImmediate(resolve));
+	tui.renderNow();
+	assert.ok(tui.getScreenLines().some((line) => stripAnsi(line).includes("Copied!")));
 	send(0, nativeButton.col, nativeButton.row);
 	send(32, nativeButton.col + 1, nativeButton.row);
 	send(0, nativeButton.col + 1, nativeButton.row, true);
@@ -239,16 +251,50 @@ try {
 	cachedMarkdown.setText(blockB);
 	native.doRender();
 	send(0, nativeButton.col, nativeButton.row, true);
+	// Another renderer can share the terminal. Its release must not complete this renderer's press.
+	const otherRenderer = new TuiAltScreen(terminal, false, undefined, { copyOnSelect: false });
+	assert.equal(otherRenderer.terminal, tui.terminal);
+	assert.notEqual(otherRenderer.children, tui.children);
+	send(0, nativeButton.col, nativeButton.row);
+	(otherRenderer as unknown as typeof native).handleMouseEvent({
+		button: 0, x: nativeButton.col, y: nativeButton.row, release: true,
+	});
+	send(0, nativeButton.col, nativeButton.row, true);
 	tui.stop();
+	// Match Pi's fullscreen -> regular -> fullscreen replacement behind the same Proxy.
+	tui.setLayoutRoot(undefined);
+	tui.clear();
+	renderer = new TuiMainScreen(terminal, false);
+	assert.ok(cachedMarkdown.render(60).every((line) => !line.includes("[Copy]")));
+	renderer = otherRenderer;
+	otherRenderer.setLayoutRoot(cachedMarkdown);
+	otherRenderer.start();
+	otherRenderer.renderNow();
+	const replacementButton = readMarkdownCopyState(cachedMarkdown).regions[0]!;
+	assert.ok(replacementButton);
+	const replacementNative = otherRenderer as unknown as typeof native;
+	const replacementClick = () => {
+		replacementNative.handleMouseEvent({ button: 0, x: replacementButton.col, y: replacementButton.row, release: false });
+		replacementNative.handleMouseEvent({ button: 0, x: replacementButton.col, y: replacementButton.row, release: true });
+		expectedCopies.push(textB);
+	};
+	replacementClick();
+	// Clearing a renderer replaces its own child array; ownership must be read live, not cached.
+	otherRenderer.clear();
+	otherRenderer.renderNow();
+	replacementClick();
+	await new Promise<void>((resolve) => setImmediate(resolve));
+	otherRenderer.stop();
+	renderer = tui;
 	copy.cleanup();
 	const cleaned = render(40);
 	assert.ok(cleaned.every((line) => !line.includes("[Copy]")));
 	click(message, cleaned, 40, column(restored), cleaned.length - 1);
-	copy = installCopyButtons({ getTui: () => tui, getTheme: () => theme, isEnabled: () => enabled });
+	copy = installCopyButtons({ getTui: () => tuiReference, getTheme: () => theme, isEnabled: () => enabled });
 	clickLabel(render(40), 40);
 	await new Promise<void>((resolve) => setImmediate(resolve));
 	console.log("expected-copies:" + JSON.stringify(expectedCopies));
 } finally {
 	copy.cleanup();
-	tui.stop();
+	renderer.stop();
 }
