@@ -364,8 +364,9 @@ for (const tuiMode of ["regular", "fullscreen"] as const) {
 		await withHost(tuiMode === "fullscreen", async ({ runtime, host, current, lifecycle, footer, frame, toggle, directory, publish, remove, readConfig }) => {
 			const key = "process:directory";
 			let text = "";
+			const directoryContributionMarker = "[directory-files-contribution]";
 			const refresh = async () => {
-				text = `Files ${(await readdir(directory)).length}`;
+				text = `Files ${(await readdir(directory)).length} ${directoryContributionMarker}`;
 				publish({ key, position: { after: "cost" }, text });
 			};
 			const assertContributions = () => {
@@ -390,7 +391,7 @@ for (const tuiMode of ["regular", "fullscreen"] as const) {
 			await refresh();
 			assert.notEqual(text, originalText, "an actual new file changes the async contribution");
 			assert.equal(footer(320).length, 2, "hidden live updates do not reactivate separate status fallbacks");
-			assert.doesNotMatch(stripAnsi(footer(320).join("\n")), /Files |RAM /);
+			assert.doesNotMatch(stripAnsi(footer(320).join("\n")), /\[directory-files-contribution\]/);
 			await toggle("Footer", "Extension footer segments");
 			assert.equal(lifecycle(), originalLifecycle);
 			assertContributions();
@@ -439,9 +440,9 @@ for (const tuiMode of ["regular", "fullscreen"] as const) {
 			assert.match(stripAnsi(footer(320).join("\n")), /RAM /, "the example extension restores its status fallback");
 			await toggle("General", "Enabled");
 			assert.notEqual(lifecycle(), originalLifecycle);
-			const staleText = `Files ${(await pendingDirectory).length}`;
+			const staleText = `Files ${(await pendingDirectory).length} ${directoryContributionMarker}`;
 			publish({ key, position: { after: "cost" }, text: staleText }, originalLifecycle);
-			assert.doesNotMatch(stripAnsi(footer(320).join("\n")), /Files /, "old async data is rejected after reactivation");
+			assert.doesNotMatch(stripAnsi(footer(320).join("\n")), /\[directory-files-contribution\]/, "old async data is rejected after reactivation");
 			await refresh();
 			remove(key, originalLifecycle);
 			assertContributions();
