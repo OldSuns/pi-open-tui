@@ -22,6 +22,8 @@ const TOOL_LABELS: Record<string, string> = {
 	grep: "Grep",
 	find: "Find",
 	ls: "LS",
+	codemode: "Codemode",
+	tool_search: "Tool Search",
 };
 const LIVE_TAIL_LINES = 3;
 /** Arguments that best identify a call to a tool this view knows nothing else about. */
@@ -160,6 +162,10 @@ export function callDetail(toolName: string, args: Args, cwd: string): string {
 		case "bash":
 		case "powershell":
 			return firstLine(str(args.command));
+		case "tool_search":
+			return firstLine(str(args.query));
+		case "codemode":
+			return firstLine(str(args.code).replace(/^\/\/ @options:[^\n]*\n/, ""));
 		case "grep": {
 			const pattern = str(args.pattern);
 			return pattern ? `/${pattern}/${path ? ` in ${path}` : ""}` : path;
@@ -219,6 +225,91 @@ function shellLines(output: string, result: ToolResult): string {
 	return (lines === 0 ? "no output" : plural(lines, "line")) + incomplete(result);
 }
 
+/** Pi emits the script status as a separate block; keep it out of output counts and previews. */
+function codemodeOutput(result: ToolResult): ToolResult {
+	const [first, ...rest] = result.content;
+	return first?.type === "text" && /^Script (?:completed|failed)\r?\nWall time [\d.]+ seconds\r?\nOutput:\r?\n$/.test(first.text)
+		? { ...result, content: rest } : result;
+}
+
+interface NestedCall {
+	name: string;
+	args: string;
+	status: "running" | "ok" | "error" | "cancelled";
+	durationMs?: number;
+}
+
+function codemodeCalls(result: ToolResult): NestedCall[] {
+	const calls = details(result).calls;
+	if (!Array.isArray(calls)) return [];
+	return calls.flatMap((call: unknown): NestedCall[] => {
+		if (typeof call !== "object" || call === null) return [];
+		const { name, args, status, durationMs } = call as Record<string, unknown>;
+		if (typeof name !== "string" || typeof args !== "string"
+			|| (status !== "running" && status !== "ok" && status !== "error" && status !== "cancelled")) return [];
+		return [{ name, args, status, durationMs: typeof durationMs === "number" && Number.isFinite(durationMs) && durationMs >= 0 ? durationMs : undefined }];
+	});
+}
+
+function codemodeCounts(calls: NestedCall[]): string {
+	if (!calls.length) return "";
+	return [plural(calls.length, "call"), ...(["running", "error", "cancelled"] as const).flatMap((status) => {
+		const count = calls.filter((call) => call.status === status).length;
+		return count ? [`${count} ${status === "error" ? "failed" : status}`] : [];
+	})].join(" · ");
+}
+
+function codemodeBody(result: ToolResult): string[] {
+	let output = textOutput(codemodeOutput(result));
+	// Keep the warning visible when Pi could not save the full output.
+	if (typeof details(result).fullOutputPath === "string") {
+		output = output.replace(/^Warning: truncated output \(original token count: \d+\)\nTotal output lines: \d+\n\n/, "");
+	}
+	return output.split("\n")
+		.filter((line) => line.trim() && !/^(?:==> text \d+\/\d+ <==|<\/?console_output>)$/.test(line.trim()));
+}
+
+function codemodeError(result: ToolResult): string {
+	const output = textOutput(codemodeOutput(result)).trim();
+	const marker = "Script error:\n";
+	const index = output.lastIndexOf(marker);
+	return (index >= 0 ? output.slice(index + marker.length) : output).split("\n").find((line) => line.trim())?.trim() ?? "Failed";
+}
+
+function summarizeCodemode(result: ToolResult, duration = "", status = "Done"): string {
+	const counts = codemodeCounts(codemodeCalls(result));
+	const images = result.content.filter((block) => block.type === "image").length;
+	return status + (counts ? ` · ${counts}` : "") + duration
+		+ (images ? ` · ${plural(images, "image")}` : "")
+		+ (typeof details(result).fullOutputPath === "string" ? " · truncated" : "");
+}
+
+function loadedTools(result: ToolResult): string[] | undefined {
+	const loaded = details(result).loaded;
+	return Array.isArray(loaded) && loaded.every((name: unknown) => typeof name === "string" && name.trim()) ? loaded : undefined;
+}
+
+function nestedCallRows(calls: NestedCall[], theme: Theme, cwd: string, icons: IconGlyphs): string[] {
+	const ascii = icons.toolResult === "`-";
+	const rows = calls.slice(-3).map((call) => {
+		let detail = firstLine(call.args);
+		try {
+			const args: unknown = JSON.parse(call.args);
+			if (typeof args === "object" && args !== null && !Array.isArray(args)) {
+				detail = callDetail(call.name, args as Args, cwd) || genericDetail(args as Args, cwd);
+			}
+		} catch { /* Pi truncates long argument JSON for display. */ }
+		const label = Object.hasOwn(TOOL_LABELS, call.name) ? TOOL_LABELS[call.name]! : call.name;
+		const color: ThemeColor = call.status === "error" ? "error" : call.status === "running" ? "warning" : "dim";
+		const icon = call.status === "ok" ? icons.done : call.status === "error" ? icons.deleted
+			: call.status === "cancelled" ? ascii ? "-" : "⊘" : ascii ? "..." : "…";
+		const duration = call.durationMs === undefined ? "" : ` · ${formatElapsed(call.durationMs)}`;
+		return theme.fg("dim", ascii ? "|-  " : "├  ") + theme.fg(color, `${icon} ${sanitizeStatus(label)}${detail ? `(${sanitizeStatus(detail)})` : ""}${duration}`);
+	});
+	if (calls.length > 3) rows.unshift(theme.fg("dim", `${ascii ? "|-" : "├"}  … ${plural(calls.length - 3, "earlier call")} (ctrl+o to expand)`));
+	return rows;
+}
+
 /** One-line result summary for a finished, successful call. */
 export function summarizeResult(toolName: string, result: ToolResult, args: Args): string {
 	const raw = textOutput(result);
@@ -230,6 +321,12 @@ export function summarizeResult(toolName: string, result: ToolResult, args: Args
 			const more = /\n\n\[\d+ more lines in file\. Use offset=\d+ to continue\.\]\s*$/.test(raw) ? " · more" : "";
 			return plural(countLines(text), "line") + incomplete(result) + more;
 		}
+		case "tool_search": {
+			const loaded = loadedTools(result);
+			return loaded ? loaded.length ? `Loaded ${plural(loaded.length, "tool")}` : "No matching tools" : summarizeGeneric(result);
+		}
+		case "codemode":
+			return summarizeCodemode(result);
 		case "bash":
 		case "powershell":
 			return `Done · ${shellLines(text, result)}`;
@@ -338,6 +435,9 @@ export function fffKind(toolName: string, sourceInfo: SourceInfo | undefined): "
  * otherwise the error's first line.
  */
 export function summarizeError(toolName: string, result: ToolResult, duration = ""): string {
+	if (toolName === "codemode") {
+		return codemodeError(result) + summarizeCodemode(result, duration, "");
+	}
 	const text = textOutput(result).trim();
 	// Pi ends failed shell output with "Command exited with code N", "Command aborted", etc.
 	const status = toolName === "bash" || toolName === "powershell" ? /(?:^|\n\n)Command ([^\n]+)$/.exec(text) : null;
@@ -432,11 +532,14 @@ export function createCompactRenderers(
 ): ToolRenderers {
 	const label = Object.hasOwn(TOOL_LABELS, toolName) ? TOOL_LABELS[toolName]! : sanitizeStatus(toolName);
 	const isShell = !generic && (toolName === "bash" || toolName === "powershell");
+	const isCodemode = !generic && toolName === "codemode";
+	const isToolSearch = !generic && toolName === "tool_search";
+	const lazyNative = generic || isCodemode || isToolSearch;
 	const nativeShell = native?.renderShell;
 	const renderNativeCall: RenderCall | undefined = native?.renderCall
-		?? (generic ? (args, theme) => genericCall(toolName, args, theme) : undefined);
+		?? (lazyNative ? (args, theme) => genericCall(toolName, args, theme) : undefined);
 	const renderNativeResult: RenderResult | undefined = native?.renderResult
-		?? (generic ? (result, _options, theme, context) => genericResult(result, theme, context) : undefined);
+		?? (lazyNative ? (result, _options, theme, context) => genericResult(result, theme, context) : undefined);
 	// Expanded rows hand off to Pi's own card so nothing is hidden.
 	const showNative = (context: RenderContext) => context.expanded;
 	// A generic row that was expanded skips hidden progress but still sees the call finish, for a renderer's own timers.
@@ -448,7 +551,7 @@ export function createCompactRenderers(
 		renderCall(args, theme, context) {
 			const row = rowState(context);
 			// Keep native timers/edit state current; write rebuilds its full highlight cache only on expansion.
-			if (context.expanded || (generic ? feedCollapsedNative(row, context.isPartial, context.isError) : toolName !== "write")) {
+			if (context.expanded || (lazyNative ? feedCollapsedNative(row, context.isPartial, context.isError) : toolName !== "write")) {
 				row.nativeCall = renderNativeCall?.(args, theme, nativeContext(context, row, row.nativeCall));
 			}
 			if (context.executionStarted) row.startedAt ??= Date.now();
@@ -492,7 +595,7 @@ export function createCompactRenderers(
 					+ (detail ? theme.fg(context.isPartial || context.isError ? "muted" : "dim", `(${detail})`) : "");
 				// Pi does not call renderResult until the tool provides its first result.
 				// Read the shared flag during rendering, after both slots have been prepared.
-				if (generic && live && !row.hasResult) {
+				if (lazyNative && live && !row.hasResult) {
 					const elapsed = row.startedAt === undefined ? "" : ` ${formatElapsed(Date.now() - row.startedAt)}`;
 					const gutter = `${pad}  ${theme.fg("dim", icons.toolResult)}  `;
 					return [call, gutter + theme.fg("warning", `Running…${elapsed}`)];
@@ -506,7 +609,7 @@ export function createCompactRenderers(
 			row.hasResult = true;
 			const partial = options.isPartial && !context.isError;
 			if (!options.isPartial || context.isError) stopPulse(row);
-			if (!generic || context.expanded || feedCollapsedNative(row, options.isPartial, context.isError)) {
+			if (!lazyNative || context.expanded || feedCollapsedNative(row, options.isPartial, context.isError)) {
 				row.nativeResult = renderNativeResult?.(result, options, theme, nativeContext(context, row, row.nativeResult));
 			}
 			if (showNative(context) && row.nativeResult) {
@@ -530,15 +633,33 @@ export function createCompactRenderers(
 					row.preview = { source, path, colors: theme.colors, render: prepareToolPreview(toolName, source, path, theme) };
 				}
 			}
-			const timed = isShell || generic;
+			const timed = isShell || lazyNative;
 			const duration = timed && context.durationMs !== undefined ? ` · ${formatElapsed(context.durationMs)}` : "";
 			const summary = partial ? "" : context.isError
 				? summarizeError(generic ? "" : toolName, result, duration)
-				: generic ? summarizeExtension(result, duration) : summarizeResult(toolName, result, args) + duration;
+				: generic ? summarizeExtension(result, duration) : isCodemode ? summarizeCodemode(result, duration)
+					: summarizeResult(toolName, result, args) + duration;
 			const tail = partial && isShell ? tailLines(textOutput(result), LIVE_TAIL_LINES) : [];
-			return lines((width, { toolResult }) => {
+			const calls = isCodemode ? codemodeCalls(result) : [];
+			const body = isCodemode && !partial ? context.isError
+				? codemodeError(result) : codemodeBody(result)[0] : undefined;
+			const loaded = isToolSearch && !partial && !context.isError ? loadedTools(result) : undefined;
+			return lines((width, icons) => {
+				const { toolResult } = icons;
 				const gutter = `${pad}  ${theme.fg("dim", toolResult)}  `;
 				const indent = `${pad}  ${" ".repeat(visibleWidth(toolResult))}  `;
+				if (isCodemode) {
+					const counts = codemodeCounts(calls);
+					const elapsed = row.startedAt === undefined ? "" : ` ${formatElapsed(Date.now() - row.startedAt)}`;
+					const status = partial ? `Running…${elapsed}${counts ? ` · ${counts}` : ""}`
+						: context.isError ? summarizeCodemode(result, duration, "Failed") : summary;
+					const color = context.isError ? "error" : partial || calls.some((call) => call.status === "error" || call.status === "cancelled") ? "warning" : "dim";
+					return [
+						...nestedCallRows(calls, theme, context.cwd, icons).map((line) => `${pad}  ${line}`),
+						gutter + theme.fg(color, status),
+						...(body ? [indent + theme.fg(context.isError ? "error" : "toolOutput", sanitizeStatus(body))] : []),
+					];
+				}
 				if (partial) {
 					if (!timed) return [gutter + theme.fg("warning", "Running…")];
 					const elapsed = row.startedAt === undefined ? "" : ` ${formatElapsed(Date.now() - row.startedAt)}`;
@@ -546,7 +667,11 @@ export function createCompactRenderers(
 						.map((line, index) => (index === 0 ? gutter : indent) + line);
 				}
 				if (context.isError) return [gutter + theme.fg("error", summary)];
-				return [gutter + theme.fg("dim", summary), ...(row.preview?.render(width, indent) ?? [])];
+				const names = loaded?.slice(0, 3).map(sanitizeStatus).join(" · ");
+				const remaining = loaded ? Math.max(0, loaded.length - 3) : 0;
+				return [gutter + theme.fg("dim", summary),
+					...(names ? [indent + theme.fg("toolOutput", names + (remaining ? ` · +${remaining} more (ctrl+o to expand)` : ""))] : []),
+					...(row.preview?.render(width, indent) ?? [])];
 			}, theme, glyphs, !partial);
 		},
 	};
@@ -577,7 +702,7 @@ export function registerToolView(pi: ExtensionAPI, getView: () => ToolViewConfig
 		const sourceInfo = OWNED_TOOLS.has(toolName) || view.extensionTools && FFF_TOOLS.has(toolName)
 			? pi.getAllTools().find((tool) => tool.name === toolName)?.sourceInfo : undefined;
 		const builtin = OWNED_TOOLS.has(toolName) && sourceInfo?.source === "builtin";
-		if (builtin) return native && createCompactRenderers(toolName, native, glyphs, running);
+		if (builtin) return native || toolName === "tool_search" ? createCompactRenderers(toolName, native, glyphs, running) : native;
 		if (!view.extensionTools) return native;
 		const fff = fffKind(toolName, sourceInfo);
 		return createCompactRenderers(toolName, native, glyphs, running, true,

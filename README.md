@@ -100,7 +100,7 @@ Choose **Off**, **1 line**, or **2 lines** under **General → Messages & tools 
 
 ## Tool view
 
-**Native** remains the default. Select **General → Messages & tools → Tool view → Compact** to display Pi's built-in tools (`read`, `bash`, `powershell`, `edit`, `write`, `grep`, `find`, `ls`) as call and summary rows:
+**Native** remains the default. Select **General → Messages & tools → Tool view → Compact** to display Pi's built-in tools (`read`, `bash`, `powershell`, `edit`, `write`, `grep`, `find`, `ls`, and the opt-in `codemode` and `tool_search`) as call and summary rows:
 
 ```text
 ● Read(extensions/open-tui/footer.ts:1-120)
@@ -109,10 +109,21 @@ Choose **Off**, **1 line**, or **2 lines** under **General → Messages & tools 
   └  +2 −1
 ● Bash(npm test)
   └  Done · 131 lines · 6.4s
+● Codemode(const results = await Promise.allSettled([ … (+3 lines))
+  ├  ✓ Read(src/config.ts) · 12ms
+  ├  ✓ Find(*test.ts) · 18ms
+  ├  ✓ Bash(npm test) · 2.6s
+  └  Done · 3 calls · 2.7s
+     42 tests passed
+● Tool Search(browser screenshot)
+  └  Loaded 3 tools · 24ms
+     browser_snapshot · browser_click · browser_screenshot
 ```
 
 - Successful `edit` and `write` calls show syntax-highlighted previews of up to 16 rows, with a hint to expand longer output.
 - Running shell calls show recent output and elapsed time; errors retain their error summary.
+- `codemode` shows up to three recent nested calls with status, arguments, and duration, followed by the script status, total call counts, elapsed time, and one output or error line. Image counts and output truncation remain visible; expand to see earlier calls and full output. Its call detail skips the optional script options header.
+- `tool_search` shows the number of loaded tools and up to three tool names, with an expansion hint for more. Neither tool requires **Compact extension tools**.
 - Click a row to expand its native card, or use `Ctrl+O` to expand all rows. Tools, arguments, results, and model-visible content are unchanged.
 - Enable **Compact extension tools** to include extension and MCP tools. Use `toolView.exclude` in the config file for tools that should keep native rendering. Recognized `@ff-labs/pi-fff` tools receive search-specific summaries.
 - Changing the mode affects newly created rows. Use `/reload` or a new session to apply it to the whole transcript.
