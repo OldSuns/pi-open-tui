@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.4.5] - 2026-11-11
+
+### Fixed
+
+- Render built-in `codemode` and `tool_search` calls in compact tool view, preserving nested-call status, output previews, image counts, truncation hints, and full results on expansion (#98).
+
 ## [0.4.4] - 2026-11-06
 
 ### Added
