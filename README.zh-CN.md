@@ -100,7 +100,7 @@ TPS 用服务商报告的输出 Token 除以生成时间，包含等待和停顿
 
 ## 工具视图
 
-默认使用**原生**模式。在**常规 → 消息与工具 → 工具视图**中选择**紧凑**后，Pi 内置工具（`read`、`bash`、`powershell`、`edit`、`write`、`grep`、`find`、`ls`）显示为调用行和摘要行：
+默认使用**原生**模式。在**常规 → 消息与工具 → 工具视图**中选择**紧凑**后，Pi 内置工具（`read`、`bash`、`powershell`、`edit`、`write`、`grep`、`find`、`ls`，以及需要手动启用的 `codemode` 和 `tool_search`）显示为调用行和摘要行：
 
 ```text
 ● Read(extensions/open-tui/footer.ts:1-120)
@@ -109,10 +109,21 @@ TPS 用服务商报告的输出 Token 除以生成时间，包含等待和停顿
   └  +2 −1
 ● Bash(npm test)
   └  Done · 131 lines · 6.4s
+● Codemode(const results = await Promise.allSettled([ … (+3 lines))
+  ├  ✓ Read(src/config.ts) · 12ms
+  ├  ✓ Find(*test.ts) · 18ms
+  ├  ✓ Bash(npm test) · 2.6s
+  └  Done · 3 calls · 2.7s
+     42 tests passed
+● Tool Search(browser screenshot)
+  └  Loaded 3 tools · 24ms
+     browser_snapshot · browser_click · browser_screenshot
 ```
 
 - `edit` 和 `write` 成功后显示带语法高亮的预览，最多 16 行，较长输出会提示展开。
 - Shell 运行时显示近期输出和已用时间；出错时保留错误摘要。
+- `codemode` 最多显示最近三条子调用的状态、参数和耗时，随后显示脚本状态、子调用总数、已用时间及一行输出或错误。保留图片数量和输出截断提示；展开可查看更早的调用与完整输出。调用摘要跳过可选的脚本选项头。
+- `tool_search` 显示已加载工具的数量与最多三个工具名，更多工具会提示展开。两者均无需开启**紧凑显示扩展工具**。
 - 点击某行展开其原生卡片，`Ctrl+O` 展开全部行。工具、参数、结果和模型看到的内容都不改变。
 - 开启**紧凑显示扩展工具**可包含扩展和 MCP 工具；需要保留原生显示的工具可写入配置文件中的 `toolView.exclude`。识别到的 `@ff-labs/pi-fff` 工具使用专门的搜索摘要。
 - 切换模式只影响新建的行；执行 `/reload` 或新开会话后，整个记录都会应用。

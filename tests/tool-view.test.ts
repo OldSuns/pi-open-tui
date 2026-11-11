@@ -5,11 +5,13 @@ import { join, resolve } from "node:path";
 import test from "node:test";
 import {
 	createAgentSession,
+	createCodemodeExtension,
 	createEditTool,
 	createEditToolDefinition,
 	createGrepTool,
 	createReadTool,
 	createReadToolDefinition,
+	createToolSearchExtension,
 	createWriteTool,
 	createWriteToolDefinition,
 	DefaultResourceLoader,
@@ -220,6 +222,207 @@ test("call details show the key argument", () => {
 	assert.deepEqual(tailLines("a\r\nb\r\n\r\nc\r\nd\r\n", 3), ["b", "c", "d"]);
 });
 
+test("builtin codemode and tool_search collapse without the extension-tool opt-in", async (t) => {
+	const cwd = await mkdtemp(join(tmpdir(), "pi-codemode-view-"));
+	t.after(() => rm(cwd, { recursive: true, force: true }));
+	const settingsManager = SettingsManager.inMemory();
+	const view: ToolViewConfig = { mode: "compact", extensionTools: false, exclude: [] };
+	const resourceLoader = new DefaultResourceLoader({
+		cwd, agentDir: cwd, settingsManager,
+		noExtensions: true, noSkills: true, noThemes: true, noPromptTemplates: true, noContextFiles: true,
+		additionalExtensionPaths: ["builtin:codemode", "builtin:tool-search"],
+		extensionFactories: [
+			{ name: "codemode", factory: createCodemodeExtension(), builtin: true },
+			{ name: "tool-search", factory: createToolSearchExtension(), builtin: true },
+			(pi) => {
+				registerToolView(pi, () => view, glyphs);
+				for (const name of ["browser_snapshot", "browser_click", "browser_screenshot", "browser_tabs"]) {
+					pi.registerTool({ ...createReadToolDefinition(cwd), name, description: "Browser automation", exposure: "deferred", defaultActive: false });
+				}
+			},
+		],
+	});
+	await resourceLoader.reload();
+	assert.deepEqual(resourceLoader.getExtensions().errors, []);
+	const { session } = await createAgentSession({
+		cwd, agentDir: cwd, resourceLoader, settingsManager, sessionManager: SessionManager.inMemory(cwd),
+		tools: ["+codemode", "+tool_search"],
+	});
+	t.after(() => session.dispose());
+	assert.equal(session.getAllTools().find((tool) => tool.name === "codemode")?.sourceInfo.source, "builtin");
+	const native = session.getToolDefinition("codemode")!;
+	const compact = session.extensionRunner.resolveToolRenderers("codemode", () => native)!;
+	assert.equal(compact.renderShell, "self");
+	assert.notEqual(compact, native);
+	initTheme("dark");
+	const args = { code: '// @options: {"max_output_tokens": 2000}\ntext("hello");\nreturn 42;' };
+	const ctx = context({ cwd, args, executionStarted: false, durationMs: 1200 });
+	const updates: ToolResult[] = [];
+	const toolContext = session.extensionRunner.createToolContext("codemode-test", undefined);
+	const result = await native.execute("codemode-test", args, undefined, (update) => updates.push(update), toolContext);
+	assert.ok(updates.length > 0);
+	const call = compact.renderCall!(args, piTheme, ctx);
+	const rows = compact.renderResult!(result, { expanded: false, isPartial: false }, piTheme, ctx).render(100);
+	assert.match(plain(call.render(100)).join("\n"), /Codemode\(text\("hello"\); … \(\+1 lines\)\)/);
+	assert.equal(rows.length, 2);
+	assert.match(plain(rows)[0]!, /Done · 1\.2s/);
+	assert.equal(plain(rows)[1]!.trim(), "hello");
+	assert.doesNotMatch(plain(rows).join("\n"), /Script completed|Wall time|Output:/);
+	assert.equal((ctx.state as { nativeCall?: Component }).nativeCall, undefined, "collapsed scripts skip native highlighting and timers");
+	const expanded = { ...ctx, expanded: true };
+	const nativeCall = compact.renderCall!(args, piTheme, expanded).render(100);
+	const nativeResult = compact.renderResult!(result, { expanded: true, isPartial: false }, piTheme, expanded).render(100);
+	assert.match(plain(nativeCall).join("\n"), /return 42;/);
+	assert.match(plain(nativeResult).join("\n"), /hello/);
+	assert.match(plain(nativeResult).join("\n"), /42/);
+	assert.deepEqual(compact.renderResult!(result, { expanded: false, isPartial: false }, piTheme, ctx).render(100), rows);
+	await createWriteTool(cwd).execute("codemode-fixture", { path: "input.txt", content: "hello from read" });
+	const nestedArgs = { code: 'text(await tools.read({ path: "input.txt" }));' };
+	session.sessionManager.appendMessage({
+		role: "assistant", content: [{ type: "toolCall", id: "codemode-test", name: "codemode", arguments: nestedArgs }],
+		api: "openai-responses", provider: "openai", model: "gpt-5", stopReason: "toolUse", timestamp: 0,
+		usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0,
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+	});
+	session.refreshContext();
+	const nested = await native.execute("codemode-test", nestedArgs, undefined, undefined, toolContext);
+	assert.equal(summarizeResult("codemode", nested, {}), "Done · 1 call", textOutput(nested));
+	const nestedRows = plain(compact.renderResult!(nested, { expanded: false, isPartial: false }, piTheme,
+		context({ cwd, args: nestedArgs, executionStarted: false })).render(100));
+	assert.match(nestedRows[0]!, /├  ✓ Read\(input.txt\)/);
+	assert.equal(nestedRows.at(-1)!.trim(), "hello from read");
+	const failed = await native.execute("codemode-error", { code: 'text("partial output"); throw new Error("boom");' }, undefined, undefined, toolContext);
+	const errorRows = compact.renderResult!(failed, { expanded: false, isPartial: false }, piTheme,
+		context({ cwd, isError: true, executionStarted: false, durationMs: 1200 })).render(100);
+	assert.match(plain(errorRows)[0]!, /Failed · 1\.2s/);
+	assert.equal(plain(errorRows)[1]!.trim(), "Error: boom");
+	assert.doesNotMatch(plain(errorRows).join("\n"), /Script failed|partial output/);
+	const search = session.getToolDefinition("tool_search")!;
+	assert.equal(session.getAllTools().find((tool) => tool.name === "tool_search")?.sourceInfo.source, "builtin");
+	const searchView = session.extensionRunner.resolveToolRenderers("tool_search", () => undefined)!;
+	assert.equal(searchView.renderShell, "self", "tool_search has no native renderers to wrap");
+	const searchArgs = { query: "browser", limit: 4 };
+	const searchResult = await search.execute("search-test", searchArgs, undefined, undefined, toolContext);
+	const searchContext = context({ cwd, args: searchArgs, durationMs: 24, executionStarted: false });
+	assert.match(plain(searchView.renderCall!(searchArgs, piTheme, searchContext).render(100))[0]!, /Tool Search\(browser\)/);
+	const searchRows = plain(searchView.renderResult!(searchResult, { expanded: false, isPartial: false }, piTheme, searchContext).render(180));
+	assert.match(searchRows[0]!, /Loaded 4 tools · 24ms/);
+	assert.match(searchRows[1]!, /browser_snapshot · browser_click · browser_screenshot · \+1 more/);
+	assert.doesNotMatch(searchRows[1]!, /browser_tabs/);
+	assert.ok(session.getActiveToolNames().includes("browser_tabs"), "real search loads the tools");
+	const fullSearch = { ...searchContext, expanded: true };
+	searchView.renderCall!(searchArgs, piTheme, fullSearch);
+	assert.match(plain(searchView.renderResult!(searchResult, { expanded: true, isPartial: false }, piTheme, fullSearch).render(180)).join("\n"), /browser_tabs/);
+	const noMatches = await search.execute("search-again", searchArgs, undefined, undefined, toolContext);
+	assert.equal(summarizeResult("tool_search", noMatches, searchArgs), "No matching tools");
+	await assert.rejects(() => search.execute("search-invalid", { query: " " }, undefined, undefined, toolContext), /query must not be empty/);
+	view.extensionTools = true;
+	const optedIn = session.extensionRunner.resolveToolRenderers("codemode", () => native)!;
+	assert.deepEqual(optedIn.renderResult!(result, { expanded: false, isPartial: false }, piTheme,
+		context({ cwd, args, executionStarted: false, durationMs: 1200 })).render(100), rows);
+	view.exclude = ["codemode", "tool_search"];
+	assert.equal(session.extensionRunner.resolveToolRenderers("tool_search", () => undefined), undefined);
+	assert.equal(session.extensionRunner.resolveToolRenderers("codemode", () => native), native);
+	view.exclude = [];
+	view.mode = "native";
+	assert.equal(session.extensionRunner.resolveToolRenderers("codemode", () => native), native);
+});
+
+test("codemode summaries retain nested status, output, images, truncation and errors", () => {
+	const calls = [
+		{ id: "c/1", name: "read", args: "{}", status: "ok" },
+		{ id: "c/2", name: "bash", args: "{}", status: "error" },
+		{ id: "c/3", name: "read", args: "{}", status: "cancelled" },
+	];
+	const result: ToolResult = {
+		content: [
+			{ type: "text", text: "Script completed\nWall time 0.1 seconds\nOutput:\n" },
+			{ type: "text", text: "actual output\nsecond line" },
+			{ type: "image", data: "", mimeType: "image/png" },
+		],
+		details: { calls, fullOutputPath: "/tmp/full-output.txt" },
+	};
+	assert.equal(summarizeResult("codemode", result, {}), "Done · 3 calls · 1 failed · 1 cancelled · 1 image · truncated");
+	const compact = createCompactRenderers("codemode", undefined, glyphs);
+	const ctx = context({ isPartial: true });
+	assert.match(compact.renderCall!({ code: "await work();" }, theme, ctx).render(100).join("\n"), /Running…/);
+	const progress = text("", { calls: [...calls, { name: "read", args: "{}", status: "running" }] });
+	const progressRows = compact.renderResult!(progress, { expanded: false, isPartial: true }, theme, ctx).render(100);
+	assert.equal(progressRows.length, 5);
+	assert.match(progressRows[0]!, /1 earlier call/);
+	assert.match(progressRows.at(-1)!, /Running….*4 calls · 1 running · 1 failed · 1 cancelled/);
+	for (const malformed of [undefined, null, {}, [null, 1, {}, { status: "unknown" }]]) {
+		assert.equal(summarizeResult("codemode", text("plain output", { calls: malformed }), {}), "Done");
+	}
+	assert.equal(summarizeResult("codemode", text("Script completed\nWall time 0.1 seconds\nOutput:\n", { calls: [] }), {}), "Done");
+	assert.equal(summarizeError("codemode", text("Invalid options: unknown field"), " · 20ms"), "Invalid options: unknown field · 20ms");
+	assert.equal(summarizeError("codemode", text("Script failed\nWall time 0.1 seconds\nOutput:\n")), "Failed");
+	assert.equal(summarizeError("codemode", text("Script error:\nboom", { calls }), " · 1.2s"), "boom · 3 calls · 1 failed · 1 cancelled · 1.2s");
+	assert.equal(callDetail("codemode", { code: "// @options: {}\r\nreturn 1;" }, "/repo"), "return 1;");
+	for (const width of [0, 1, 6, 20, 80]) {
+		const rows = compact.renderResult!(result, { expanded: false, isPartial: false }, theme, context()).render(width);
+		assert.ok(rows.every((line) => visibleWidth(line) <= width));
+	}
+});
+
+test("codemode rows bound call previews and preserve statuses through real component updates", () => {
+	initTheme("dark");
+	const calls = [
+		{ name: "read", args: '{"path":"hidden.txt"}', status: "ok", durationMs: 1 },
+		{ name: "read", args: '{"path":"src/config.ts"}', status: "ok", durationMs: 12 },
+		{ name: "bash", args: '{"command":"npm test"}', status: "error", durationMs: 1200 },
+		{ name: "external_tool", args: '{"query":"truncated', status: "cancelled", durationMs: -1 },
+	];
+	const result = text("actual\x1b[2~ output\t中文\nsecond line", { calls });
+	const args = { code: "await work();" };
+	const compact = createCompactRenderers("codemode", undefined, glyphs);
+	const tui = new TuiAltScreen(new ProcessTerminal(), false);
+	const row = new ToolExecutionComponent("codemode", "nested-preview", args, { showImages: false }, compact, tui, "/repo");
+	row.updateResult({ ...result, isError: false });
+	const completed = plain(row.render(140)).filter((line) => line.trim());
+	assert.equal(completed.length, 7, "title, hidden count, three calls, status, output");
+	assert.match(completed[1]!, /1 earlier call/);
+	assert.match(completed[2]!, /✓ Read\(src\/config.ts\) · 12ms/);
+	assert.match(completed[3]!, /✗ Bash\(npm test\) · 1\.2s/);
+	assert.match(completed[4]!, /⊘ external_tool/);
+	assert.doesNotMatch(completed.join("\n"), /hidden.txt|-1ms|second line/);
+	assert.equal(completed.at(-1)!.trim(), "actual output 中文");
+	assert.deepEqual(plain(row.render(140)).filter((line) => line.trim()), completed);
+	row.updateResult({ ...text("", { calls: [...calls, { name: "read", args: "{}", status: "running" }] }), isError: false }, true);
+	assert.match(plain(row.render(140)).join("\n"), /… Read.*\n.*Running….*5 calls · 1 running/);
+	row.updateResult({ ...text("Script error:\nboom", { calls }), isError: true });
+	const failed = plain(row.render(140)).join("\n");
+	assert.match(failed, /Failed · 4 calls · 1 failed · 1 cancelled/);
+	assert.match(failed, /\n +boom/);
+	for (const mode of ["unicode", "ascii", "nerd"] as const) {
+		const renderer = createCompactRenderers("codemode", undefined, () => resolveGlyphs(mode));
+		const component = renderer.renderResult!(result, { expanded: false, isPartial: false }, theme, context());
+		const wide = component.render(140).join("\n");
+		assert.match(wide, mode === "ascii" ? /\|-.*\+ Read/ : /Read\(src\/config.ts\)/);
+		assert.doesNotMatch(wide, /\x1b|\t|\r/);
+		for (const width of [0, 1, 8, 20, 80]) assert.ok(component.render(width).every((line) => visibleWidth(line) <= width));
+	}
+	assert.equal(summarizeError("codemode", text("Script error:\nprinted text\nScript error:\nactual failure")), "actual failure");
+});
+
+test("tool_search summaries validate loaded names and preserve generic fallback", () => {
+	const compact = createCompactRenderers("tool_search", undefined, glyphs);
+	for (const loaded of [null, {}, [1], [""], [" "]]) {
+		assert.equal(summarizeResult("tool_search", text("Unexpected result", { loaded }), {}), "1 line · Unexpected result");
+	}
+	const result = text("loaded", { loaded: ["one\x1b[2~", "two\nname", "three", "four"] });
+	const rows = compact.renderResult!(result, { expanded: false, isPartial: false }, theme, context()).render(140);
+	assert.equal(rows[0]!.trim(), "└  Loaded 4 tools");
+	assert.equal(rows[1]!.trim(), "one · two name · three · +1 more (ctrl+o to expand)");
+	for (const width of [0, 1, 8, 20, 80]) {
+		assert.ok(compact.renderResult!(result, { expanded: false, isPartial: false }, theme, context()).render(width)
+			.every((line) => visibleWidth(line) <= width));
+	}
+	const failed = compact.renderResult!(text("query must not be empty"), { expanded: false, isPartial: false }, theme, context({ isError: true })).render(100);
+	assert.equal(failed.length, 1);
+	assert.match(failed[0]!, /query must not be empty/);
+});
+
 // Registration, native rendering, and scroll caches.
 test("real extension registration preserves native and third-party tools and cleans up pulses", async (t) => {
 	const cwd = await mkdtemp(join(tmpdir(), "pi-tool-view-"));
@@ -285,6 +488,8 @@ test("extension tool opt-in wraps every tool except exclusions and keeps built-i
 		extensionFactories: [(pi) => {
 			registerToolView(pi, () => view, glyphs);
 			pi.registerTool({ ...createWriteToolDefinition(cwd), name: "write" });
+			pi.registerTool({ ...createWriteToolDefinition(cwd), name: "codemode" });
+			pi.registerTool({ ...createWriteToolDefinition(cwd), name: "tool_search" });
 		}],
 	});
 	await resourceLoader.reload();
@@ -319,8 +524,18 @@ test("extension tool opt-in wraps every tool except exclusions and keeps built-i
 	assert.equal(runner.resolveToolRenderers("mcp__late", () => undefined), undefined);
 	assert.equal(runner.resolveToolRenderers("edit", () => edit), edit);
 
+	const codemodeReplacement = session.getToolDefinition("codemode")!;
+	const genericCodemode = runner.resolveToolRenderers("codemode", () => codemodeReplacement)!;
+	assert.equal(plain(genericCodemode.renderResult!(text("Script completed"), { expanded: false, isPartial: false }, theme, context()).render(100))[0]!.trim(),
+		"└  1 line · Script completed", "same-name replacements keep generic output handling");
+	const searchReplacement = session.getToolDefinition("tool_search")!;
+	const genericSearch = runner.resolveToolRenderers("tool_search", () => searchReplacement)!;
+	assert.equal(plain(genericSearch.renderResult!(text("Custom search result", { loaded: ["custom"] }), { expanded: false, isPartial: false }, theme, context()).render(100))[0]!.trim(),
+		"└  1 line · Custom search result");
 	view.exclude = [];
 	view.extensionTools = false;
+	assert.equal(runner.resolveToolRenderers("tool_search", () => searchReplacement), searchReplacement);
+	assert.equal(runner.resolveToolRenderers("codemode", () => codemodeReplacement), codemodeReplacement);
 	assert.equal(runner.resolveToolRenderers("write", () => replacement), replacement);
 	view.extensionTools = true;
 	view.mode = "native";

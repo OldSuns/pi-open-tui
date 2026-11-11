@@ -73,6 +73,10 @@ Word matching is bounded to an edit distance of 256. Lines up to 512 characters 
 
 Write previews use the submitted content with line numbers on the normal background. New files and overwrites look the same; no old-file diff is synthesized. Only successful completed edit/write results get previews. Bodies show at most 16 rows, including context and ellipsis rows, followed by a hidden-row count and `Ctrl+O` hint. Compact previews truncate long lines with `…`; expanded rendering retains Pi's native behavior.
 
+Built-in `codemode` rows skip the optional script options header in the call detail. Compact results show up to three recent nested calls with their status, key argument, and duration; earlier calls get a count and expansion hint. The summary shows script status, total calls, running/failed/cancelled counts, duration, image count, and a truncation marker when `details.fullOutputPath` is present. One output line follows, skipping Pi's script header and text/console separators. Failures show the last `Script error:` reason instead. Expansion uses Pi's native script, nested-call, output, and cost rendering. Native codemode rendering starts on expansion to avoid hidden script highlighting and timers.
+
+Built-in `tool_search` uses `details.loaded` for the loaded-tool count and a preview of up to three names. No matches and additional names have explicit summaries. Invalid metadata falls back to a generic summary. Expansion retains the full result using Pi's generic layout, since this tool has no dedicated native renderer.
+
 #### Extension and FFF summaries
 
 With `toolView.extensionTools` enabled, unknown tools use generic summaries: nonempty text-line counts, image counts, duration, and the first text line. They do not receive edit/write previews. Truncation requires `details.truncation.truncated: true`; a valid total line count may replace the displayed count, but built-in-specific limit fields are not interpreted. Running rows show elapsed time even before a first result arrives.
@@ -163,6 +167,10 @@ Agent 运行期间，工作计时器每 250 毫秒请求一次重绘。Git 和�
 词差异匹配的编辑距离上限为 256。长度不超过 512 个字符的行不使用时钟超时，因此调度延迟不会让词高亮消失；更长且不超过 4,096 个字符的行使用五毫秒超时，更大或无法匹配的行保留整行高亮。语法高亮另有输入长度上限。
 
 写入预览基于提交内容，在普通背景上显示行号；新建与覆盖相同，不生成旧文件 diff。仅完成且成功的编辑/写入会产生预览。正文最多 16 行，包含上下文和省略行，之后显示隐藏行数与 `Ctrl+O` 提示。紧凑预览用 `…` 截断长行，展开后保留 Pi 原生行为。
+
+内置 `codemode` 的调用摘要跳过可选的脚本选项头。紧凑结果最多显示最近三条子调用的状态、关键参数和耗时，更早的调用显示数量与展开提示。摘要显示脚本状态、子调用总数、运行/失败/取消数量、耗时、图片数量，并在存在 `details.fullOutputPath` 时标记输出截断。随后显示一行输出，跳过 Pi 的脚本状态头及文本、控制台分隔标记；失败时改为显示最后一个 `Script error:` 后的原因。展开后使用 Pi 原生的脚本、子调用、输出和费用渲染。codemode 原生渲染在展开时才启动，避免折叠状态下的代码高亮和计时器开销。
+
+内置 `tool_search` 根据 `details.loaded` 显示加载数量与最多三个工具名，无匹配与更多工具均有对应提示。元数据无效时使用通用摘要。由于该工具没有专用原生渲染器，展开时使用 Pi 的通用布局显示完整结果。
 
 #### 扩展与 FFF 摘要
 
