@@ -365,6 +365,45 @@ test("codemode summaries retain nested status, output, images, truncation and er
 	}
 });
 
+test("codemode previews skip saved-output truncation headers and preserve warnings otherwise", () => {
+	const warning = "Warning: truncated output (original token count: 1000)";
+	const header = `${warning}\nTotal output lines: 200\n\n`;
+	const output = `${header}==> text 1/2 <==\nactual output\n…900 tokens truncated…tail`;
+	const compact = createCompactRenderers("codemode", undefined, glyphs);
+	const render = (value: string, fullOutputPath?: unknown) => {
+		const result = text(value, { calls: [], fullOutputPath });
+		return compact.renderResult!(result, { expanded: false, isPartial: false }, theme, context()).render(160).map(stripAnsi);
+	};
+	const saved = render(output, "/tmp/full-output.txt");
+	assert.match(saved[0]!, /Done · truncated/);
+	assert.equal(saved[1]!.trim(), "actual output");
+	assert.equal(render(`${output}\n[Could not save the full output: disk full]`)[1]!.trim(), warning);
+	assert.equal(render(output, 123)[1]!.trim(), warning);
+	assert.equal(render("Warning: truncated output is user text\nkeep it", "/tmp/full-output.txt")[1]!.trim(),
+		"Warning: truncated output is user text");
+	assert.equal(render("<console_output>\nconsole message\n</console_output>")[1]!.trim(), "console message");
+});
+
+test("failed codemode summaries retain images alongside call counts, duration and truncation", () => {
+	for (const count of [0, 1, 2]) {
+		const result: ToolResult = {
+			content: [
+				{ type: "text", text: "Script failed\nWall time 1.2 seconds\nOutput:\n" },
+				{ type: "text", text: "partial output\nScript error:\nError: boom" },
+				...Array.from({ length: count }, () => ({ type: "image" as const, data: "", mimeType: "image/png" })),
+			],
+			details: { calls: [{ name: "read", args: "{}", status: "error" }], fullOutputPath: "/tmp/full-output.txt" },
+		};
+		const images = count ? ` · ${count} image${count === 1 ? "" : "s"}` : "";
+		assert.equal(summarizeError("codemode", result, " · 1.2s"), `Error: boom · 1 call · 1 failed · 1.2s${images} · truncated`);
+		const compact = createCompactRenderers("codemode", undefined, glyphs);
+		const rows = compact.renderResult!(result, { expanded: false, isPartial: false }, theme,
+			context({ isError: true, durationMs: 1200 })).render(160).map(stripAnsi);
+		assert.equal(rows[1]!.trim(), `└  Failed · 1 call · 1 failed · 1.2s${images} · truncated`);
+		assert.equal(rows[2]!.trim(), "Error: boom");
+	}
+});
+
 test("codemode rows bound call previews and preserve statuses through real component updates", () => {
 	initTheme("dark");
 	const calls = [

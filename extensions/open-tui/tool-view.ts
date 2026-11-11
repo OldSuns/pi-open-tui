@@ -260,7 +260,12 @@ function codemodeCounts(calls: NestedCall[]): string {
 }
 
 function codemodeBody(result: ToolResult): string[] {
-	return textOutput(codemodeOutput(result)).split("\n")
+	let output = textOutput(codemodeOutput(result));
+	// Keep the warning visible when Pi could not save the full output.
+	if (typeof details(result).fullOutputPath === "string") {
+		output = output.replace(/^Warning: truncated output \(original token count: \d+\)\nTotal output lines: \d+\n\n/, "");
+	}
+	return output.split("\n")
 		.filter((line) => line.trim() && !/^(?:==> text \d+\/\d+ <==|<\/?console_output>)$/.test(line.trim()));
 }
 
@@ -271,10 +276,10 @@ function codemodeError(result: ToolResult): string {
 	return (index >= 0 ? output.slice(index + marker.length) : output).split("\n").find((line) => line.trim())?.trim() ?? "Failed";
 }
 
-function summarizeCodemode(result: ToolResult, duration = ""): string {
+function summarizeCodemode(result: ToolResult, duration = "", status = "Done"): string {
 	const counts = codemodeCounts(codemodeCalls(result));
 	const images = result.content.filter((block) => block.type === "image").length;
-	return "Done" + (counts ? ` · ${counts}` : "") + duration
+	return status + (counts ? ` · ${counts}` : "") + duration
 		+ (images ? ` · ${plural(images, "image")}` : "")
 		+ (typeof details(result).fullOutputPath === "string" ? " · truncated" : "");
 }
@@ -431,9 +436,7 @@ export function fffKind(toolName: string, sourceInfo: SourceInfo | undefined): "
  */
 export function summarizeError(toolName: string, result: ToolResult, duration = ""): string {
 	if (toolName === "codemode") {
-		const calls = codemodeCounts(codemodeCalls(result));
-		return codemodeError(result) + (calls ? ` · ${calls}` : "") + duration
-			+ (typeof details(result).fullOutputPath === "string" ? " · truncated" : "");
+		return codemodeError(result) + summarizeCodemode(result, duration, "");
 	}
 	const text = textOutput(result).trim();
 	// Pi ends failed shell output with "Command exited with code N", "Command aborted", etc.
@@ -649,7 +652,7 @@ export function createCompactRenderers(
 					const counts = codemodeCounts(calls);
 					const elapsed = row.startedAt === undefined ? "" : ` ${formatElapsed(Date.now() - row.startedAt)}`;
 					const status = partial ? `Running…${elapsed}${counts ? ` · ${counts}` : ""}`
-						: context.isError ? `Failed${counts ? ` · ${counts}` : ""}${duration}${typeof details(result).fullOutputPath === "string" ? " · truncated" : ""}` : summary;
+						: context.isError ? summarizeCodemode(result, duration, "Failed") : summary;
 					const color = context.isError ? "error" : partial || calls.some((call) => call.status === "error" || call.status === "cancelled") ? "warning" : "dim";
 					return [
 						...nestedCallRows(calls, theme, context.cwd, icons).map((line) => `${pad}  ${line}`),
