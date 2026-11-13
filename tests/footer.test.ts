@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { hostname, tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import test, { type TestContext } from "node:test";
+import { setTimeout as delay } from "node:timers/promises";
 import type {
 	ExtensionContext,
 	ReadonlyFooterDataProvider,
@@ -15,7 +16,8 @@ import { visibleWidth } from "@earendil-works/pi-tui";
 import { DEFAULT_CONFIG } from "../extensions/open-tui/config.ts";
 import { installFooter, shortHostname } from "../extensions/open-tui/footer.ts";
 import type { LiveTps } from "../extensions/open-tui/telemetry.ts";
-import { emptyGitStatus, readGitStatus } from "../extensions/open-tui/git.ts";
+import { emptyGitStatus, readGitStatus, type GitStatus } from "../extensions/open-tui/git.ts";
+import { GitStatusRefresher } from "../extensions/open-tui/git-refresh.ts";
 import { detectNerdFont, resolveGlyphs, resolveIconMode, runtimeSymbol } from "../extensions/open-tui/icons.ts";
 import { clearRuntimeCache, readRuntimeInfo } from "../extensions/open-tui/runtime.ts";
 import { getModelMeta, getUsageTotals, invalidateUsageCache, type FooterState } from "../extensions/open-tui/state.ts";
@@ -40,6 +42,193 @@ function gitRepository(t: TestContext, branch = "main") {
 	git("init", "-b", branch);
 	return { root, git, commit };
 }
+
+const gitRefreshOptions = { readCommit: true, readTag: true, readCounts: true };
+
+function refreshRepository(t: TestContext, branch = "main") {
+	const repo = gitRepository(t, branch);
+	const commit = () => {
+		repo.git("add", ".");
+		repo.commit("snapshot");
+	};
+	commit();
+	return { cwd: repo.root, git: repo.git, commit };
+}
+
+async function waitForGitRefresh(predicate: () => boolean): Promise<void> {
+	const deadline = performance.now() + 10_000;
+	while (!predicate()) {
+		assert.ok(performance.now() < deadline, "Git refresh did not reach the expected state");
+		await delay(10);
+	}
+}
+
+function observeGitRefresh(t: TestContext) {
+	const updates: GitStatus[] = [];
+	const refresher = new GitStatusRefresher((status) => updates.push(status));
+	t.after(() => refresher.reset());
+	return { refresher, updates };
+}
+
+test("a same-branch commit clears all cached counts without another refresh request", async (t) => {
+	const { cwd, commit } = refreshRepository(t);
+	for (let i = 0; i < 3; i++) writeFileSync(join(cwd, `tracked-${i}.txt`), "before\n");
+	commit();
+	for (let i = 0; i < 3; i++) writeFileSync(join(cwd, `tracked-${i}.txt`), "after\n");
+	for (let i = 0; i < 2; i++) writeFileSync(join(cwd, `untracked-${i}.txt`), "new\n");
+	const { refresher, updates } = observeGitRefresh(t);
+	refresher.request(cwd, gitRefreshOptions);
+	await waitForGitRefresh(() => updates.length === 1);
+	assert.equal(updates[0]!.modified, 3);
+	assert.equal(updates[0]!.untracked, 2);
+	commit();
+	refresher.request(cwd, gitRefreshOptions);
+	await waitForGitRefresh(() => updates.length === 2);
+	assert.deepEqual(updates[1], { ...emptyGitStatus(), branch: "main" });
+	await delay(600);
+	assert.equal(updates.length, 2, "no polling should continue after the final refresh");
+});
+
+test("requests during a real Git read coalesce and never overlap Git queries", async (t) => {
+	const { cwd } = refreshRepository(t);
+	const tracePath = join(temporaryDirectory(t, "open-tui-git-trace-"), "events.jsonl");
+	preserveEnvironment(t, ["GIT_TRACE2_EVENT"]);
+	process.env.GIT_TRACE2_EVENT = tracePath;
+	const { refresher, updates } = observeGitRefresh(t);
+	refresher.request(cwd, gitRefreshOptions);
+	writeFileSync(join(cwd, "created-during-read.txt"), "new\n");
+	for (let i = 0; i < 20; i++) refresher.request(cwd, gitRefreshOptions, true);
+	await waitForGitRefresh(() => updates.length >= 2);
+	await delay(600);
+	assert.equal(updates.length, 2);
+	assert.equal(updates.at(-1)!.untracked, 1);
+
+	const trace = readFileSync(tracePath, "utf8").trim().split("\n").map((line) => JSON.parse(line) as {
+		event: string; sid: string; argv?: string[];
+	});
+	const queries = new Set(trace.filter((entry) => entry.event === "start"
+		&& (entry.argv?.[1] === "status" || entry.argv?.[1] === "stash")).map((entry) => entry.sid));
+	assert.equal(queries.size, 4, "two refreshes each run status and stash");
+	let running = 0;
+	for (const entry of trace) {
+		if (!queries.has(entry.sid)) continue;
+		if (entry.event === "start") {
+			running++;
+			assert.equal(running, 1, "Git queries overlapped");
+		} else if (entry.event === "exit") {
+			running--;
+		}
+	}
+	assert.equal(running, 0);
+});
+
+test("continuous tool activity still publishes updates and retains the final change", async (t) => {
+	const { cwd } = refreshRepository(t);
+	const { refresher, updates } = observeGitRefresh(t);
+	let files = 0;
+	const timer = setInterval(() => {
+		writeFileSync(join(cwd, `file-${++files}.txt`), "new\n");
+		refresher.request(cwd, gitRefreshOptions);
+	}, 50);
+	try {
+		await waitForGitRefresh(() => updates.length >= 2);
+	} finally {
+		clearInterval(timer);
+	}
+	writeFileSync(join(cwd, `file-${++files}.txt`), "final\n");
+	refresher.request(cwd, gitRefreshOptions);
+	await waitForGitRefresh(() => updates.at(-1)?.untracked === files);
+});
+
+test("flushing an in-flight request retains the final read without starting a third", async (t) => {
+	const { cwd } = refreshRepository(t);
+	const { refresher, updates } = observeGitRefresh(t);
+	refresher.request(cwd, gitRefreshOptions);
+	writeFileSync(join(cwd, "last-tool.txt"), "new\n");
+	refresher.request(cwd, gitRefreshOptions);
+	refresher.flush();
+	await waitForGitRefresh(() => updates.length === 2);
+	assert.equal(updates[1]!.untracked, 1);
+	refresher.flush();
+	await delay(600);
+	assert.equal(updates.length, 2, "an idle flush must not issue another Git read");
+});
+
+test("reset discards an in-flight result and pending work before switching repositories", async (t) => {
+	const first = refreshRepository(t, "previous");
+	const second = refreshRepository(t, "current");
+	const { refresher, updates } = observeGitRefresh(t);
+	refresher.request(first.cwd, gitRefreshOptions);
+	refresher.request(first.cwd, gitRefreshOptions);
+	refresher.reset();
+	refresher.request(second.cwd, gitRefreshOptions, true);
+	await waitForGitRefresh(() => updates.length >= 1);
+	await delay(600);
+	assert.deepEqual(updates, [{ ...emptyGitStatus(), branch: "current" }]);
+});
+
+test("reset cancels a trailing refresh and permits a fresh read when re-enabled", async (t) => {
+	const { cwd } = refreshRepository(t);
+	const { refresher, updates } = observeGitRefresh(t);
+	refresher.request(cwd, gitRefreshOptions);
+	await waitForGitRefresh(() => updates.length === 1);
+	writeFileSync(join(cwd, "while-disabled.txt"), "new\n");
+	refresher.request(cwd, gitRefreshOptions);
+	refresher.reset();
+	refresher.flush();
+	await delay(650);
+	assert.equal(updates.length, 1);
+	refresher.request(cwd, gitRefreshOptions, true);
+	await waitForGitRefresh(() => updates.length === 2);
+	assert.equal(updates[1]!.untracked, 1);
+});
+
+test("new display options invalidate old results and are captured at request time", async (t) => {
+	const { cwd } = refreshRepository(t);
+	writeFileSync(join(cwd, "untracked.txt"), "new\n");
+	const { refresher, updates } = observeGitRefresh(t);
+	refresher.request(cwd, gitRefreshOptions);
+	refresher.reset();
+	const branchOnly = { readCounts: false };
+	refresher.request(cwd, branchOnly, true);
+	branchOnly.readCounts = true;
+	await waitForGitRefresh(() => updates.length === 1);
+	assert.deepEqual(updates[0], { ...emptyGitStatus(), branch: "main" });
+	refresher.request(cwd, gitRefreshOptions, true);
+	await waitForGitRefresh(() => updates.length === 2);
+	assert.equal(updates[1]!.untracked, 1);
+});
+
+test("a failed status read does not prevent the next repository refresh", async (t) => {
+	const { cwd } = refreshRepository(t);
+	const nonRepository = temporaryDirectory(t, "open-tui-non-repository-");
+	const { refresher, updates } = observeGitRefresh(t);
+	refresher.request(nonRepository, gitRefreshOptions);
+	await waitForGitRefresh(() => updates.length === 1);
+	assert.deepEqual(updates[0], emptyGitStatus());
+	refresher.request(cwd, gitRefreshOptions, true);
+	await waitForGitRefresh(() => updates.length === 2);
+	assert.equal(updates[1]!.branch, "main");
+});
+
+test("a detached HEAD commit refreshes its hash and exact tag", async (t) => {
+	const { cwd, git, commit } = refreshRepository(t);
+	git("tag", "before");
+	git("checkout", "--detach");
+	const { refresher, updates } = observeGitRefresh(t);
+	refresher.request(cwd, gitRefreshOptions);
+	await waitForGitRefresh(() => updates.length === 1);
+	assert.equal(updates[0]!.commit?.tag, "before");
+	writeFileSync(join(cwd, "after.txt"), "new\n");
+	commit();
+	refresher.request(cwd, gitRefreshOptions);
+	await waitForGitRefresh(() => updates.length === 2);
+	assert.equal(updates[1]!.commit?.detached, true);
+	assert.equal(updates[1]!.commit?.oid, git("rev-parse", "HEAD").trim());
+	assert.notEqual(updates[1]!.commit?.oid, updates[0]!.commit?.oid);
+	assert.equal(updates[1]!.commit?.tag, null);
+	assert.equal(updates[1]!.untracked, 0);
+});
 
 test("reads Git status from a nested repository directory", async (t) => {
 	const { root, commit } = gitRepository(t, "nested-repo-test");
