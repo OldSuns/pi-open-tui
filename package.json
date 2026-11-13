@@ -27,7 +27,7 @@
     "LICENSE"
   ],
   "scripts": {
-    "test": "node --test tests/settings-command.test.ts tests/footer.test.ts tests/footer-protocol.test.ts tests/footer-segments.test.ts tests/editor.test.ts tests/telemetry.test.ts tests/peek.test.ts tests/peek-label.test.ts tests/tool-view.test.ts tests/copy-buttons.test.ts tests/copy-markdown.test.ts",
+    "test": "node --test tests/settings-command.test.ts tests/footer.test.ts tests/footer-protocol.test.ts tests/footer-segments.test.ts tests/editor.test.ts tests/telemetry.test.ts tests/peek.test.ts tests/peek-label.test.ts tests/reload-thinking-label.test.ts tests/tool-view.test.ts tests/copy-buttons.test.ts tests/copy-markdown.test.ts",
     "typecheck": "tsc --noEmit"
   },
   "pi": {

@@ -58,7 +58,7 @@ test("an unrendered final label uses the message width and padding", () => {
 	const tracked = trackHiddenThinkingLabel(component);
 	tracked.update(label(done));
 	tracked.release(true);
-	assert.equal(rendered(component, 10), label(done)(6));
+	assert.equal(rendered(component, 10), stripAnsi(label(done)(6)));
 	assert.ok(component.render(10).every((line) => visibleWidth(line) <= 10));
 });
 

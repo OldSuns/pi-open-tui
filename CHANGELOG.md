@@ -5,6 +5,7 @@
 ### Fixed
 
 - Keep the check mark on finished messages, including when the next message starts before the final label renders (#96).
+- Keep the check mark on finished messages after `/reload` rebuilds the chat and Pi resets the hidden-thinking label.
 
 ## [0.4.5] - 2026-11-11
 

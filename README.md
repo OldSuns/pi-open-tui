@@ -96,7 +96,7 @@ With Pi's **Hide thinking** enabled, pi-open-tui replaces the hidden block's `Th
           latest thought
 ```
 
-Choose **Off**, **1 line**, or **2 lines** under **General → Messages & tools → Thinking peek**. The ticker appears only when the model streams reasoning and settles on a check mark when the answer begins. A finished message keeps its check mark while later messages take over the preview; Pi's native label returns when the peek is turned off. It follows Pi's Hide thinking toggle immediately and clips text to fit the available width.
+Choose **Off**, **1 line**, or **2 lines** under **General → Messages & tools → Thinking peek**. The ticker appears only when the model streams reasoning and settles on a check mark when the answer begins. A finished message keeps its check mark while later messages take over the preview and after `/reload` rebuilds the chat; Pi's native label returns when the peek is turned off. It follows Pi's Hide thinking toggle immediately and clips text to fit the available width.
 
 ## Tool view
 

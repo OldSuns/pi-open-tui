@@ -42,6 +42,7 @@ export interface InlineFooterRenderer {
 interface HiddenThinkingLabelComponent {
 	children: unknown[];
 	outputPad?: unknown;
+	isStreaming?: unknown;
 	render(width: number): string[];
 	setHiddenThinkingLabel(label: string): void;
 	setHideThinkingBlock(hide: boolean): void;
@@ -58,19 +59,25 @@ function isHiddenThinkingLabelComponent(value: object): value is HiddenThinkingL
 }
 
 /** Ponytail until Pi exposes a per-message hidden-thinking label API. */
-function findLatestHiddenThinkingLabel(tui: TUI): HiddenThinkingLabelComponent {
+function collectHiddenThinkingLabelComponents(tui: TUI): HiddenThinkingLabelComponent[] {
 	const pending: unknown[] = [tui];
 	const visited = new Set<object>();
-	let latest: HiddenThinkingLabelComponent | undefined;
+	const components: HiddenThinkingLabelComponent[] = [];
 	while (pending.length > 0) {
 		const value = pending.pop();
 		if (!value || typeof value !== "object" || visited.has(value)) continue;
 		visited.add(value);
-		if (isHiddenThinkingLabelComponent(value)) latest = value;
+		if (isHiddenThinkingLabelComponent(value)) components.push(value);
 		const children = (value as { children?: unknown }).children;
 		if (!Array.isArray(children)) continue;
 		for (let i = children.length - 1; i >= 0; i--) pending.push(children[i]);
 	}
+	return components;
+}
+
+/** Ponytail until Pi exposes a per-message hidden-thinking label API. */
+function findLatestHiddenThinkingLabel(tui: TUI): HiddenThinkingLabelComponent {
+	const latest = collectHiddenThinkingLabelComponents(tui).at(-1);
 	if (!latest) throw new Error("Unable to find the active hidden-thinking component");
 	return latest;
 }
@@ -635,6 +642,26 @@ export function installEditor(
 			tui.requestRender();
 		},
 		resetHiddenThinkingLabelTarget: resetHiddenThinkingTarget,
+		/**
+		 * Re-apply the label to messages Pi rebuilt from scratch (a reload drops every
+		 * per-message label and falls back to Pi's native one).
+		 */
+		restoreFinishedThinkingLabels(build: (width: number) => string): number {
+			const tui = activeTui;
+			if (!tui) return 0;
+			let restored = 0;
+			for (const component of collectHiddenThinkingLabelComponents(tui)) {
+				if (component.isStreaming === true) continue;
+				const label = trackHiddenThinkingLabel(component, () => pendingHiddenThinkingLabels.delete(label));
+				pendingHiddenThinkingLabels.add(label);
+				label.update(build);
+				// The label is written on the next render, once the real width is known.
+				label.release(true);
+				restored++;
+			}
+			if (restored > 0) tui.requestRender();
+			return restored;
+		},
 		getTui: (): TUI | undefined => activeTui,
 		setCursorStyle(nextCursorStyle: CursorStyle): void {
 			currentCursorStyle = nextCursorStyle;

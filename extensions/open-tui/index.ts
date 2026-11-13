@@ -94,6 +94,19 @@ export default function (pi: ExtensionAPI) {
 		peek.tail = "";
 		editor?.resetHiddenThinkingLabelTarget();
 	};
+
+	/**
+	 * Pi rebuilds every message on reload and drops the per-message labels, so the
+	 * finished messages fall back to the native "Thinking..." label. Re-apply ours.
+	 */
+	const restoreFinishedPeekLabels = (): void => {
+		if (!isPeekEnabled() || !editor) return;
+		const glyphs = resolveGlyphs(config.icons.mode);
+		const lines = config.thinkingPeek.lines;
+		const restored = editor.restoreFinishedThinkingLabels((width) =>
+			buildPeekLabel({ phase: "done", tail: "" }, 0, glyphs, width, lines));
+		if (restored > 0) peekLabelActive = true;
+	};
 	const applyUi = (ctx: ExtensionContext) => {
 		if (!isTuiContext(ctx)) return;
 		if (!config.enabled) {
@@ -218,7 +231,7 @@ export default function (pi: ExtensionAPI) {
 		}
 	};
 
-	pi.on("session_start", async (_event, ctx) => {
+	pi.on("session_start", async (event, ctx) => {
 		sessionLifecycle.start();
 		lastCtx = ctx;
 		state.workingSince = undefined;
@@ -230,6 +243,7 @@ export default function (pi: ExtensionAPI) {
 		configLoaded = true;
 
 		applyUi(ctx);
+		if (event.reason === "reload") restoreFinishedPeekLabels();
 
 		refreshInteractiveState(ctx, true);
 	});
