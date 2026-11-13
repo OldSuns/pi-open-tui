@@ -58,8 +58,6 @@ export default function (pi: ExtensionAPI) {
 	// thinking-peek state (rendered by Pi inside its hidden-thinking block)
 	const peek: PeekState = createPeekState();
 	let peekFrame = 0;
-	let peekSettleTimer: ReturnType<typeof setTimeout> | undefined;
-	let peekTaskEpoch = 0; // bumped at every agent task boundary
 	let peekLabelActive = false;
 
 	const getThinkingLevel = () => (sessionLifecycle.isCurrent() ? pi.getThinkingLevel() : "off");
@@ -80,31 +78,21 @@ export default function (pi: ExtensionAPI) {
 		peekLabelActive = true;
 	};
 
-	/**
-	 * Hand Pi's hidden-thinking label back to Pi.
-	 *
-	 * Pi applies the label to every assistant message at once, so a global reset would also
-	 * wipe the frozen "done" label of messages that already finished. A finished message
-	 * keeps the label it was rendered with, and the native label returns only when this
-	 * extension stops using the label.
-	 */
+	/** Pi resets every message's label, so restore it only when the peek is disabled. */
 	const restoreNativePeekLabel = (ctx?: ExtensionContext): void => {
 		if (!peekLabelActive) return;
 		const target = ctx ?? lastCtx;
 		if (!target || !isTuiContext(target)) return;
+		editor?.resetHiddenThinkingLabelTarget(false);
 		target.ui.setHiddenThinkingLabel();
 		peekLabelActive = false;
 	};
 
-	/** Reset peek state to idle and cancel any scheduled cleanup. */
+	/** Release the current message while preserving its final label. */
 	const resetPeek = () => {
 		peek.phase = "idle";
 		peek.tail = "";
 		editor?.resetHiddenThinkingLabelTarget();
-		if (peekSettleTimer) {
-			clearTimeout(peekSettleTimer);
-			peekSettleTimer = undefined;
-		}
 	};
 	const applyUi = (ctx: ExtensionContext) => {
 		if (!isTuiContext(ctx)) return;
@@ -259,9 +247,6 @@ export default function (pi: ExtensionAPI) {
 	pi.on("agent_start", (event, _ctx) => {
 		turnTelemetry.handle(event);
 		if (!sessionLifecycle.isCurrent()) return;
-		// agent_start also covers custom-message and continuation-triggered tasks
-		// that do not emit a user message_start event.
-		peekTaskEpoch++;
 		state.workingSince = Date.now();
 		state.lastDoneIn = undefined;
 		startWorkingTimer();
@@ -285,14 +270,7 @@ export default function (pi: ExtensionAPI) {
 		turnTelemetry.handle(event);
 		if (!sessionLifecycle.isCurrent() || ctx.isIdle()) return;
 		const role = event.message?.role;
-		if (role === "user") {
-			// Stop updating the previous message; it keeps the label it was rendered with.
-			// The task epoch is advanced by agent_start so custom/no-user tasks are covered too.
-			resetPeek();
-		} else if (role === "assistant") {
-			// The new assistant message takes over the peek once its thinking arrives.
-			resetPeek();
-		}
+		if (role === "user" || role === "assistant") resetPeek();
 	});
 
 	pi.on("message_update", (event, ctx) => {
@@ -330,14 +308,7 @@ export default function (pi: ExtensionAPI) {
 			const message = formatTurnTelemetry(telemetry, ctx.ui.theme, config.telemetry, config.icons.mode);
 			if (message) ctx.ui.notify(message, "info");
 		}
-		// Only clear the peek label when this task is still the current one.
-		const settleEpoch = peekTaskEpoch;
-		if (peekSettleTimer) clearTimeout(peekSettleTimer);
-		peekSettleTimer = setTimeout(() => {
-			peekSettleTimer = undefined;
-			if (!sessionLifecycle.isCurrent() || peekTaskEpoch !== settleEpoch) return;
-			resetPeek();
-		}, 300);
+		if (sessionLifecycle.isCurrent()) resetPeek();
 	});
 
 	pi.on("model_select", (_event, ctx) => {

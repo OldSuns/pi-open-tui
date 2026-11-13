@@ -82,6 +82,54 @@ function hiddenThinkingTextWidth(width: number, outputPad: unknown): number {
 	return Math.max(1, width - paddingX * 2);
 }
 
+/** Keep a message's final update until its actual render width is available. */
+export function trackHiddenThinkingLabel(
+	target: Pick<HiddenThinkingLabelComponent, "render" | "setHiddenThinkingLabel">,
+	onRelease?: () => void,
+) {
+	const originalRender = target.render;
+	let build: ((width: number) => string) | undefined;
+	let lastBuild: ((width: number) => string) | undefined;
+	let lastWidth: number | undefined;
+	let finishing = false;
+	let active = true;
+	const restore = (): void => {
+		active = false;
+		// Leave later wrappers intact; they can still delegate to this passthrough.
+		if (target.render === patched) target.render = originalRender;
+		onRelease?.();
+	};
+	const patched = function (this: typeof target, width: number): string[] {
+		if (active) {
+			const textWidth = hiddenThinkingTextWidth(width, Reflect.get(this, "outputPad"));
+			if (build && (build !== lastBuild || textWidth !== lastWidth)) {
+				this.setHiddenThinkingLabel(build(textWidth));
+				lastBuild = build;
+			}
+			lastWidth = textWidth;
+			if (finishing) restore();
+		}
+		return originalRender.call(this, width);
+	};
+	target.render = patched;
+	return {
+		update(next: (width: number) => string): void {
+			build = next;
+		},
+		release(preserve = false): void {
+			if (!active) return;
+			if (preserve && build) {
+				if (lastWidth === undefined) {
+					finishing = true;
+					return;
+				}
+				target.setHiddenThinkingLabel(build(lastWidth));
+			}
+			restore();
+		},
+	};
+}
+
 // pi-tui's renderFakeCursor() markers (FAKE_CURSOR_START/END, not exported). Truncation can drop the end marker.
 const FAKE_CURSOR = /\x1b_pi:fc\x07([\s\S]*?)(?:\x1b_pi:\/fc\x07|$)/g;
 
@@ -448,43 +496,18 @@ export function installEditor(
 	let enabled = true;
 	let previousHardwareCursor: boolean | undefined;
 	let currentCursorStyle = cursorStyle;
-	let hiddenThinkingTarget: HiddenThinkingLabelComponent | undefined;
-	let restoreHiddenThinkingRender: (() => void) | undefined;
-	let buildHiddenThinkingLabel: ((width: number) => string) | undefined;
+	let hiddenThinkingLabel: ReturnType<typeof trackHiddenThinkingLabel> | undefined;
+	const pendingHiddenThinkingLabels = new Set<ReturnType<typeof trackHiddenThinkingLabel>>();
 	const getActiveTui = (): TUI => {
 		if (!activeTui) throw new Error("Open TUI editor is not mounted");
 		return activeTui;
 	};
-	const resetHiddenThinkingTarget = (): void => {
-		restoreHiddenThinkingRender?.();
-		restoreHiddenThinkingRender = undefined;
-		hiddenThinkingTarget = undefined;
-		buildHiddenThinkingLabel = undefined;
-	};
-	// Build the label at the width Pi actually renders the message with; layout
-	// extensions (e.g. pi-sidebar) can make it much narrower than the terminal.
-	const patchHiddenThinkingRender = (target: HiddenThinkingLabelComponent): void => {
-		const originalRender = target.render;
-		let lastWidth: number | undefined;
-		let lastBuild: ((width: number) => string) | undefined;
-		let active = true;
-		const patched = function (this: HiddenThinkingLabelComponent, width: number): string[] {
-			if (!active) return originalRender.call(this, width);
-			const build = buildHiddenThinkingLabel;
-			const textWidth = hiddenThinkingTextWidth(width, this.outputPad);
-			if (build && (build !== lastBuild || textWidth !== lastWidth)) {
-				lastBuild = build;
-				lastWidth = textWidth;
-				this.setHiddenThinkingLabel(build(textWidth));
-			}
-			return originalRender.call(this, width);
-		};
-		target.render = patched;
-		restoreHiddenThinkingRender = () => {
-			active = false;
-			// Another copy of this extension may have wrapped us; unwinding then would drop its wrapper.
-			if (target.render === patched) target.render = originalRender;
-		};
+	const resetHiddenThinkingTarget = (preserve = true): void => {
+		hiddenThinkingLabel?.release(preserve);
+		hiddenThinkingLabel = undefined;
+		if (!preserve) {
+			for (const label of pendingHiddenThinkingLabels) label.release();
+		}
 	};
 	// Only the fullscreen renderer clears and rewrites the whole screen on a forced render.
 	const restoreStderr = repaintAfterStreamWrites(() => {
@@ -602,11 +625,13 @@ export function installEditor(
 		/** `build` receives the hidden-thinking text width and runs again whenever that width changes. */
 		setLatestHiddenThinkingLabel(build: (width: number) => string): void {
 			const tui = getActiveTui();
-			if (!hiddenThinkingTarget) {
-				hiddenThinkingTarget = findLatestHiddenThinkingLabel(tui);
-				patchHiddenThinkingRender(hiddenThinkingTarget);
+			if (!hiddenThinkingLabel) {
+				const target = findLatestHiddenThinkingLabel(tui);
+				const label = trackHiddenThinkingLabel(target, () => pendingHiddenThinkingLabels.delete(label));
+				pendingHiddenThinkingLabels.add(label);
+				hiddenThinkingLabel = label;
 			}
-			buildHiddenThinkingLabel = build;
+			hiddenThinkingLabel.update(build);
 			tui.requestRender();
 		},
 		resetHiddenThinkingLabelTarget: resetHiddenThinkingTarget,
@@ -621,7 +646,7 @@ export function installEditor(
 			restoreEditorMount?.();
 			releaseEditor();
 			restoreStderr();
-			resetHiddenThinkingTarget();
+			resetHiddenThinkingTarget(false);
 			// 只恢复自己的代理；后来捕获的代理会在停用后透传到原接口。
 			if (ui.setEditorComponent === setEditor) ui.setEditorComponent = originalSetEditor;
 			if (ui.getEditorComponent === getEditor) ui.getEditorComponent = originalGetEditor;

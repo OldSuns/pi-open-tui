@@ -4,7 +4,7 @@
 
 ### Fixed
 
-- Keep the check mark on a finished message instead of resetting every assistant message to Pi's native `Thinking...` label when the next message starts.
+- Keep the check mark on finished messages, including when the next message starts before the final label renders (#96).
 
 ## [0.4.5] - 2026-11-11
 
