@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+
+- Keep the check mark on a finished message instead of resetting every assistant message to Pi's native `Thinking...` label when the next message starts.
+
 ## [0.4.5] - 2026-11-11
 
 ### Fixed

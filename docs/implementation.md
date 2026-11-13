@@ -55,7 +55,7 @@ Live TPS uses streamed text, thinking, and tool-call arguments over a trailing t
 
 [peek.ts](../extensions/open-tui/peek.ts) tracks idle, thinking, and done phases. It extracts the latest nonempty reasoning lines, normalizes whitespace, and strips terminal control sequences before display. The label is built using the width of the actual message component, so a layout extension can make it narrower than the terminal.
 
-In two-line mode, a long latest logical line can occupy both rows; otherwise the previous and latest lines share the same indentation. Clipping retains the newest tail and respects visible width and grapheme boundaries. Answer text or assistant-message completion freezes the label at a check mark. After settlement, the native label returns after a short delay guarded against clearing a newer task's label. Pi's own Hide thinking toggle controls visibility.
+In two-line mode, a long latest logical line can occupy both rows; otherwise the previous and latest lines share the same indentation. Clipping retains the newest tail and respects visible width and grapheme boundaries. Answer text or assistant-message completion freezes the label at a check mark. A finished message keeps that check mark while later messages take over the peek, because Pi applies the hidden-thinking label to every assistant message at once and a global reset would also wipe finished labels. The native label returns only when the peek is disabled or the extension is uninstalled. Pi's own Hide thinking toggle controls visibility.
 
 ### Tool rendering
 
@@ -150,7 +150,7 @@ Agent 运行期间，工作计时器每 250 毫秒请求一次重绘。Git 和�
 
 [peek.ts](../extensions/open-tui/peek.ts) 跟踪空闲、思考中和完成三种状态，提取最近的非空推理行、规范空白，并在显示前去除终端控制序列。标签按实际消息组件宽度生成，因此其他布局扩展缩窄消息区域时也会适配。
 
-双行模式中，如果最新逻辑行很长，会占用两行；否则上一行和最新一行保持相同缩进。截断保留最新末尾，并考虑可见宽度和完整字素边界。正文开始或助手消息结束后，标签变为对勾。任务结束后稍作延迟恢复原生标签，并防止旧任务的清理误清新任务标签。可见性仍由 Pi 自身的 Hide thinking 控制。
+双行模式中，如果最新逻辑行很长，会占用两行；否则上一行和最新一行保持相同缩进。截断保留最新末尾，并考虑可见宽度和完整字素边界。正文开始或助手消息结束后，标签变为对勾。由于 Pi 会把隐藏思考标签同时应用到所有助手消息，全局重置会连带清除已完成消息的标签，因此已完成消息会保留对勾，后续消息再接管预览。只有关闭思考预览或卸载扩展时才恢复原生标签。可见性仍由 Pi 自身的 Hide thinking 控制。
 
 ### 工具渲染
 

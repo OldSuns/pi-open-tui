@@ -80,11 +80,18 @@ export default function (pi: ExtensionAPI) {
 		peekLabelActive = true;
 	};
 
-	const clearPeekLabel = (ctx?: ExtensionContext): void => {
+	/**
+	 * Hand Pi's hidden-thinking label back to Pi.
+	 *
+	 * Pi applies the label to every assistant message at once, so a global reset would also
+	 * wipe the frozen "done" label of messages that already finished. A finished message
+	 * keeps the label it was rendered with, and the native label returns only when this
+	 * extension stops using the label.
+	 */
+	const restoreNativePeekLabel = (ctx?: ExtensionContext): void => {
 		if (!peekLabelActive) return;
 		const target = ctx ?? lastCtx;
 		if (!target || !isTuiContext(target)) return;
-		// The global reset is safe here: every completed message returns to Pi's native label.
 		target.ui.setHiddenThinkingLabel();
 		peekLabelActive = false;
 	};
@@ -160,7 +167,7 @@ export default function (pi: ExtensionAPI) {
 			editor = undefined;
 			requestFooterRender = undefined;
 			resetPeek();
-			clearPeekLabel(ctx);
+			restoreNativePeekLabel(ctx);
 			active = false;
 		}
 	};
@@ -233,7 +240,6 @@ export default function (pi: ExtensionAPI) {
 		ensureConfigExists();
 		config = loadConfig((msg, level) => ctx.ui.notify(msg, level));
 		configLoaded = true;
-		clearPeekLabel(ctx);
 
 		applyUi(ctx);
 
@@ -280,13 +286,12 @@ export default function (pi: ExtensionAPI) {
 		if (!sessionLifecycle.isCurrent() || ctx.isIdle()) return;
 		const role = event.message?.role;
 		if (role === "user") {
-			// Restore Pi's native label until real thinking arrives. The task epoch is
-			// advanced by agent_start so custom/no-user tasks are covered too.
+			// Stop updating the previous message; it keeps the label it was rendered with.
+			// The task epoch is advanced by agent_start so custom/no-user tasks are covered too.
 			resetPeek();
-			clearPeekLabel(ctx);
 		} else if (role === "assistant") {
+			// The new assistant message takes over the peek once its thinking arrives.
 			resetPeek();
-			clearPeekLabel(ctx);
 		}
 	});
 
@@ -332,7 +337,6 @@ export default function (pi: ExtensionAPI) {
 			peekSettleTimer = undefined;
 			if (!sessionLifecycle.isCurrent() || peekTaskEpoch !== settleEpoch) return;
 			resetPeek();
-			clearPeekLabel(ctx);
 		}, 300);
 	});
 
@@ -402,7 +406,7 @@ export default function (pi: ExtensionAPI) {
 			config = newConfig;
 			if (newConfig.thinkingPeek.lines === 0 || !newConfig.enabled) {
 				resetPeek();
-				clearPeekLabel(lastCtx);
+				restoreNativePeekLabel(lastCtx);
 			} else if (thinkingPeekLinesChanged && peekLabelActive) {
 				setPeekLabel(lastCtx);
 			}
