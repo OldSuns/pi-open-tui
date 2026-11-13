@@ -5,7 +5,8 @@ import { installEditor } from "./editor.ts";
 import { installFooter } from "./footer.ts";
 import { createFooterSegments } from "./footer-segments.ts";
 import { installHeader } from "./header.ts";
-import { emptyGitStatus, readGitStatus } from "./git.ts";
+import { emptyGitStatus } from "./git.ts";
+import { GitStatusRefresher } from "./git-refresh.ts";
 import { readRuntimeInfo } from "./runtime.ts";
 import { SessionLifecycle } from "./session-lifecycle.ts";
 import { registerSettingsCommand } from "./settings-command.ts";
@@ -54,6 +55,11 @@ export default function (pi: ExtensionAPI) {
 	let copyButtons: ReturnType<typeof installCopyButtons> | undefined;
 	let pendingUiChange: PendingUiChange | undefined;
 	const footerSegments = createFooterSegments(pi.events, () => requestFooterRender?.());
+	const gitRefresher = new GitStatusRefresher((git) => {
+		if (!sessionLifecycle.isCurrent() || !active || !config.enabled) return;
+		state.git = git;
+		requestFooterRender?.();
+	});
 
 	// thinking-peek state (rendered by Pi inside its hidden-thinking block)
 	const peek: PeekState = createPeekState();
@@ -120,7 +126,7 @@ export default function (pi: ExtensionAPI) {
 						else if (active && sessionLifecycle.isCurrent()) footerSegments.activate();
 					},
 					scheduleGitRefresh: () => {
-						void scheduleGitRefresh(ctx);
+						scheduleGitRefresh(ctx, true);
 					},
 					getLiveTps: () => turnTelemetry.getLiveTps(),
 					getExtensionSegments: footerSegments.getSegments,
@@ -149,6 +155,7 @@ export default function (pi: ExtensionAPI) {
 
 	const uninstallUi = (ctx: ExtensionContext) => {
 		if (!isTuiContext(ctx)) return;
+		gitRefresher.reset();
 		if (active) {
 			cleanupHeader?.();
 			cleanupFooter?.();
@@ -165,25 +172,21 @@ export default function (pi: ExtensionAPI) {
 		}
 	};
 
-	const scheduleGitRefresh = async (ctx: ExtensionContext) => {
-		if (!sessionLifecycle.isCurrent()) return;
+	const scheduleGitRefresh = (ctx: ExtensionContext, immediate = false) => {
+		if (!sessionLifecycle.isCurrent() || !isTuiContext(ctx) || !active || !config.enabled) return;
 		const segs = config.footerSegments;
 		// gitCommit only appends a tag to the gitBranch segment, so it never needs git on its own.
 		if (!segs.gitBranch && !segs.gitStatus) {
+			gitRefresher.reset();
 			state.git = emptyGitStatus();
 			requestFooterRender?.();
 			return;
 		}
-		const generation = sessionLifecycle.currentGeneration();
-		const cwd = ctx.cwd;
-		const git = await readGitStatus(cwd, {
+		gitRefresher.request(ctx.cwd, {
 			readCommit: segs.gitBranch,
 			readTag: segs.gitBranch && segs.gitCommit,
 			readCounts: segs.gitStatus,
-		});
-		if (!sessionLifecycle.isCurrent(generation)) return;
-		state.git = git;
-		requestFooterRender?.();
+		}, immediate);
 	};
 
 	const refreshRuntime = async (ctx: ExtensionContext) => {
@@ -199,7 +202,7 @@ export default function (pi: ExtensionAPI) {
 	const refreshInteractiveState = (ctx: ExtensionContext, project = false) => {
 		if (!sessionLifecycle.isCurrent() || !ctx.hasUI) return;
 		if (project) {
-			void scheduleGitRefresh(ctx);
+			scheduleGitRefresh(ctx, true);
 			void refreshRuntime(ctx);
 		}
 		requestFooterRender?.();
@@ -225,6 +228,7 @@ export default function (pi: ExtensionAPI) {
 
 	pi.on("session_start", async (_event, ctx) => {
 		sessionLifecycle.start();
+		gitRefresher.reset();
 		lastCtx = ctx;
 		state.workingSince = undefined;
 		state.lastDoneIn = undefined;
@@ -242,6 +246,7 @@ export default function (pi: ExtensionAPI) {
 
 	pi.on("session_shutdown", async (_event, ctx) => {
 		sessionLifecycle.shutdown();
+		gitRefresher.reset();
 		stopWorkingTimer();
 		footerSegments.deactivate();
 		if (active) {
@@ -264,6 +269,7 @@ export default function (pi: ExtensionAPI) {
 	pi.on("agent_end", (_event, _ctx) => {
 		if (!sessionLifecycle.isCurrent()) return;
 		stopWorkingTimer();
+		gitRefresher.flush();
 		if (state.workingSince !== undefined) {
 			state.lastDoneIn = Date.now() - state.workingSince;
 			state.workingSince = undefined;
@@ -357,6 +363,7 @@ export default function (pi: ExtensionAPI) {
 	});
 
 	pi.on("tool_execution_end", (_event, ctx) => {
+		scheduleGitRefresh(ctx);
 		refreshInteractiveState(ctx);
 	});
 
@@ -418,8 +425,9 @@ export default function (pi: ExtensionAPI) {
 				pendingUiChange = getPendingUiChange(newConfig.enabled, active);
 			}
 			const gitNeeded = newConfig.footerSegments.gitBranch || newConfig.footerSegments.gitStatus;
-			if (lastCtx && gitNeeded) {
-				void scheduleGitRefresh(lastCtx);
+			gitRefresher.reset();
+			if (lastCtx && newConfig.enabled && gitNeeded) {
+				scheduleGitRefresh(lastCtx, true);
 			} else {
 				state.git = emptyGitStatus();
 			}
@@ -433,6 +441,7 @@ export default function (pi: ExtensionAPI) {
 				uninstallUi(lastCtx);
 			} else {
 				applyUi(lastCtx);
+				scheduleGitRefresh(lastCtx, true);
 			}
 		},
 	});
