@@ -288,10 +288,11 @@ try {
 	assert.equal(draftEditor.getExpandedText(), fullDraft);
 	const draftButton = () => {
 		native.doRender();
-		const lines = tui.getScreenLines();
-		const row = lines.findIndex((line) => stripAnsi(line).includes("[Copy]"));
-		assert.ok(row >= 0);
-		return { x: column(lines, row), y: row };
+		// Transient copy flashes can cover the editor's right border in the composited screen.
+		const editorLines = draftEditor.render(terminal.columns);
+		const editorRow = editorLines.findIndex((line) => stripAnsi(line).includes("[Copy]"));
+		assert.ok(editorRow >= 0);
+		return { x: column(editorLines, editorRow), y: layoutSpacer + editorRow };
 	};
 	// Moving the parent layout invalidates the old screen position even though the local region is unchanged.
 	let point = draftButton();
