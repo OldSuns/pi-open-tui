@@ -142,6 +142,7 @@ export default function (pi: ExtensionAPI) {
 					enabled: () => config.inlineFooter,
 					render: footer.renderInline,
 				},
+				() => copyButtons?.editor,
 			);
 			copyButtons = installCopyButtons({
 				getTui: editor.getTui,

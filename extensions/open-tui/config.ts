@@ -57,7 +57,7 @@ export interface OpenTuiConfig {
 	/** Override Pi's header with the open-tui header. When false, the header slot is left to Pi or another extension. */
 	header: boolean;
 	inlineFooter: boolean;
-	/** Clickable `Copy` labels on code blocks and user messages (fullscreen mode only). */
+	/** Clickable `Copy` labels on code blocks, user messages, and nonempty editor drafts (fullscreen mode only). */
 	copyButtons: boolean;
 	settingsLanguage: SettingsLanguage;
 	cursorStyle: CursorStyle;

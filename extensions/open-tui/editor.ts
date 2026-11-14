@@ -4,8 +4,9 @@ import {
 	type ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 import type { Component, Container, EditorComponent, TUI } from "@earendil-works/pi-tui";
-import { CURSOR_MARKER, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import { compositeTuiLine, CURSOR_MARKER, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import type { CursorStyle } from "./config.ts";
+import { handleCopyMouse, type CopyRegion, type EditorCopySupport } from "./copy-buttons.ts";
 import { findBottomBorderIndex, isEditorBorderLine, stripAnsi } from "./utils.ts";
 
 function fillLine(content: string, width: number): string {
@@ -100,12 +101,18 @@ function configureCursor(tui: TUI, cursorStyle: CursorStyle): void {
 	if (sequence) tui.terminal.write(sequence);
 }
 
+interface BorderGap {
+	col: number;
+	width: number;
+}
+
 function roundedBorder(
 	width: number,
 	kind: "top" | "bottom",
 	paint: (s: string) => string,
 	sourceLine?: string,
 	indicator?: WorkingStatusIndicator,
+	gaps?: BorderGap[],
 ): string {
 	if (width < 2) return paint(truncateToWidth(kind === "top" ? "╭╮" : "╰╯", width, ""));
 	const corners = kind === "top" ? (["╭", "╮"] as const) : (["╰", "╯"] as const);
@@ -129,14 +136,20 @@ function roundedBorder(
 			}
 			if (canFitOverflow()) {
 				const leftBlockWidth = 3 + statusWidth + 1;
+				gaps?.push(
+					{ col: 1 + leftBlockWidth, width: overflowStart - leftBlockWidth },
+					{ col: 1 + overflowStart + overflowLabelWidth, width: contentWidth - overflowStart - overflowLabelWidth },
+				);
 				return `${paint(`${corners[0]}── `)}${status}${paint(` ${"─".repeat(overflowStart - leftBlockWidth)}${overflowLabel}${"─".repeat(contentWidth - overflowStart - overflowLabelWidth)}${corners[1]}`)}`;
 			}
 			if (contentWidth >= statusWidth + 5) {
+				gaps?.push({ col: 1 + statusWidth + 4, width: contentWidth - statusWidth - 4 });
 				return `${paint(`${corners[0]}── `)}${status}${paint(` ${"─".repeat(contentWidth - statusWidth - 4)}${corners[1]}`)}`;
 			}
 			status = indicator.renderSpinnerInBorder(contentWidth);
 			statusWidth = visibleWidth(status);
 			const prefixWidth = Math.min(3, Math.max(0, contentWidth - statusWidth));
+			gaps?.push({ col: 1 + prefixWidth + statusWidth, width: Math.max(0, contentWidth - prefixWidth - statusWidth) });
 			return `${paint(`${corners[0]}${"─".repeat(prefixWidth)}`)}${status}${paint(`${"─".repeat(Math.max(0, contentWidth - prefixWidth - statusWidth))}${corners[1]}`)}`;
 		}
 	}
@@ -147,10 +160,12 @@ function roundedBorder(
 		if (scrollMatch) {
 			const label = `─── ${scrollMatch[1]} `;
 			const fill = Math.max(0, width - 2 - visibleWidth(label));
+			gaps?.push({ col: 1 + visibleWidth(label), width: fill });
 			return paint(`${corners[0]}${label}${"─".repeat(fill)}${corners[1]}`);
 		}
 	}
 
+	gaps?.push({ col: 1, width: width - 2 });
 	return paint(`${corners[0]}${"─".repeat(Math.max(0, width - 2))}${corners[1]}`);
 }
 
@@ -167,6 +182,7 @@ function inlineBorder(
 	renderLine: (width: number) => InlineFooterLine | undefined,
 	sourceLine?: string,
 	indicator?: WorkingStatusIndicator,
+	gaps?: BorderGap[],
 ): string {
 	if (width < 2) return paint(truncateToWidth(kind === "top" ? "╭╮" : "╰╯", width, ""));
 
@@ -188,22 +204,24 @@ function inlineBorder(
 
 	const lineBudget = Math.max(0, contentWidth - visibleWidth(left) - visibleWidth(right) - 6);
 	const line = renderLine(lineBudget);
-	if (!line) return roundedBorder(width, kind, paint, sourceLine, indicator);
+	if (!line) return roundedBorder(width, kind, paint, sourceLine, indicator, gaps);
 	const leftContent = trimTrailingSpaces(line.left);
 	const rightContent = trimTrailingSpaces(line.right);
 	if (visibleWidth(leftContent) === 0 && visibleWidth(rightContent) === 0) {
-		return roundedBorder(width, kind, paint, sourceLine, indicator);
+		return roundedBorder(width, kind, paint, sourceLine, indicator, gaps);
 	}
 
 	const leftCell = leftContent ? ` ${leftContent} ` : "";
 	const rightCell = rightContent ? ` ${rightContent} ` : "";
 	const fill = Math.max(1, contentWidth - visibleWidth(left) - visibleWidth(leftCell) - visibleWidth(rightCell) - visibleWidth(right) - 1);
+	gaps?.push({ col: 1 + visibleWidth(left) + visibleWidth(leftCell), width: fill });
 	return `${paint(corners[0])}${left}${leftCell}${paint("─".repeat(fill))}${rightCell}${right}${paint("─")}${paint(corners[1])}`;
 }
 
 interface OpenTuiEditorOptions {
 	cursorStyle?: CursorStyle;
 	inlineFooter?: InlineFooterRenderer;
+	copyButtons?: () => EditorCopySupport | undefined;
 }
 
 /** Capabilities this decorator adds to the editor instance it wraps. */
@@ -232,6 +250,8 @@ interface EditorDecoration {
 	cursorStyle: CursorStyle;
 	previewHardwareCursor: boolean;
 	inlineFooter: InlineFooterRenderer | undefined;
+	copySupport: EditorCopySupport | undefined;
+	copyRegion: CopyRegion | undefined;
 	indicator: WorkingStatusIndicator | undefined;
 	baseRender: (width: number) => string[];
 	framedWidth: number | undefined;
@@ -286,6 +306,7 @@ function renderWithCursor(decoration: EditorDecoration, width: number): string[]
 
 function renderFrame(decoration: EditorDecoration, width: number): string[] {
 	decoration.framedWidth = undefined;
+	decoration.copyRegion = undefined;
 	if (width < EDITOR_FRAME_HORIZONTAL_CHROME) return renderWithCursor(decoration, width);
 
 	const innerWidth = Math.max(0, width - EDITOR_FRAME_HORIZONTAL_CHROME);
@@ -298,12 +319,14 @@ function renderFrame(decoration: EditorDecoration, width: number): string[] {
 	const rail = borderPaint("│");
 
 	const result: string[] = [];
+	const topGaps: BorderGap[] = [];
+	const bottomGaps: BorderGap[] = [];
 	const inlineFooter = decoration.inlineFooter?.enabled() === true;
 	const renderInlineLine = (kind: "top" | "bottom", budget: number): InlineFooterLine | undefined =>
 		decoration.inlineFooter?.render(budget)?.[kind];
 	result.push(inlineFooter
-		? inlineBorder(width, "top", borderPaint, (budget) => renderInlineLine("top", budget), baseLines[0], decoration.indicator)
-		: roundedBorder(width, "top", borderPaint, baseLines[0], decoration.indicator));
+		? inlineBorder(width, "top", borderPaint, (budget) => renderInlineLine("top", budget), baseLines[0], decoration.indicator, topGaps)
+		: roundedBorder(width, "top", borderPaint, baseLines[0], decoration.indicator, topGaps));
 
 	for (let i = 1; i < bottomIdx; i++) {
 		const line = baseLines[i] ?? "";
@@ -311,13 +334,26 @@ function renderFrame(decoration: EditorDecoration, width: number): string[] {
 	}
 
 	result.push(inlineFooter
-		? inlineBorder(width, "bottom", borderPaint, (budget) => renderInlineLine("bottom", budget), baseLines[bottomIdx])
-		: roundedBorder(width, "bottom", borderPaint, baseLines[bottomIdx]));
+		? inlineBorder(width, "bottom", borderPaint, (budget) => renderInlineLine("bottom", budget), baseLines[bottomIdx], undefined, bottomGaps)
+		: roundedBorder(width, "bottom", borderPaint, baseLines[bottomIdx], undefined, bottomGaps));
 
 	for (let i = bottomIdx + 1; i < baseLines.length; i++) {
 		result.push(baseLines[i]!);
 	}
 
+	const label = decoration.copySupport?.label();
+	const text = label === undefined ? undefined : decoration.editor.getExpandedText?.();
+	if (label !== undefined && text !== undefined && text.length > 0) {
+		const labelWidth = visibleWidth(label);
+		for (const [row, gaps] of [[bottomIdx, bottomGaps], [0, topGaps]] as const) {
+			const gap = gaps.slice().reverse().find((candidate) => candidate.width >= labelWidth + 4);
+			if (!gap) continue;
+			const col = gap.col + gap.width - labelWidth - 2;
+			result[row] = compositeTuiLine(result[row]!, ` ${label} `, col - 1, labelWidth + 2, width);
+			decoration.copyRegion = { row, col, width: labelWidth, text };
+			break;
+		}
+	}
 	decoration.framedWidth = width;
 	return result.map((line) => truncateToWidth(line, width, ""));
 }
@@ -348,6 +384,8 @@ export function decorateOpenTuiEditor<T extends FrameableEditor>(
 		cursorStyle: options.cursorStyle ?? "block",
 		previewHardwareCursor: false,
 		inlineFooter: options.inlineFooter,
+		copySupport: undefined,
+		copyRegion: undefined,
 		indicator: undefined,
 		baseRender: editor.render.bind(editor),
 		framedWidth: undefined,
@@ -355,6 +393,8 @@ export function decorateOpenTuiEditor<T extends FrameableEditor>(
 		cleanup() {
 			if (!decoration.active) return;
 			decoration.active = false;
+			decoration.copySupport?.updateRegion(editor, undefined);
+			decoration.copyRegion = undefined;
 			for (const undo of restore) undo();
 			baseSetPaddingX(padding);
 			DECORATIONS.delete(editor);
@@ -385,14 +425,48 @@ export function decorateOpenTuiEditor<T extends FrameableEditor>(
 		if (decoration.active) applyCursorStyle(decoration, style, hardware);
 		else baseSetCursorStyle?.(style, hardware);
 	});
-	patch("render", (width) => decoration.active
-		? renderFrame(decoration, width)
-		: decoration.baseRender(width));
-	patch("handleMouse", (event) => baseHandleMouse(
-		decoration.active && event.width === decoration.framedWidth
+	patch("render", (width) => {
+		if (!decoration.active) return decoration.baseRender(width);
+		const support = options.copyButtons?.();
+		if (decoration.copySupport !== support) decoration.copySupport?.updateRegion(editor, undefined);
+		decoration.copySupport = support;
+		try {
+			return renderFrame(decoration, width);
+		} finally {
+			support?.updateRegion(editor, decoration.copyRegion);
+		}
+	});
+	patch("handleMouse", (event) => {
+		const support = decoration.copySupport;
+		const region = decoration.copyRegion;
+		if (decoration.active && support && support === options.copyButtons?.()
+			&& support.label() !== undefined && region && event.width === decoration.framedWidth) {
+			const { columns, rows } = tui.terminal;
+			const handled = handleCopyMouse(editor, [region], event, (text, released) => {
+				const current = decoration.copyRegion;
+				const expanded = editor.getExpandedText?.();
+				if (decoration.active && support === options.copyButtons?.() && support.label() !== undefined
+					&& tui.terminal.columns === columns && tui.terminal.rows === rows
+					&& released.screenX - released.x === event.screenX - event.x
+					&& released.screenY - released.y === event.screenY - event.y
+					&& decoration.framedWidth === event.width
+					&& current?.row === region.row && current.col === region.col && current.width === region.width
+					&& current.text === text && expanded === text) support.copy(expanded);
+			}, true);
+			if (handled) return handled;
+			if (event.button === "left" && !event.shift && !event.alt && !event.ctrl
+				&& event.y === region.row && event.x >= region.col && event.x < region.col + region.width
+				&& (event.type === "press" || event.type === "click")) {
+				// A handled press would leave Pi's mouse target held when our raw hook consumes the release.
+				return event.type === "click" ? { handled: true, render: false } : undefined;
+			}
+		} else {
+			support?.updateRegion(editor, undefined);
+		}
+		return baseHandleMouse(decoration.active && event.width === decoration.framedWidth
 			? { ...event, x: event.x - EDITOR_FRAME_LEFT_INSET, width: event.width - EDITOR_FRAME_HORIZONTAL_CHROME }
-			: event,
-	));
+			: event);
+	});
 	patch("setPaddingX", (nextPadding) => {
 		padding = nextPadding;
 		baseSetPaddingX(decoration.active ? 0 : nextPadding);
@@ -442,6 +516,7 @@ export function installEditor(
 	ctx: ExtensionContext,
 	cursorStyle: CursorStyle = "block",
 	inlineFooter?: InlineFooterRenderer,
+	copyButtons?: () => EditorCopySupport | undefined,
 ) {
 	let activeTui: TUI | undefined;
 	let activeEditor: (FrameableEditor & OpenTuiEditorDecoration) | undefined;
@@ -525,7 +600,7 @@ export function installEditor(
 			// Capabilities alone do not guarantee that the first and bottom rows are replaceable borders.
 			if (bottom > 1 && isEditorBorderLine(lines[0] ?? "") && isEditorBorderLine(lines[bottom] ?? "")) {
 				previousHardwareCursor = tui.getShowHardwareCursor?.();
-				activeEditor = decorateOpenTuiEditor(editor, tui, { cursorStyle: currentCursorStyle, inlineFooter });
+				activeEditor = decorateOpenTuiEditor(editor, tui, { cursorStyle: currentCursorStyle, inlineFooter, copyButtons });
 			}
 		}
 		mountedRender = editor.render;

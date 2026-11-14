@@ -32,12 +32,19 @@ export interface CopyRegion {
 	text: string;
 }
 
+export interface EditorCopySupport {
+	label(): string | undefined;
+	copy(text: string): void;
+	updateRegion(owner: object, region: CopyRegion | undefined): void;
+}
+
 interface Press {
 	owner: object;
 	region: CopyRegion;
 	x: number;
 	y: number;
-	onCopy: (text: string) => void;
+	onCopy: (text: string, event: TuiMouseEvent) => void;
+	releaseInComponent: boolean;
 }
 
 interface RawMouseEvent {
@@ -51,6 +58,8 @@ interface AltScreenInternals {
 	children: TUI["children"];
 	handleMouseEvent(event: RawMouseEvent): void;
 	createMouseEvent(type: TuiMouseEvent["type"], button: number, x: number, y: number): TuiMouseEvent;
+	dispatchMouseToLayout(event: TuiMouseEvent): TuiMouseEventResult | undefined;
+	hasOverlay(): boolean;
 	resetTextSelection(): void;
 	requestRender(): void;
 }
@@ -138,13 +147,14 @@ export function handleCopyMouse(
 	owner: object,
 	regions: readonly CopyRegion[],
 	event: TuiMouseEvent,
-	onCopy: (text: string) => void,
+	onCopy: (text: string, event: TuiMouseEvent) => void,
+	releaseInComponent = false,
 ): TuiMouseEventResult | undefined {
 	if (event.type === "press") {
 		if (press?.owner === owner) press = undefined;
 		if (event.button !== "left" || event.shift || event.alt || event.ctrl) return undefined;
 		const region = regions.find((r) => event.y === r.row && event.x >= r.col && event.x < r.col + r.width);
-		if (region) press = { owner, region, x: event.screenX, y: event.screenY, onCopy };
+		if (region) press = { owner, region, x: event.screenX, y: event.screenY, onCopy, releaseInComponent };
 		return undefined;
 	}
 	if (press?.owner !== owner || (event.type !== "drag" && event.type !== "release")) return undefined;
@@ -157,7 +167,7 @@ export function handleCopyMouse(
 	}
 	if (event.type === "drag") return undefined;
 	press = undefined;
-	pending.onCopy(pending.region.text);
+	pending.onCopy(pending.region.text, event);
 	return { handled: true, render: false };
 }
 
@@ -239,7 +249,7 @@ export function installCopyButtons(options: {
 	getTui: () => TUI | undefined;
 	getTheme: () => Theme;
 	isEnabled: () => boolean;
-}): { cleanup: () => void; refresh: () => void } {
+}): { cleanup: () => void; refresh: () => void; editor?: EditorCopySupport } {
 	const markdownProto = Markdown.prototype as unknown as MarkdownInternals & Record<symbol, unknown>;
 	const userProto = UserMessageComponent.prototype as unknown as UserMessageInternals;
 	const altScreenProto = TuiAltScreen.prototype as unknown as AltScreenInternals;
@@ -289,6 +299,17 @@ export function installCopyButtons(options: {
 			}
 			const motion = (raw.button & 32) !== 0;
 			if (!raw.release && !motion) press = undefined;
+			if (press?.releaseInComponent && raw.release) {
+				// Parent layout changes can move an editor without changing its local Copy region.
+				try {
+					if (!this.hasOverlay()) this.dispatchMouseToLayout(this.createMouseEvent("release", raw.button, raw.x, raw.y));
+				} finally {
+					press = undefined;
+					this.resetTextSelection();
+					this.requestRender();
+				}
+				return;
+			}
 			// Leave press/drag to Pi's selection; intercept only a qualifying release before copy-on-select runs.
 			if (press && (raw.release || motion)) {
 				const event = this.createMouseEvent(raw.release ? "release" : "drag", raw.button, raw.x, raw.y);
@@ -468,5 +489,10 @@ export function installCopyButtons(options: {
 			}
 		},
 		refresh,
+		editor: typeof altScreenProto.dispatchMouseToLayout === "function" ? {
+			label: () => active() ? label() : undefined,
+			copy: (text) => { if (active()) copy(text); },
+			updateRegion: (owner, region) => cancelStalePress(owner, active() && region ? [region] : []),
+		} : undefined,
 	};
 }
