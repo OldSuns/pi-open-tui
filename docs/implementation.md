@@ -94,6 +94,8 @@ Recognition checks Pi's npm source metadata, the installed npm entry path, or th
 
 Each Markdown owner tracks block descriptors and occurrence-specific copy regions. Marker data survives Pi's block cache and is removed before display; occurrence matching restores source tabs that Pi normalizes for rendering. A policy change, such as streaming completion, invalidates the Markdown cache so labels appear without resizing. Repeated identical blocks still copy their own source occurrence.
 
+The framed editor adds a label for nonempty drafts using its actual border-fill spans, preferring the bottom border and falling back to the top. The label needs ten free border cells (twelve columns for a plain frame), including padding and a border cell on each side; it never overwrites or reduces footer, working-status, or scroll content. Editors without `getExpandedText()` keep their frame but have no draft Copy button. Draft snapshots and clipboard payloads use `getExpandedText()` so folded pastes are copied in full, without trimming whitespace or copying completion/ghost text. Target changes, editor replacement, cleanup, and draft/terminal-size changes before release invalidate a held click. The existing fullscreen release hook clears the temporary selection and prevents a successful Copy gesture from moving the cursor or changing focus.
+
 The user-message label occupies the bubble's last row and copies the original message. Code labels copy code without fences. Ordinary selection is passed to Pi; a qualifying left-button release on a recorded Copy press copies the text. Moving, removing, or changing a target cancels a held click, as do disabling or cleaning up the installation. Clipboard completion from a cleaned-up installation does not flash a notification.
 
 Some integrations use Pi component internals: Copy buttons check required Markdown and fullscreen mouse methods before installing; per-message thinking labels and editor mounting also inspect component structure. Other extensions that patch the same renderers can affect compatibility. Cleanup restores methods still owned by open-tui and leaves later wrappers in place.
@@ -189,6 +191,8 @@ Agent 运行期间，工作计时器每 250 毫秒请求一次重绘。Git 和�
 [copy-buttons.ts](../extensions/open-tui/copy-buttons.ts) 在全屏模式中装饰 Markdown 代码块和用户消息。代码块渲染宽度不足 8 列时保留原生围栏，8 至 15 列显示无标签边框，从 16 列起完成的代码块可显示 `[Copy]`。长行在边框内换行，上下边框替代围栏行，标签不额外占一行。思考块保留原生围栏，流式代码块只有边框。
 
 每个 Markdown 实例分别跟踪代码块描述和对应的复制区域。标记数据随 Pi 代码块缓存保留，在最终显示前移除；通过具体出现位置匹配源代码，恢复 Pi 渲染时规范化的制表符。流式结束等显示规则变化会使 Markdown 缓存失效，无需调整窗口大小即可显示标签。完全相同的重复代码块仍对应各自的源位置。
+
+已加框的编辑器会为非空草稿添加标签，按实际生成的边框填充区域定位，优先下边框，不够时尝试上边框。标签连同留白和两侧边框需要十列空余空间（纯边框总宽至少十二列），不会覆盖或挤占底栏、工作状态和滚动提示。缺少 `getExpandedText()` 的编辑器保留边框，但不显示草稿复制按钮。草稿快照与剪贴板内容均使用 `getExpandedText()`，完整复制折叠粘贴的原文，不裁剪首尾空白，也不包含补全或灰字建议。目标变化、编辑器替换、清理，以及释放前的草稿或终端尺寸变化，都会使未完成点击失效。沿用全屏释放钩子清除临时选区，成功复制不会移动光标或改变焦点。
 
 用户消息标签位于气泡末行，复制消息原文；代码标签复制不含围栏的代码。普通选择交给 Pi 处理，只有从已记录复制区域按下并满足条件的鼠标左键释放才执行复制。目标移动、消失或变化会取消尚未完成的点击，关闭按钮或清理安装也会取消。已清理安装的异步剪贴板操作结束后不再弹出提示。
 

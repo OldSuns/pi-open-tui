@@ -2,10 +2,12 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { getMarkdownTheme, initTheme, UserMessageComponent } from "@earendil-works/pi-coding-agent";
-import { Markdown, ProcessTerminal, TuiAltScreen, TuiMainScreen, visibleWidth, type TUI, type TuiMouseEvent, type TuiMouseEventResult } from "@earendil-works/pi-tui";
-import { theme } from "../../node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/theme/theme.js";
+import { CustomEditor, getMarkdownTheme, initTheme, UserMessageComponent } from "@earendil-works/pi-coding-agent";
+import { Markdown, Container, ProcessTerminal, Spacer, TuiAltScreen, TuiMainScreen, visibleWidth, type TUI, type TuiMouseEvent, type TuiMouseEventResult } from "@earendil-works/pi-tui";
+import { getEditorTheme, theme } from "../../node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/theme/theme.js";
+import { KeybindingsManager } from "../../node_modules/@earendil-works/pi-coding-agent/dist/core/keybindings.js";
 import { createInteractiveTuiReference } from "../../node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/tui-renderer.js";
+import { decorateOpenTuiEditor } from "../../extensions/open-tui/editor.ts";
 import { installCopyButtons, markCopyScope } from "../../extensions/open-tui/copy-buttons.ts";
 import { stripAnsi } from "../../extensions/open-tui/utils.ts";
 import { assertMarkdownCopy, copyMarkdown, blockA, blockB, textA, textB, nestedCode, nestedText, readMarkdownCopyState } from "./copy-test-helpers.ts";
@@ -260,12 +262,122 @@ try {
 		button: 0, x: nativeButton.col, y: nativeButton.row, release: true,
 	});
 	send(0, nativeButton.col, nativeButton.row, true);
+	// The actual editor and shared fullscreen hook must copy expanded drafts, not paste markers.
+	const draftEditor = decorateOpenTuiEditor(
+		new CustomEditor(tuiReference, getEditorTheme(), new KeybindingsManager({})),
+		tuiReference,
+		{ copyButtons: () => copy.editor },
+	);
+	const draftLayout = new Container();
+	let layoutSpacer = 0;
+	const setDraftOffset = (height: number) => {
+		layoutSpacer = height;
+		draftLayout.clear();
+		if (height > 0) draftLayout.addChild(new Spacer(height));
+		draftLayout.addChild(draftEditor);
+	};
+	setDraftOffset(0);
+	tui.setLayoutRoot(draftLayout);
+	tui.setFocus(draftEditor);
+	const pasted = Array.from({ length: 14 }, (_, index) => `  pasted 中文 ${index}  `).join("\n");
+	const fullDraft = `  before  \n${pasted}\n after  `;
+	draftEditor.setText("  before  \n");
+	draftEditor.handleInput(`\x1b[200~${pasted}\x1b[201~`);
+	draftEditor.insertTextAtCursor("\n after  ");
+	assert.match(draftEditor.getText(), /\[paste #/);
+	assert.equal(draftEditor.getExpandedText(), fullDraft);
+	const draftButton = () => {
+		native.doRender();
+		// Transient copy flashes can cover the editor's right border in the composited screen.
+		const editorLines = draftEditor.render(terminal.columns);
+		const editorRow = editorLines.findIndex((line) => stripAnsi(line).includes("[Copy]"));
+		assert.ok(editorRow >= 0);
+		return { x: column(editorLines, editorRow), y: layoutSpacer + editorRow };
+	};
+	// Moving the parent layout invalidates the old screen position even though the local region is unchanged.
+	let point = draftButton();
+	const layoutCursor = draftEditor.getCursor();
+	send(0, point.x, point.y);
+	setDraftOffset(2);
+	const movedPoint = draftButton();
+	assert.equal(movedPoint.y, point.y + 2);
+	send(0, point.x, point.y, true);
+	assert.deepEqual(draftEditor.getCursor(), layoutCursor);
+	assert.equal(tui.hasActiveSelection(), false);
+	// The moved button still works at its new screen position.
+	send(0, movedPoint.x, movedPoint.y);
+	send(0, movedPoint.x, movedPoint.y, true);
+	expectedCopies.push(fullDraft);
+
+	for (const jitter of [0, 2]) {
+		const point = draftButton();
+		const cursor = draftEditor.getCursor();
+		send(0, point.x, point.y);
+		if (jitter) send(32, point.x + jitter, point.y);
+		send(0, point.x + jitter, point.y, true);
+		expectedCopies.push(fullDraft);
+		assert.deepEqual(draftEditor.getCursor(), cursor);
+		assert.equal(draftEditor.focused, true);
+		assert.equal(tui.hasActiveSelection(), false);
+	}
+	await new Promise<void>((resolve) => setImmediate(resolve));
+	tui.renderNow();
+	assert.ok(tui.getScreenLines().some((line) => stripAnsi(line).includes("Copied!")));
+	// Leaving the hit region must still cancel a press even when the pointer comes back.
+	point = draftButton();
+	send(0, point.x, point.y);
+	send(32, point.x - 3, point.y);
+	send(0, point.x, point.y, true);
+	point = draftButton();
+	send(0, point.x, point.y);
+	draftEditor.insertTextAtCursor("changed before redraw");
+	const changedCursor = draftEditor.getCursor();
+	send(0, point.x, point.y, true);
+	assert.deepEqual(draftEditor.getCursor(), changedCursor);
+	assert.equal(tui.hasActiveSelection(), false);
+	// Settings changes and theme-only redraws use the same pending-press rules as other targets.
+	point = draftButton();
+	send(0, point.x, point.y);
+	enabled = false;
+	copy.refresh();
+	enabled = true;
+	copy.refresh();
+	send(0, point.x, point.y, true);
+	point = draftButton();
+	send(0, point.x, point.y);
+	initTheme("light", false);
+	native.doRender();
+	send(0, point.x, point.y, true);
+	expectedCopies.push(draftEditor.getExpandedText());
+	// No captured component gesture or selection may survive a completed Copy click.
+	send(35, point.x - 5, point.y);
+	assert.equal(tui.hasActiveSelection(), false);
+	draftEditor.setText("abcdef");
+	native.doRender();
+	send(0, 3, layoutSpacer + 1);
+	send(0, 3, layoutSpacer + 1, true);
+	assert.equal(draftEditor.getCursor().col, 1);
+	draftEditor.setText("");
+	native.doRender();
+	assert.ok(tui.getScreenLines().every((line) => !line.includes("[Copy]")));
+	draftEditor.setText("cleanup target");
+	point = draftButton();
+	send(0, point.x, point.y);
+	copy.cleanup();
+	send(0, point.x, point.y, true);
+	copy = installCopyButtons({ getTui: () => tuiReference, getTheme: () => theme, isEnabled: () => enabled });
+	point = draftButton();
+	send(0, point.x, point.y);
+	send(0, point.x, point.y, true);
+	expectedCopies.push("cleanup target");
+	await new Promise<void>((resolve) => setImmediate(resolve));
 	tui.stop();
 	// Match Pi's fullscreen -> regular -> fullscreen replacement behind the same Proxy.
 	tui.setLayoutRoot(undefined);
 	tui.clear();
 	renderer = new TuiMainScreen(terminal, false);
 	assert.ok(cachedMarkdown.render(60).every((line) => !line.includes("[Copy]")));
+	assert.ok(draftEditor.render(60).every((line) => !line.includes("[Copy]")));
 	renderer = otherRenderer;
 	otherRenderer.setLayoutRoot(cachedMarkdown);
 	otherRenderer.start();

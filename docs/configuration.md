@@ -32,7 +32,7 @@ Tab/Shift+Tab or ←/→ switches tabs; ↑/↓ or Page Up/Page Down moves betwe
 | `enabled` | `true` | Master switch for open-tui |
 | `header` | `true` | Replaces the header; disable to leave that slot to Pi or another extension |
 | `inlineFooter` | `false` | Moves the two main footer rows into a compatible editor's borders; extension status rows remain separate |
-| `copyButtons` | `true` | Code-block and user-message Copy labels in fullscreen mode |
+| `copyButtons` | `true` | Copy labels for code blocks, user messages, and nonempty input drafts in fullscreen mode |
 | `settingsLanguage` | `"en"` | `"en"` or `"zh"`; changes the settings interface language |
 | `cursorStyle` | `"block"` | `"block"`, `"bar"`, or `"underline"`; the latter two need terminal cursor-shape support |
 | `icons.mode` | `"auto"` | `"auto"`, `"nerd"`, `"unicode"`, or `"ascii"`; see [Icons](#icons) |
@@ -127,7 +127,7 @@ Tab/Shift+Tab 或 ←/→ 切页，↑/↓ 或 Page Up/Page Down 移动，Enter/
 | `enabled` | `true` | open-tui 总开关 |
 | `header` | `true` | 替换顶栏；关闭后把位置留给 Pi 或其他扩展 |
 | `inlineFooter` | `false` | 将两条主底栏行移入兼容编辑器的边框，扩展状态行保持独立 |
-| `copyButtons` | `true` | 全屏模式中代码块和用户消息的复制标签 |
+| `copyButtons` | `true` | 全屏模式中代码块、用户消息和非空输入草稿的复制标签 |
 | `settingsLanguage` | `"en"` | `"en"` 或 `"zh"`，控制设置界面的语言 |
 | `cursorStyle` | `"block"` | `"block"`、`"bar"` 或 `"underline"`，后两种需要终端支持光标形状控制 |
 | `icons.mode` | `"auto"` | `"auto"`、`"nerd"`、`"unicode"` 或 `"ascii"`，见[图标](#图标) |

@@ -21,6 +21,8 @@ import { Container, TuiMainScreen, type EditorComponent, type EditorTheme, type 
 import { decorateOpenTuiEditor, installEditor, repaintAfterStreamWrites, type InlineFooterRenderer } from "../extensions/open-tui/editor.ts";
 import { OpenTuiHeader } from "../extensions/open-tui/header.ts";
 import type { CursorStyle } from "../extensions/open-tui/config.ts";
+import type { EditorCopySupport } from "../extensions/open-tui/copy-buttons.ts";
+import { installRealCopyButtons } from "./fixtures/copy-test-helpers.ts";
 import { stripAnsi } from "../extensions/open-tui/utils.ts";
 import { mouseEvent } from "./fixtures/test-helpers.ts";
 
@@ -46,6 +48,7 @@ function createOpenTuiEditor(options: {
 	keybindings?: KeybindingsManager;
 	cursorStyle?: CursorStyle;
 	inlineFooter?: InlineFooterRenderer;
+	copyButtons?: () => EditorCopySupport | undefined;
 } = {}) {
 	const hostTui = options.tui ?? tui;
 	const currentTheme = options.theme ?? editorTheme;
@@ -53,7 +56,7 @@ function createOpenTuiEditor(options: {
 	return decorateOpenTuiEditor(
 		new CustomEditor(hostTui, currentTheme, keybindings, { paddingX: 0 }),
 		hostTui,
-		{ cursorStyle: options.cursorStyle ?? "block", inlineFooter: options.inlineFooter },
+		{ cursorStyle: options.cursorStyle ?? "block", inlineFooter: options.inlineFooter, copyButtons: options.copyButtons },
 	);
 }
 
@@ -157,6 +160,78 @@ test("keeps a narrow scrolled working border intact", () => {
 	assert.ok(topBorder.endsWith("╮"));
 });
 
+
+test("shows draft Copy only for nonempty expanded text and a sufficiently wide frame", (t) => {
+	const { tui, copy, enable } = installRealCopyButtons();
+	t.after(() => copy.cleanup());
+	const editor = createOpenTuiEditor({ tui, copyButtons: () => copy.editor });
+	assert.ok(editor.render(40).every((line) => !line.includes("[Copy]")));
+	editor.setText(" \n ");
+	assert.ok(editor.render(11).every((line) => !line.includes("[Copy]")));
+	const narrow = editor.render(12).map(stripAnsi);
+	assert.equal(narrow.at(-1), "╰─ [Copy] ─╯");
+	assert.ok(narrow.every((line) => visibleWidth(line) === 12));
+	enable(false);
+	assert.ok(editor.render(40).every((line) => !line.includes("[Copy]")));
+	enable(true);
+	assert.match(stripAnsi(editor.render(40).at(-1)!), /\[Copy\]/);
+	Object.defineProperty(editor, "getExpandedText", { value: undefined });
+	assert.ok(editor.render(40).every((line) => !line.includes("[Copy]")));
+});
+
+test("places draft Copy only in generated border gaps without shrinking inline footer content", (t) => {
+	const { tui, copy, enable } = installRealCopyButtons();
+	t.after(() => copy.cleanup());
+	let crowdedBottom = false;
+	let crowdedTop = false;
+	const editor = createOpenTuiEditor({
+		tui,
+		copyButtons: () => copy.editor,
+		inlineFooter: {
+			enabled: () => true,
+			render: () => ({
+				top: { left: crowdedTop ? "目录 ──────────── [Copy]" : "cwd", right: "context" },
+				bottom: { left: crowdedBottom ? "model details" : "model", right: "stats more" },
+			}),
+		},
+	});
+	editor.setText("draft");
+	let lines = editor.render(40).map(stripAnsi);
+	assert.match(lines.at(-1)!, /^╰─ model ─+ \[Copy\] ─ stats more ─╯$/);
+	assert.ok(!lines[0]!.includes("[Copy]"));
+	crowdedBottom = true;
+	lines = editor.render(40).map(stripAnsi);
+	assert.match(lines[0]!, /^╭─ cwd ─+ \[Copy\] ─ context ─╮$/);
+	assert.ok(!lines.at(-1)!.includes("[Copy]"));
+	crowdedTop = true;
+	const crowded = editor.render(40);
+	enable(false);
+	assert.deepEqual(editor.render(40), crowded, "footer dashes and literal labels are never treated as free border space");
+	assert.ok(crowded.every((line) => visibleWidth(line) === 40));
+});
+
+test("keeps draft Copy presses and direct clicks out of the underlying editor", (t) => {
+	const { tui, copy } = installRealCopyButtons();
+	t.after(() => copy.cleanup());
+	const editor = createOpenTuiEditor({
+		tui,
+		copyButtons: () => copy.editor,
+		theme: { ...editorTheme, borderColor: (text) => `\x1b[32m${text}\x1b[0m` },
+	});
+	editor.setText("draft 🙂");
+	editor.focused = false;
+	const lines = editor.render(40);
+	const row = lines.length - 1;
+	const plain = stripAnsi(lines[row]!);
+	const x = visibleWidth(plain.slice(0, plain.indexOf("[Copy]")));
+	const cursor = editor.getCursor();
+	assert.equal(editor.handleMouse(mouseEvent("press", x, row)), undefined);
+	assert.deepEqual(editor.handleMouse(mouseEvent("click", x, row)), { handled: true, render: false });
+	assert.deepEqual(editor.getCursor(), cursor);
+	assert.equal(editor.focused, false);
+	copy.cleanup();
+	assert.ok(editor.render(40).every((line) => !line.includes("[Copy]")));
+});
 
 // Hardware cursor and fullscreen settings.
 test("uses the terminal hardware cursor for non-block styles", () => {

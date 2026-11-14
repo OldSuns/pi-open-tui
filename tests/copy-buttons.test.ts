@@ -3,7 +3,7 @@ import { spawnSync } from "node:child_process";
 import { dirname, join } from "node:path";
 import test from "node:test";
 import { initTheme, UserMessageComponent, type MarkdownTransformContext, type Theme } from "@earendil-works/pi-coding-agent";
-import { Markdown, TuiAltScreen, visibleWidth, type Component, type MarkdownTheme, type Terminal, type TUI, type TuiMouseEvent } from "@earendil-works/pi-tui";
+import { Container, Markdown, Spacer, TuiAltScreen, visibleWidth, type Component, type MarkdownTheme, type Terminal, type TUI, type TuiMouseEvent } from "@earendil-works/pi-tui";
 import { createInteractiveTuiReference } from "../node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/tui-renderer.js";
 import {
 	handleCopyMouse,
@@ -270,6 +270,65 @@ test("cleanup disables render wrappers retained by other extensions", () => {
 		copy.cleanup();
 		Markdown.prototype.render = originalMarkdownRender;
 		UserMessageComponent.prototype.render = originalUserRender;
+	}
+});
+
+test("component Copy releases follow the current parent layout and clear an unmounted target", () => {
+	const terminal = { columns: 40, rows: 10, write() {} } as unknown as Terminal;
+	const tui = new TuiAltScreen(terminal, false, undefined, { copyOnSelect: false });
+	tui.requestRender = () => {};
+	const native = tui as unknown as {
+		stopped: boolean;
+		altScreenActive: boolean;
+		doRender(): void;
+		handleMouseEvent(event: { button: number; x: number; y: number; release: boolean }): void;
+	};
+	native.stopped = false;
+	native.altScreenActive = true;
+	const copied: { text: string; y: number; screenY: number }[] = [];
+	const regions: CopyRegion[] = [{ row: 0, col: 10, width: 6, text: "draft" }];
+	const component: Component = {
+		render: () => ["          [Copy]", "draft body", "tail"],
+		invalidate() {},
+		handleMouse: (event) => handleCopyMouse(component, regions, event, (text, release) => {
+			copied.push({ text, y: release.y, screenY: release.screenY });
+		}, true),
+	};
+	const root = new Container();
+	const setOffset = (height: number) => {
+		root.clear();
+		root.addChild(new Spacer(height));
+		root.addChild(component);
+	};
+	const copy = installCopyButtons({ getTui: () => tui, getTheme: () => theme, isEnabled: () => true });
+	const send = (y: number, release = false, x = 10) => native.handleMouseEvent({ button: 0, x, y, release });
+	try {
+		setOffset(1);
+		tui.setLayoutRoot(root);
+		native.doRender();
+		send(1);
+		setOffset(3);
+		native.doRender();
+		send(1, true);
+		assert.deepEqual(copied, [], "releasing at the old screen position must not copy an unhit component");
+		assert.equal(tui.hasActiveSelection(), false);
+		send(3);
+		send(3, true, 12);
+		assert.deepEqual(copied, [{ text: "draft", y: 0, screenY: 3 }], "release coordinates must be local to the current component");
+		assert.equal(tui.hasActiveSelection(), false);
+		send(3);
+		root.removeChild(component);
+		native.doRender();
+		send(3, true);
+		assert.equal(copied.length, 1, "unmounted targets cannot complete a held press");
+		root.addChild(component);
+		native.doRender();
+		send(3);
+		send(3, true);
+		assert.equal(copied.length, 2, "an invalidated gesture must not break the next normal Copy click");
+	} finally {
+		copy.cleanup();
+		tui.resetTextSelection();
 	}
 });
 
