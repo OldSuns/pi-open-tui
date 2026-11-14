@@ -1,7 +1,5 @@
 # pi-open-tui
 
-[![omp 状态](https://omppackages.com/badge/pi-open-tui.svg)](https://omppackages.com/packages/pi-open-tui)
-
 [English](./README.md) | **简体中文**
 
 一个为 [Pi](https://pi.dev) 编程代理打造的终端界面扩展。
