@@ -63,7 +63,7 @@ const NERD_GLYPHS: IconGlyphs = {
 	renamed: "»",
 	deleted: "✘",
 	toolCall: "●",
-	toolResult: "⎿",
+	toolResult: "└",
 };
 
 // ponytail: ASCII fallback uses compact symbols (not English words) to keep
