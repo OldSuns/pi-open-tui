@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.4.7] - 2026-11-20
+
+### Fixed
+
+- Use `└` instead of `⎿` for the tool result glyph so code-mode alignment stays correct (#104).
+
 ## [0.4.6] - 2026-11-14
 
 ### Added

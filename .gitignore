@@ -39,3 +39,4 @@ yarn.lock
 # Agent skills & user config
 .agents/
 .pi/
+.alma-snapshots
