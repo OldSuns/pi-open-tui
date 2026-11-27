@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { hostname, tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, isAbsolute, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import test, { type TestContext } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
@@ -763,6 +763,87 @@ test("prefers Bun lockfiles while preserving the Node fallback", async () => {
 		clearRuntimeCache();
 		rmSync(cwd, { recursive: true, force: true });
 	}
+});
+
+test("Python runtime selects real virtual environments and refreshes changed interpreters", async (t) => {
+	let python: string | undefined;
+	for (const command of process.platform === "win32" ? ["python", "python3"] : ["python3", "python"]) {
+		try {
+			const executable = execFileSync(command, ["-c", "import sys; print(sys.executable)"], {
+				encoding: "utf8", timeout: 5_000,
+			}).trim();
+			if (isAbsolute(executable)) {
+				python = executable;
+				break;
+			}
+		} catch { /* Try the next installed interpreter. */ }
+	}
+	if (!python) {
+		t.skip("A Python installation is required to exercise real virtual environments");
+		return;
+	}
+	const root = temporaryDirectory(t, "open-tui-python-");
+	const cwd = join(root, "project with spaces");
+	const active = join(root, "active environment");
+	const project = join(cwd, ".venv");
+	const executableIn = (directory: string) => process.platform === "win32"
+		? join(directory, "Scripts", "python.exe") : join(directory, "bin", "python");
+	const createEnvironment = (directory: string) => execFileSync(python!, ["-m", "venv", "--without-pip", directory], {
+		encoding: "utf8", timeout: 15_000,
+	});
+	mkdirSync(cwd);
+	writeFileSync(join(cwd, "pyproject.toml"), "[project]\nname = 'runtime-test'\nversion = '0.0.0'\n", "utf8");
+	writeFileSync(join(cwd, ".python-version"), "0.0\n", "utf8");
+	writeFileSync(join(cwd, "uv.lock"), "", "utf8");
+	createEnvironment(active);
+	const version = execFileSync(executableIn(active), ["--version"], { encoding: "utf8" }).match(/Python\s+(\d+\.\d+\.\d+)/)?.[1];
+	assert.ok(version);
+	preserveEnvironment(t, ["PATH", "VIRTUAL_ENV"]);
+	t.after(clearRuntimeCache);
+	// An empty PATH makes the old python3 lookup fail even when both interpreters have the same version.
+	process.env.PATH = "";
+	delete process.env.VIRTUAL_ENV;
+	assert.deepEqual(await readRuntimeInfo(cwd), { name: "python", version: undefined });
+
+	process.env.VIRTUAL_ENV = active;
+	assert.deepEqual(await readRuntimeInfo(cwd), { name: "python", version });
+	process.env.VIRTUAL_ENV = join(root, "missing environment");
+	assert.deepEqual(await readRuntimeInfo(cwd), { name: "python", version: undefined });
+
+	createEnvironment(project);
+	delete process.env.VIRTUAL_ENV;
+	const detected = await readRuntimeInfo(cwd);
+	assert.deepEqual(detected, { name: "python", version });
+	assert.strictEqual(await readRuntimeInfo(cwd), detected, "unchanged interpreters reuse the cached result");
+	const { component, handle } = footerFixture({ state: { runtime: detected } });
+	assert.ok(component.render(160)[0]!.includes(`py ${version}`));
+	assert.ok(handle.renderInline(160)!.top.right.includes(`py ${version}`));
+
+	const activePython = executableIn(active);
+	const savedActivePython = `${activePython}.saved`;
+	renameSync(activePython, savedActivePython);
+	writeFileSync(activePython, "", "utf8");
+	process.env.VIRTUAL_ENV = active;
+	clearRuntimeCache();
+	assert.deepEqual(await readRuntimeInfo(cwd), { name: "python", version }, "the project environment wins over another active environment");
+	rmSync(activePython);
+	renameSync(savedActivePython, activePython);
+
+	const projectPython = executableIn(project);
+	const savedProjectPython = `${projectPython}.saved`;
+	renameSync(projectPython, savedProjectPython);
+	writeFileSync(projectPython, "", "utf8");
+	assert.deepEqual(await readRuntimeInfo(cwd), { name: "python", version: undefined }, "a broken project interpreter must not report another environment's version");
+	rmSync(projectPython);
+	renameSync(savedProjectPython, projectPython);
+	assert.deepEqual(await readRuntimeInfo(cwd), { name: "python", version }, "repairing an interpreter invalidates the failed result");
+
+	renameSync(project, join(root, "removed project environment"));
+	delete process.env.VIRTUAL_ENV;
+	assert.deepEqual(await readRuntimeInfo(cwd), { name: "python", version: undefined }, "removing the environment invalidates its cached version");
+	if (process.platform === "win32") copyFileSync(activePython, join(dirname(activePython), "python3.exe"));
+	process.env.PATH = dirname(activePython);
+	assert.deepEqual(await readRuntimeInfo(cwd), { name: "python", version }, "PATH remains the fallback when no virtual environment is selected");
 });
 
 test("detects runtime project suffixes and Java versions on either output stream", () => {

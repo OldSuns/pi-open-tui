@@ -17,6 +17,8 @@ The working timer requests a redraw every 250 ms while an agent run is active. G
 - [runtime.ts](../extensions/open-tui/runtime.ts) chooses the first matching definition from its ordered list of 50+ runtimes and environments. It checks project files, folders, extensions, and environment variables in the working directory. It reports the locally executed version command's result, not a declared dependency version. Version commands have a 2.5-second timeout; unavailable versions leave the runtime symbol visible. Results are cached by directory and runtime, with a fingerprint of relevant files and environment values.
 - [state.ts](../extensions/open-tui/state.ts) reads model metadata and session usage. Usage is cached by session manager and leaf ID, with invalidation on message completion, compaction, tree changes, and session start.
 
+Python checks the working directory's `.venv` before `VIRTUAL_ENV`, using `Scripts/python.exe` on Windows or `bin/python` then `bin/python3` on macOS/Linux. Missing interpreter paths are skipped; with no environment interpreter, detection uses `python3` from PATH. If the selected interpreter fails or its output cannot be parsed, only the Python symbol is shown. Version declarations such as `.python-version` are not displayed as installed versions. The cache tracks the selected path, its resolved target and file metadata, and `pyvenv.cfg`; PATH changes invalidate fallback results. Environment creation, removal, or replacement is picked up on the next runtime read at session start, including reload, rather than being polled.
+
 ### Editor and layout
 
 [editor.ts](../extensions/open-tui/editor.ts) decorates the same editor instance, retaining input callbacks, completion, and ghost text. It requires native-style borders plus focus, border-color, mouse, and padding capabilities. An initial render probes for the borders; missing capabilities, an unrecognized layout, or a failing probe leave the editor undecorated. Each framed render checks the borders again. If they disappear, that render uses the full requested width without frame mouse offsets; framing resumes when the borders return.
@@ -114,6 +116,8 @@ Agent 运行期间，工作计时器每 250 毫秒请求一次重绘。Git 和�
 - [git-refresh.ts](../extensions/open-tui/git-refresh.ts) 串行读取 Git。工具结束后请求刷新，两次读取的启动时间至少间隔 500 毫秒；密集请求和读取期间的新请求会保留一次后续刷新。Agent 任务结束时提前处理待刷请求；会话开始、切换分支和修改设置时请求立即读取。切换或关闭会话、禁用界面时取消排队任务并使旧结果失效。工具事件不触发运行环境检测，也不轮询 Pi 空闲时发生的外部修改。
 - [runtime.ts](../extensions/open-tui/runtime.ts) 从按顺序排列的 50 多种运行环境定义中选择第一个匹配项，检查工作目录中的项目文件、目录、扩展名和环境变量。版本来自本地实际执行的版本命令，不是依赖声明中的版本。命令超时为 2.5 秒，版本不可用时仍显示环境标记。结果按目录和环境缓存，并用相关文件与环境变量构成指纹。
 - [state.ts](../extensions/open-tui/state.ts) 读取模型信息与会话用量。用量缓存绑定会话管理器和当前叶节点 ID，在消息结束、压缩、会话树变化和会话开始时失效。
+
+Python 优先检查工作目录中的 `.venv`，其次是 `VIRTUAL_ENV`；Windows 使用 `Scripts/python.exe`，macOS/Linux 依次检查 `bin/python` 和 `bin/python3`。不存在的解释器路径会被跳过，没有环境解释器时使用 PATH 中的 `python3`。已选中的解释器执行失败或输出无法解析时，仅显示 Python 标记。`.python-version` 等版本声明不会当作已安装版本显示。缓存跟踪选中的路径、解析后的目标及文件信息，以及 `pyvenv.cfg`；PATH 改变会使回退结果失效。创建、删除或替换环境后，会在下次会话开始（包括重新加载）读取运行环境时更新，不进行轮询。
 
 ### 编辑器与布局
 

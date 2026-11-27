@@ -71,6 +71,8 @@ The header provides model and project context with command hints. The two main f
 
 Git status refreshes after tool execution, including commits on the current branch. Rapid tool activity is combined into periodic refreshes, with any pending refresh expedited when the agent run ends.
 
+Python version detection prefers `.venv` in the working directory, then `VIRTUAL_ENV`, and otherwise uses `python3` from PATH. Project environments, including those created by uv, work without activation. The version comes from the interpreter; reload Pi after changing environments to refresh it.
+
 Footer token and cost totals include assistant responses, tool-reported usage, compaction and branch summaries, and cache warming. The cache-hit percentage describes the latest assistant response. Other extensions can use separate status rows or [contribute text directly to the main footer](./docs/footer-segments.md).
 
 Enable **Footer in editor border** to move the two main rows into the editor's top and bottom borders. Extension status rows remain below the editor. Compatible editors keep their input behavior, completion, and ghost text; editors that cannot be framed retain a separate footer. See [editor compatibility and layout](./docs/implementation.md#editor-and-layout) for the integration boundaries.

@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
-import { existsSync, readdirSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, readdirSync, realpathSync, statSync } from "node:fs";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
@@ -86,7 +86,22 @@ interface CacheEntry {
 const cache = new Map<string, CacheEntry>();
 const CACHE_MAX = 32;
 
-function fingerprint(cwd: string, def: RuntimeDef): string {
+function pythonCommand(cwd: string): string {
+	const environments = [resolve(cwd, ".venv"), process.env.VIRTUAL_ENV];
+	const interpreters = process.platform === "win32" ? ["Scripts/python.exe"] : ["bin/python", "bin/python3"];
+	for (const environment of environments) {
+		if (!environment) continue;
+		for (const interpreter of interpreters) {
+			const command = resolve(cwd, environment, interpreter);
+			try {
+				if (statSync(command).isFile()) return command;
+			} catch { /* Try the next environment path. */ }
+		}
+	}
+	return "python3";
+}
+
+function fingerprint(cwd: string, def: RuntimeDef, command: string | undefined): string {
 	const parts: string[] = [];
 	for (const f of def.files) {
 		try {
@@ -102,6 +117,20 @@ function fingerprint(cwd: string, def: RuntimeDef): string {
 	}
 	if (def.env && process.env[def.env]) {
 		parts.push(`${def.env}=${process.env[def.env]}`);
+	}
+	if (def.name === "python" && command) {
+		parts.push(command);
+		if (isAbsolute(command)) {
+			// Windows venv launchers also depend on pyvenv.cfg; POSIX interpreters can be symlinks.
+			for (const file of [command, join(dirname(dirname(command)), "pyvenv.cfg")]) {
+				try {
+					const stat = statSync(file);
+					parts.push(`${realpathSync(file)}:${stat.mtimeMs}:${stat.ctimeMs}:${stat.size}`);
+				} catch { /* Missing files change the fingerprint. */ }
+			}
+		} else {
+			parts.push(process.env.PATH ?? "");
+		}
 	}
 	return parts.join("\0");
 }
@@ -119,17 +148,17 @@ function matchesDef(cwd: string, def: RuntimeDef): boolean {
 	return false;
 }
 
-async function fetchVersion(def: RuntimeDef, cwd: string): Promise<string | undefined> {
-	if (!def.versionCommand) return undefined;
+async function fetchVersion(command: RuntimeDef["versionCommand"], cwd: string): Promise<string | undefined> {
+	if (!command) return undefined;
 	try {
-		const { stdout, stderr } = await execFileAsync(def.versionCommand.cmd, def.versionCommand.args ?? [], {
+		const { stdout, stderr } = await execFileAsync(command.cmd, command.args ?? [], {
 			cwd,
 			timeout: VERSION_TIMEOUT_MS,
 			maxBuffer: 64 * 1024,
 		});
 		const output = `${stdout}\n${stderr}`;
-		if (def.versionCommand.pattern) {
-			const match = output.match(def.versionCommand.pattern);
+		if (command.pattern) {
+			const match = output.match(command.pattern);
 			return match?.[1];
 		}
 		return output.trim() || undefined;
@@ -141,7 +170,9 @@ async function fetchVersion(def: RuntimeDef, cwd: string): Promise<string | unde
 export async function readRuntimeInfo(cwd: string): Promise<RuntimeInfo | null> {
 	for (const def of RUNTIMES) {
 		if (!matchesDef(cwd, def)) continue;
-		const fp = fingerprint(cwd, def);
+		const command = def.name === "python" && def.versionCommand
+			? { ...def.versionCommand, cmd: pythonCommand(cwd) } : def.versionCommand;
+		const fp = fingerprint(cwd, def, command?.cmd);
 		const cacheKey = `${cwd}\0${def.name}`;
 		const cached = cache.get(cacheKey);
 		if (cached && cached.fingerprint === fp) {
@@ -152,7 +183,7 @@ export async function readRuntimeInfo(cwd: string): Promise<RuntimeInfo | null> 
 			if (key === cacheKey || key.startsWith(`${cwd}\0`)) cache.delete(key);
 		}
 
-		const version = await fetchVersion(def, cwd);
+		const version = await fetchVersion(command, cwd);
 		const info: RuntimeInfo = {
 			name: def.name,
 			version,
