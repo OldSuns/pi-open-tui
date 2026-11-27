@@ -280,7 +280,6 @@ test("component Copy releases follow the current parent layout and clear an unmo
 	const native = tui as unknown as {
 		stopped: boolean;
 		altScreenActive: boolean;
-		doRender(): void;
 		handleMouseEvent(event: { button: number; x: number; y: number; release: boolean }): void;
 	};
 	native.stopped = false;
@@ -305,10 +304,10 @@ test("component Copy releases follow the current parent layout and clear an unmo
 	try {
 		setOffset(1);
 		tui.setLayoutRoot(root);
-		native.doRender();
+		tui.renderNow();
 		send(1);
 		setOffset(3);
-		native.doRender();
+		tui.renderNow();
 		send(1, true);
 		assert.deepEqual(copied, [], "releasing at the old screen position must not copy an unhit component");
 		assert.equal(tui.hasActiveSelection(), false);
@@ -318,11 +317,11 @@ test("component Copy releases follow the current parent layout and clear an unmo
 		assert.equal(tui.hasActiveSelection(), false);
 		send(3);
 		root.removeChild(component);
-		native.doRender();
+		tui.renderNow();
 		send(3, true);
 		assert.equal(copied.length, 1, "unmounted targets cannot complete a held press");
 		root.addChild(component);
-		native.doRender();
+		tui.renderNow();
 		send(3);
 		send(3, true);
 		assert.equal(copied.length, 2, "an invalidated gesture must not break the next normal Copy click");
@@ -343,7 +342,6 @@ test("fullscreen mouse routing preserves selection and copies only clicks", () =
 	const internals = tui as unknown as {
 		stopped: boolean;
 		altScreenActive: boolean;
-		doRender(): void;
 		handleMouseEvent(event: { button: number; x: number; y: number; release: boolean }): void;
 	};
 	internals.stopped = false;
@@ -359,7 +357,7 @@ test("fullscreen mouse routing preserves selection and copies only clicks", () =
 	const send = (button: number, x: number, y: number, release = false) => internals.handleMouseEvent({ button, x, y, release });
 	try {
 		tui.setLayoutRoot(component);
-		internals.doRender();
+		tui.renderNow();
 		send(0, 11, 0);
 		send(32, 2, 1);
 		assert.equal(tui.hasActiveSelection(), true, "Pi must receive the drag");

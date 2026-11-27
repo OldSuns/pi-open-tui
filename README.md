@@ -20,7 +20,7 @@ A polished terminal interface for the [Pi](https://pi.dev) coding agent.
 
 ## Requirements
 
-- Pi 1.5.0 or later
+- Pi 1.6.1 or later
 - Node.js 22.19.0 or later (Pi's minimum)
 - A terminal with UTF-8 and color support
 - A [Nerd Font](https://www.nerdfonts.com/font-downloads) for the full icon set (optional; Unicode and ASCII modes are available)
@@ -164,7 +164,7 @@ npm run typecheck
 pi -e .
 ```
 
-CI checks Pi 1.5.0 and the latest release on Node.js 22.19.0 and 24 across Linux, Windows, and macOS. Keep all Pi packages on the same version. Use `pi -e .` to check terminal fonts, mouse interaction, and cursor support interactively.
+CI checks Pi 1.6.1 and the latest release on Node.js 22.19.0 and 24 across Linux, Windows, and macOS. Keep all Pi packages on the same version. Use `pi -e .` to check terminal fonts, mouse interaction, and cursor support interactively.
 
 ## Acknowledgements
 

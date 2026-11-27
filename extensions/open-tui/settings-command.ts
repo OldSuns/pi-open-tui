@@ -517,7 +517,7 @@ class SectionedSettingsList {
 }
 
 interface SettingsUiHandle {
-	render: (width: number) => string[];
+	render: (width: number) => readonly string[];
 	invalidate: () => void;
 	handleInput: (data: string) => void;
 	handleMouse: (event: TuiMouseEvent) => TuiMouseEventResult | undefined;
@@ -535,7 +535,7 @@ class SettingsUi implements SettingsUiHandle {
 	private readonly onClose: () => void;
 	private layoutWidth: number | undefined;
 	private layoutRows: number | undefined;
-	private cachedLines: string[] | undefined;
+	private cachedLines: readonly string[] | undefined;
 
 	constructor(
 		tui: TUI,
@@ -634,7 +634,7 @@ class SettingsUi implements SettingsUiHandle {
 		return result ? { handled: result.handled, render: result.render } : undefined;
 	}
 
-	render(width: number): string[] {
+	render(width: number): readonly string[] {
 		if (width !== this.layoutWidth || this.tui.terminal.rows !== this.layoutRows) {
 			this.rebuild(undefined, width);
 		}

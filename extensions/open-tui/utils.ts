@@ -281,7 +281,7 @@ export function isEditorBorderLine(line: string): boolean {
 	return false;
 }
 
-export function findBottomBorderIndex(lines: string[]): number {
+export function findBottomBorderIndex(lines: readonly string[]): number {
 	for (let i = lines.length - 1; i >= 1; i--) {
 		const line = lines[i];
 		if (line !== undefined && isEditorBorderLine(line)) return i;

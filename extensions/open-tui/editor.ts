@@ -43,7 +43,7 @@ export interface InlineFooterRenderer {
 interface HiddenThinkingLabelComponent {
 	children: unknown[];
 	outputPad?: unknown;
-	render(width: number): string[];
+	render(width: number): readonly string[];
 	setHiddenThinkingLabel(label: string): void;
 	setHideThinkingBlock(hide: boolean): void;
 	updateContent(message: unknown, isStreaming?: boolean): void;
@@ -253,7 +253,7 @@ interface EditorDecoration {
 	copySupport: EditorCopySupport | undefined;
 	copyRegion: CopyRegion | undefined;
 	indicator: WorkingStatusIndicator | undefined;
-	baseRender: (width: number) => string[];
+	baseRender: (width: number) => readonly string[];
 	framedWidth: number | undefined;
 	active: boolean;
 	cleanup(): void;
@@ -282,7 +282,7 @@ function applyCursorStyle(
 	decoration.tui.requestRender();
 }
 
-function renderWithCursor(decoration: EditorDecoration, width: number): string[] {
+function renderWithCursor(decoration: EditorDecoration, width: number): readonly string[] {
 	const renderedLines = decoration.baseRender(width);
 	if (decoration.cursorStyle === "block") return renderedLines;
 
@@ -304,7 +304,7 @@ function renderWithCursor(decoration: EditorDecoration, width: number): string[]
 	});
 }
 
-function renderFrame(decoration: EditorDecoration, width: number): string[] {
+function renderFrame(decoration: EditorDecoration, width: number): readonly string[] {
 	decoration.framedWidth = undefined;
 	decoration.copyRegion = undefined;
 	if (width < EDITOR_FRAME_HORIZONTAL_CHROME) return renderWithCursor(decoration, width);
@@ -543,7 +543,7 @@ export function installEditor(
 		let lastWidth: number | undefined;
 		let lastBuild: ((width: number) => string) | undefined;
 		let active = true;
-		const patched = function (this: HiddenThinkingLabelComponent, width: number): string[] {
+		const patched = function (this: HiddenThinkingLabelComponent, width: number): readonly string[] {
 			if (!active) return originalRender.call(this, width);
 			const build = buildHiddenThinkingLabel;
 			const textWidth = hiddenThinkingTextWidth(width, this.outputPad);
@@ -590,7 +590,7 @@ export function installEditor(
 		mountedFactory = originalGetEditor.call(ui);
 		resetHiddenThinkingTarget();
 		if (isFrameableEditor(editor)) {
-			let lines: string[] = [];
+			let lines: readonly string[] = [];
 			try {
 				lines = editor.render(tui.terminal.columns);
 			} catch {

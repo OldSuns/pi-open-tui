@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased]
+
+### Breaking Changes
+
+- Require Pi 1.6.1 or later and use its read-only component render results.
+
 ## [0.4.7] - 2026-11-20
 
 ### Fixed

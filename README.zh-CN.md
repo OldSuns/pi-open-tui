@@ -20,7 +20,7 @@
 
 ## 环境要求
 
-- Pi 1.5.0 或更高版本
+- Pi 1.6.1 或更高版本
 - Node.js 22.19.0 或更高版本（Pi 的最低要求）
 - 支持 UTF-8 和彩色输出的终端
 - 使用完整图标集时需要 [Nerd Font](https://www.nerdfonts.com/font-downloads)（可选，也可使用 Unicode 或 ASCII 模式）
@@ -164,7 +164,7 @@ npm run typecheck
 pi -e .
 ```
 
-CI 在 Linux、Windows、macOS 上，使用 Node.js 22.19.0 和 24 检查 Pi 1.5.0 及最新版本。核对兼容性时应让所有 Pi 包保持同一版本。终端字体、鼠标交互和光标支持可通过 `pi -e .` 实际检查。
+CI 在 Linux、Windows、macOS 上，使用 Node.js 22.19.0 和 24 检查 Pi 1.6.1 及最新版本。核对兼容性时应让所有 Pi 包保持同一版本。终端字体、鼠标交互和光标支持可通过 `pi -e .` 实际检查。
 
 ## 致谢
 
