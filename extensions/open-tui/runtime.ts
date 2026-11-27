@@ -1,10 +1,12 @@
 import { execFile } from "node:child_process";
-import { existsSync, readdirSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { closeSync, constants, existsSync, fstatSync, lstatSync, openSync, readdirSync, readSync, statSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
 const VERSION_TIMEOUT_MS = 2500;
+const PYVENV_CONFIG_MAX_BYTES = 64 * 1024;
 
 export interface RuntimeInfo {
 	name: string;
@@ -86,6 +88,64 @@ interface CacheEntry {
 const cache = new Map<string, CacheEntry>();
 const CACHE_MAX = 32;
 
+function lstatIfPresent(path: string) {
+	try {
+		return lstatSync(path);
+	} catch (error) {
+		const code = (error as NodeJS.ErrnoException).code;
+		if (code !== "ENOENT" && code !== "ENOTDIR") throw error;
+		return undefined;
+	}
+}
+
+function readPyvenvVersion(path: string): string | undefined {
+	// Bound reads of project metadata and avoid following a replacement symlink or blocking on a pipe.
+	const fd = openSync(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0));
+	try {
+		const stat = fstatSync(fd);
+		if (!stat.isFile() || stat.size === 0 || stat.size > PYVENV_CONFIG_MAX_BYTES) return undefined;
+		const buffer = Buffer.alloc(stat.size);
+		if (readSync(fd, buffer, 0, buffer.length, 0) !== buffer.length) return undefined;
+		let versionInfo: string | undefined;
+		for (const line of buffer.toString("utf8").split(/\r?\n/)) {
+			const match = line.trim().match(/^(version|version_info)[ \t]*=[ \t]*(\d+\.\d+(?:\.\d+)?)(?:(?:a|b|rc)\d+|\.(?:alpha|beta|candidate|final)\.\d+)?$/);
+			if (!match) continue;
+			if (match[1] === "version") return match[2];
+			versionInfo ??= match[2];
+		}
+		return versionInfo;
+	} finally {
+		closeSync(fd);
+	}
+}
+
+function pythonVersion(cwd: string): string | undefined {
+	const interpreters = process.platform === "win32" ? ["Scripts/python.exe"] : ["bin/python", "bin/python3"];
+	try {
+		for (const environment of [".venv", process.env.VIRTUAL_ENV]) {
+			if (!environment) continue;
+			const root = resolve(cwd, environment);
+			const configPath = join(root, "pyvenv.cfg");
+			const config = lstatIfPresent(configPath);
+			const paths = interpreters.map((interpreter) => join(root, interpreter));
+			// A dangling link still selects this environment, even if there is no metadata file.
+			if (!config && !paths.some(lstatIfPresent)) continue;
+			if (!config?.isFile() || !paths.some((path) => statSync(path, { throwIfNoEntry: false })?.isFile())) return undefined;
+			return readPyvenvVersion(configPath);
+		}
+	} catch { /* An unreadable environment does not provide a version. */ }
+	return undefined;
+}
+
+function canProbePathPython(cwd: string): boolean {
+	if (process.env.VIRTUAL_ENV) return false;
+	try {
+		return !lstatIfPresent(join(cwd, ".venv"));
+	} catch {
+		return false;
+	}
+}
+
 function fingerprint(cwd: string, def: RuntimeDef): string {
 	const parts: string[] = [];
 	for (const f of def.files) {
@@ -119,17 +179,17 @@ function matchesDef(cwd: string, def: RuntimeDef): boolean {
 	return false;
 }
 
-async function fetchVersion(def: RuntimeDef, cwd: string): Promise<string | undefined> {
-	if (!def.versionCommand) return undefined;
+async function fetchVersion(command: RuntimeDef["versionCommand"], cwd: string): Promise<string | undefined> {
+	if (!command) return undefined;
 	try {
-		const { stdout, stderr } = await execFileAsync(def.versionCommand.cmd, def.versionCommand.args ?? [], {
+		const { stdout, stderr } = await execFileAsync(command.cmd, command.args ?? [], {
 			cwd,
 			timeout: VERSION_TIMEOUT_MS,
 			maxBuffer: 64 * 1024,
 		});
 		const output = `${stdout}\n${stderr}`;
-		if (def.versionCommand.pattern) {
-			const match = output.match(def.versionCommand.pattern);
+		if (command.pattern) {
+			const match = output.match(command.pattern);
 			return match?.[1];
 		}
 		return output.trim() || undefined;
@@ -138,10 +198,18 @@ async function fetchVersion(def: RuntimeDef, cwd: string): Promise<string | unde
 	}
 }
 
-export async function readRuntimeInfo(cwd: string): Promise<RuntimeInfo | null> {
+export async function readRuntimeInfo(cwd: string, projectTrusted = false): Promise<RuntimeInfo | null> {
 	for (const def of RUNTIMES) {
 		if (!matchesDef(cwd, def)) continue;
-		const fp = fingerprint(cwd, def);
+		const isPython = def.name === "python";
+		if (isPython) {
+			if (!projectTrusted) return { name: def.name, version: undefined };
+			const version = pythonVersion(cwd);
+			if (version !== undefined || !canProbePathPython(cwd)) return { name: def.name, version };
+		}
+		const versionCwd = isPython ? tmpdir() : cwd;
+		const projectFingerprint = fingerprint(cwd, def);
+		const fp = isPython ? [projectFingerprint, process.env.PATH ?? "", versionCwd].join("\0") : projectFingerprint;
 		const cacheKey = `${cwd}\0${def.name}`;
 		const cached = cache.get(cacheKey);
 		if (cached && cached.fingerprint === fp) {
@@ -152,7 +220,7 @@ export async function readRuntimeInfo(cwd: string): Promise<RuntimeInfo | null> 
 			if (key === cacheKey || key.startsWith(`${cwd}\0`)) cache.delete(key);
 		}
 
-		const version = await fetchVersion(def, cwd);
+		const version = await fetchVersion(def.versionCommand, versionCwd);
 		const info: RuntimeInfo = {
 			name: def.name,
 			version,

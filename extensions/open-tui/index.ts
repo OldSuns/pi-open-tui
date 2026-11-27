@@ -54,6 +54,7 @@ export default function (pi: ExtensionAPI) {
 	let editor: ReturnType<typeof installEditor> | undefined;
 	let copyButtons: ReturnType<typeof installCopyButtons> | undefined;
 	let pendingUiChange: PendingUiChange | undefined;
+	let runtimeRequest = 0;
 	const footerSegments = createFooterSegments(pi.events, () => requestFooterRender?.());
 	const gitRefresher = new GitStatusRefresher((git) => {
 		if (!sessionLifecycle.isCurrent() || !active || !config.enabled) return;
@@ -191,11 +192,11 @@ export default function (pi: ExtensionAPI) {
 	};
 
 	const refreshRuntime = async (ctx: ExtensionContext) => {
-		if (!sessionLifecycle.isCurrent()) return;
+		if (!sessionLifecycle.isCurrent() || !active || !config.enabled || !config.footerSegments.runtime) return;
 		const generation = sessionLifecycle.currentGeneration();
-		const cwd = ctx.cwd;
-		const runtime = await readRuntimeInfo(cwd);
-		if (!sessionLifecycle.isCurrent(generation)) return;
+		const request = ++runtimeRequest;
+		const runtime = await readRuntimeInfo(ctx.cwd, ctx.isProjectTrusted());
+		if (!sessionLifecycle.isCurrent(generation) || request !== runtimeRequest) return;
 		state.runtime = runtime;
 		requestFooterRender?.();
 	};
@@ -231,6 +232,7 @@ export default function (pi: ExtensionAPI) {
 		sessionLifecycle.start();
 		gitRefresher.reset();
 		lastCtx = ctx;
+		state.runtime = null;
 		state.workingSince = undefined;
 		state.lastDoneIn = undefined;
 		invalidateUsageCache();
@@ -398,6 +400,8 @@ export default function (pi: ExtensionAPI) {
 	registerSettingsCommand(pi, {
 		getConfig: () => config,
 		onConfigChanged: (newConfig) => {
+			const wasRuntimeEnabled = config.enabled && config.footerSegments.runtime;
+			const runtimeEnabled = newConfig.enabled && newConfig.footerSegments.runtime;
 			const cursorStyleChanged = config.cursorStyle !== newConfig.cursorStyle;
 			const headerChanged = config.header !== newConfig.header;
 			const copyButtonsChanged = config.copyButtons !== newConfig.copyButtons;
@@ -432,6 +436,14 @@ export default function (pi: ExtensionAPI) {
 			} else {
 				state.git = emptyGitStatus();
 			}
+			if (runtimeEnabled !== wasRuntimeEnabled) {
+				if (!runtimeEnabled) {
+					runtimeRequest++;
+					state.runtime = null;
+				} else if (lastCtx && active) {
+					void refreshRuntime(lastCtx);
+				}
+			}
 			requestFooterRender?.();
 		},
 		onOverlayClosed: () => {
@@ -443,6 +455,7 @@ export default function (pi: ExtensionAPI) {
 			} else {
 				applyUi(lastCtx);
 				scheduleGitRefresh(lastCtx, true);
+				void refreshRuntime(lastCtx);
 			}
 		},
 	});

@@ -1,5 +1,17 @@
 # Changelog
 
+## [Unreleased]
+
+### Breaking Changes
+
+- Require Pi 1.6.1 or later and use its read-only component render results.
+
+### Fixed
+
+- Read Python versions from virtual environment metadata without activation or launching the environment's interpreter (#105). When no virtual environment is present, query `python3` from the OS temporary directory.
+- Skip runtime detection while the extension or its runtime segment is disabled, and refresh when re-enabled.
+- Preserve Pi's shared render arrays when adding Copy buttons so disabling them clears cached labels.
+
 ## [0.4.7] - 2026-11-20
 
 ### Fixed

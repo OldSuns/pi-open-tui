@@ -497,6 +497,7 @@ test("open-tui keeps a bounded peek scoped to the current assistant", async () =
 		mode: "tui",
 		isIdle: () => false,
 		cwd: process.cwd(),
+		isProjectTrusted: () => true,
 		ui: {
 			theme,
 			notify() {},

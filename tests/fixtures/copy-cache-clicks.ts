@@ -33,13 +33,13 @@ const render = (width: number, padding = 1) => {
 	assert.deepEqual(lines, fresh.render(width), "cached output must match a fresh component");
 	return lines;
 };
-const column = (lines: string[], row = lines.length - 1) => {
+const column = (lines: readonly string[], row = lines.length - 1) => {
 	const bottom = stripAnsi(lines[row]!);
 	const index = bottom.indexOf("[Copy]");
 	assert.ok(index >= 0);
 	return visibleWidth(bottom.slice(0, index));
 };
-const click = (target: UserMessageComponent, lines: string[], width: number, x: number, y: number, expected?: string) => {
+const click = (target: UserMessageComponent, lines: readonly string[], width: number, x: number, y: number, expected?: string) => {
 	const event = mouseEvent("press", x, y, { width, height: lines.length });
 	assert.equal(target.handleMouse(event), undefined);
 	const released = target.handleMouse({ ...event, type: "release" });
@@ -51,10 +51,10 @@ const click = (target: UserMessageComponent, lines: string[], width: number, x: 
 		assert.equal(released, undefined, "an absent or stale label must not copy");
 	}
 };
-const clickLabel = (lines: string[], width: number) => click(message, lines, width, column(lines), lines.length - 1, text);
+const clickLabel = (lines: readonly string[], width: number) => click(message, lines, width, column(lines), lines.length - 1, text);
 type CopyTarget = { handleMouse(event: TuiMouseEvent): TuiMouseEventResult | undefined };
 const releaseAfterRender = (
-	target: CopyTarget, lines: string[], width: number, x: number, y: number, redraw: () => void, expected?: string,
+	target: CopyTarget, lines: readonly string[], width: number, x: number, y: number, redraw: () => void, expected?: string,
 ) => {
 	assert.equal(target.handleMouse(mouseEvent("press", x, y, { width, height: lines.length })), undefined);
 	redraw();
@@ -226,10 +226,9 @@ try {
 	tui.setLayoutRoot(cachedMarkdown);
 	tui.start();
 	const native = tui as unknown as {
-		doRender(): void;
 		handleMouseEvent(event: { button: number; x: number; y: number; release: boolean }): void;
 	};
-	native.doRender();
+	tui.renderNow();
 	const nativeButton = readMarkdownCopyState(cachedMarkdown).regions[0]!;
 	assert.ok(nativeButton);
 	const send = (button: number, x: number, y: number, release = false) => native.handleMouseEvent({ button, x, y, release });
@@ -251,7 +250,7 @@ try {
 	send(0, 0, nativeButton.row + 1, true);
 	send(0, nativeButton.col, nativeButton.row);
 	cachedMarkdown.setText(blockB);
-	native.doRender();
+	tui.renderNow();
 	send(0, nativeButton.col, nativeButton.row, true);
 	// Another renderer can share the terminal. Its release must not complete this renderer's press.
 	const otherRenderer = new TuiAltScreen(terminal, false, undefined, { copyOnSelect: false });
@@ -287,7 +286,7 @@ try {
 	assert.match(draftEditor.getText(), /\[paste #/);
 	assert.equal(draftEditor.getExpandedText(), fullDraft);
 	const draftButton = () => {
-		native.doRender();
+		tui.renderNow();
 		// Transient copy flashes can cover the editor's right border in the composited screen.
 		const editorLines = draftEditor.render(terminal.columns);
 		const editorRow = editorLines.findIndex((line) => stripAnsi(line).includes("[Copy]"));
@@ -346,19 +345,19 @@ try {
 	point = draftButton();
 	send(0, point.x, point.y);
 	initTheme("light", false);
-	native.doRender();
+	tui.renderNow();
 	send(0, point.x, point.y, true);
 	expectedCopies.push(draftEditor.getExpandedText());
 	// No captured component gesture or selection may survive a completed Copy click.
 	send(35, point.x - 5, point.y);
 	assert.equal(tui.hasActiveSelection(), false);
 	draftEditor.setText("abcdef");
-	native.doRender();
+	tui.renderNow();
 	send(0, 3, layoutSpacer + 1);
 	send(0, 3, layoutSpacer + 1, true);
 	assert.equal(draftEditor.getCursor().col, 1);
 	draftEditor.setText("");
-	native.doRender();
+	tui.renderNow();
 	assert.ok(tui.getScreenLines().every((line) => !line.includes("[Copy]")));
 	draftEditor.setText("cleanup target");
 	point = draftButton();

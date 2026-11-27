@@ -14,8 +14,10 @@ The working timer requests a redraw every 250 ms while an agent run is active. G
 
 - [git.ts](../extensions/open-tui/git.ts) parses `git status --porcelain=v1 --branch` and reads commit, tag, and stash information as requested. Each Git command has a two-second timeout. A failed status read produces an empty Git state. Turning off both branch and status display avoids the refresh; `gitCommit` only adds a tag to the detached branch display.
 - [git-refresh.ts](../extensions/open-tui/git-refresh.ts) serializes Git reads. Tool completion requests a refresh with a 500 ms minimum interval between starts, retaining a trailing request during bursts or in-flight reads. Agent completion expedites pending work; session start, branch changes, and settings changes request an immediate read. Session changes, shutdown, and UI disablement cancel queued work and invalidate old results. Tool events do not trigger runtime detection, and idle changes made outside Pi are not polled.
-- [runtime.ts](../extensions/open-tui/runtime.ts) chooses the first matching definition from its ordered list of 50+ runtimes and environments. It checks project files, folders, extensions, and environment variables in the working directory. It reports the locally executed version command's result, not a declared dependency version. Version commands have a 2.5-second timeout; unavailable versions leave the runtime symbol visible. Results are cached by directory and runtime, with a fingerprint of relevant files and environment values.
+- [runtime.ts](../extensions/open-tui/runtime.ts) chooses the first matching definition from its ordered list of 50+ runtimes and environments. It checks project files, folders, extensions, and environment variables in the working directory. Version commands have a 2.5-second timeout and use a cache keyed by directory, runtime, and a fingerprint of relevant files and environment values. Unavailable versions leave the runtime symbol visible. Runtime detection runs only when the extension and its runtime segment are enabled. Turning the segment back on refreshes its value.
 - [state.ts](../extensions/open-tui/state.ts) reads model metadata and session usage. Usage is cached by session manager and leaf ID, with invalidation on message completion, compaction, tree changes, and session start.
+
+Python version detection requires `ctx.isProjectTrusted()` to be true. It checks the working directory's `.venv` first, then `VIRTUAL_ENV`. An environment is selected if it contains `pyvenv.cfg` or an interpreter entry (`Scripts/python.exe` on Windows, `bin/python` or `bin/python3` on macOS/Linux). If the selected environment has no interpreter file or has no readable `version` or `version_info` in `pyvenv.cfg`, the footer shows only the Python symbol. A dangling interpreter link still selects its environment. Python metadata is reread on each refresh without executing the environment's interpreter. When `.venv` is absent and `VIRTUAL_ENV` is unset or empty, detection runs `python3 --version` with the inherited PATH and `os.tmpdir()` as the working directory. Both values are included in the fallback's cache fingerprint. The footer does not show `.python-version` declarations as installed versions.
 
 ### Editor and layout
 
@@ -112,8 +114,10 @@ Agent 运行期间，工作计时器每 250 毫秒请求一次重绘。Git 和�
 
 - [git.ts](../extensions/open-tui/git.ts) 解析 `git status --porcelain=v1 --branch`，按需读取提交、标签和 stash。每条 Git 命令的超时为两秒，状态读取失败时返回空 Git 状态。分支和状态显示都关闭时跳过刷新；`gitCommit` 仅为分离 HEAD 的分支显示追加标签。
 - [git-refresh.ts](../extensions/open-tui/git-refresh.ts) 串行读取 Git。工具结束后请求刷新，两次读取的启动时间至少间隔 500 毫秒；密集请求和读取期间的新请求会保留一次后续刷新。Agent 任务结束时提前处理待刷请求；会话开始、切换分支和修改设置时请求立即读取。切换或关闭会话、禁用界面时取消排队任务并使旧结果失效。工具事件不触发运行环境检测，也不轮询 Pi 空闲时发生的外部修改。
-- [runtime.ts](../extensions/open-tui/runtime.ts) 从按顺序排列的 50 多种运行环境定义中选择第一个匹配项，检查工作目录中的项目文件、目录、扩展名和环境变量。版本来自本地实际执行的版本命令，不是依赖声明中的版本。命令超时为 2.5 秒，版本不可用时仍显示环境标记。结果按目录和环境缓存，并用相关文件与环境变量构成指纹。
+- [runtime.ts](../extensions/open-tui/runtime.ts) 从按顺序排列的 50 多种运行环境定义中选择第一个匹配项，检查工作目录中的项目文件、目录、扩展名和环境变量。版本命令超时为 2.5 秒，结果按目录、运行环境及相关文件和环境变量的指纹缓存。版本不可用时仍显示环境标记。扩展和运行环境分段都开启时才检测；重新开启分段会刷新结果。
 - [state.ts](../extensions/open-tui/state.ts) 读取模型信息与会话用量。用量缓存绑定会话管理器和当前叶节点 ID，在消息结束、压缩、会话树变化和会话开始时失效。
+
+Python 版本检测要求 `ctx.isProjectTrusted()` 返回 true。先检查工作目录下的 `.venv`，再检查 `VIRTUAL_ENV`。有 `pyvenv.cfg` 或解释器入口的环境会被选中（Windows 为 `Scripts/python.exe`，macOS/Linux 为 `bin/python` 或 `bin/python3`）。如果选中的环境缺少解释器文件，或无法从 `pyvenv.cfg` 读取 `version` 或 `version_info`，则只显示 Python 标记。解释器链接的目标丢失后，仍会选中该环境。每次刷新都会重新读取版本记录，不执行虚拟环境的解释器。当 `.venv` 不存在且 `VIRTUAL_ENV` 未设置或为空时，以 `os.tmpdir()` 为工作目录，使用继承的 PATH 执行 `python3 --version`；两者都计入回退结果的缓存指纹。底栏不会把 `.python-version` 声明当作已安装版本。
 
 ### 编辑器与布局
 

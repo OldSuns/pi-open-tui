@@ -340,6 +340,7 @@ test("toggles the header without resetting a disabled slot and warns when persis
 		mode: "tui",
 		// Git/runtime probes spawn in cwd; keeping them out of agentDir lets Windows delete it.
 		cwd: process.cwd(),
+		isProjectTrusted: () => true,
 		ui: {
 			setFooter() {},
 			getEditorComponent: () => editorFactory,

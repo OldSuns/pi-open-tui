@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { execFile, execFileSync } from "node:child_process";
+import { channel } from "node:diagnostics_channel";
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { hostname, tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, isAbsolute, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import test, { type TestContext } from "node:test";
+import { promisify } from "node:util";
 import { setTimeout as delay } from "node:timers/promises";
 import type {
 	ExtensionContext,
@@ -763,6 +765,110 @@ test("prefers Bun lockfiles while preserving the Node fallback", async () => {
 		clearRuntimeCache();
 		rmSync(cwd, { recursive: true, force: true });
 	}
+});
+
+test("Python runtime reads virtual environments without spawning and caches the PATH fallback", async (t) => {
+	let python: string | undefined;
+	for (const command of process.platform === "win32" ? ["python", "python3"] : ["python3", "python"]) {
+		try {
+			const executable = execFileSync(command, ["-c", "import sys; print(sys.executable)"], {
+				encoding: "utf8", timeout: 5_000,
+			}).trim();
+			if (isAbsolute(executable)) {
+				python = executable;
+				break;
+			}
+		} catch { /* Try the next installed interpreter. */ }
+	}
+	if (!python) {
+		t.skip("A Python installation is required to exercise real virtual environments");
+		return;
+	}
+	const root = temporaryDirectory(t, "open-tui-python-");
+	const cwd = join(root, "project with spaces");
+	const active = join(root, "active environment");
+	const project = join(cwd, ".venv");
+	const savedProject = join(root, "saved project environment");
+	const projectConfig = join(project, "pyvenv.cfg");
+	const readTrusted = () => readRuntimeInfo(cwd, true);
+	const noVersion = { name: "python", version: undefined };
+	const executableIn = (directory: string) => process.platform === "win32"
+		? join(directory, "Scripts", "python.exe") : join(directory, "bin", "python");
+	const createEnvironment = (directory: string) => execFileSync(python!, ["-m", "venv", "--without-pip", directory], {
+		encoding: "utf8", timeout: 15_000,
+	});
+	mkdirSync(cwd);
+	writeFileSync(join(cwd, "pyproject.toml"), "[project]\nname = 'runtime-test'\nversion = '0.0.0'\n", "utf8");
+	writeFileSync(join(cwd, ".python-version"), "0.0\n", "utf8");
+	writeFileSync(join(cwd, "uv.lock"), "", "utf8");
+	createEnvironment(active);
+	createEnvironment(project);
+	renameSync(project, savedProject);
+	const activePython = executableIn(active);
+	if (process.platform === "win32") copyFileSync(activePython, join(dirname(activePython), "python3.exe"));
+	const version = execFileSync(activePython, ["--version"], { encoding: "utf8" }).match(/Python\s+(\d+\.\d+\.\d+)/)?.[1];
+	assert.ok(version);
+	const tempKey = process.platform === "win32" ? "TEMP" : "TMPDIR";
+	preserveEnvironment(t, ["PATH", "VIRTUAL_ENV", tempKey]);
+	t.after(clearRuntimeCache);
+	let spawned = 0;
+	const onSpawn = () => { spawned++; };
+	const processes = channel("child_process");
+	processes.subscribe(onSpawn);
+	t.after(() => processes.unsubscribe(onSpawn));
+	await promisify(execFile)(python, ["--version"], { timeout: 5_000 });
+	assert.ok(spawned > 0, "the observer must see a real child process");
+	spawned = 0;
+	process.env.PATH = dirname(activePython);
+	delete process.env.VIRTUAL_ENV;
+	assert.deepEqual(await readRuntimeInfo(cwd, false), noVersion, "untrusted projects cannot probe PATH");
+	assert.equal(spawned, 0);
+	assert.deepEqual(await readTrusted(), { name: "python", version }, "PATH supplies a version without a virtual environment");
+	process.env.VIRTUAL_ENV = "";
+	assert.deepEqual(await readTrusted(), { name: "python", version }, "an empty VIRTUAL_ENV is treated as unset");
+	assert.equal(spawned, 1, "reuse the cached PATH version");
+
+	process.env.VIRTUAL_ENV = join(root, "missing active environment");
+	assert.deepEqual(await readTrusted(), noVersion, "a set but unusable VIRTUAL_ENV blocks PATH fallback");
+	process.env.VIRTUAL_ENV = active;
+	assert.deepEqual(await readTrusted(), { name: "python", version });
+	renameSync(savedProject, project);
+	assert.deepEqual(await readTrusted(), { name: "python", version }, "read CPython's venv metadata");
+	writeFileSync(projectConfig, "uv = 0.11.0\r\nversion_info = 3.42.7\r\n", "utf8");
+	const detected = await readTrusted();
+	assert.deepEqual(detected, { name: "python", version: "3.42.7" }, "project metadata wins over the active environment");
+	for (const trusted of [false, undefined]) {
+		assert.deepEqual(await readRuntimeInfo(cwd, trusted), noVersion);
+	}
+	const { component, handle } = footerFixture({ state: { runtime: detected } });
+	assert.ok(component.render(160)[0]!.includes("py 3.42.7"));
+	assert.ok(handle.renderInline(160)!.top.right.includes("py 3.42.7"));
+
+	writeFileSync(projectConfig, "version_info = 3.42\n", "utf8");
+	assert.deepEqual(await readTrusted(), { name: "python", version: "3.42" }, "keep the precision recorded by uv");
+	writeFileSync(projectConfig, "version = 3.42.7 garbage\n", "utf8");
+	assert.deepEqual(await readTrusted(), noVersion, "unparseable metadata does not select another environment");
+	rmSync(projectConfig);
+	assert.deepEqual(await readTrusted(), noVersion, "an interpreter without metadata is not executed");
+
+	renameSync(project, savedProject);
+	assert.deepEqual(await readTrusted(), { name: "python", version }, "removing the project environment restores the active environment");
+	delete process.env.VIRTUAL_ENV;
+	mkdirSync(project);
+	assert.deepEqual(await readTrusted(), noVersion, "an empty .venv still blocks PATH fallback");
+	if (process.platform !== "win32") {
+		const projectPython = executableIn(project);
+		mkdirSync(dirname(projectPython), { recursive: true });
+		symlinkSync(join(root, "missing python"), projectPython);
+		assert.deepEqual(await readTrusted(), noVersion, "a dangling interpreter still selects the project environment");
+		writeFileSync(projectConfig, "version_info = 3.42.7\n", "utf8");
+		assert.deepEqual(await readTrusted(), noVersion, "stale metadata cannot supply a version for a dangling interpreter");
+	}
+	assert.equal(spawned, 1, "the fallback is the only Python process started by detection");
+
+	renameSync(project, join(root, "incomplete project environment"));
+	process.env[tempKey] = join(root, "missing temporary directory");
+	assert.deepEqual(await readTrusted(), noVersion, "fallback cannot start when the temporary cwd is missing, even though the project cwd exists");
 });
 
 test("detects runtime project suffixes and Java versions on either output stream", () => {

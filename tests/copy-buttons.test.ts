@@ -152,6 +152,31 @@ test("scroll cache keeps real user-message buttons current across resize, settin
 	}
 });
 
+test("Copy decoration preserves Pi's shared render arrays", () => {
+	const nativeUserRender = UserMessageComponent.prototype.render;
+	const nativeMarkdownRender = Markdown.prototype.render;
+	const { copy, enable } = installRealCopyButtons();
+	try {
+		const message = new UserMessageComponent("plain user text", undefined, 1, [markCopyScope]);
+		const nativeLines = nativeUserRender.call(message, 40);
+		const original = [...nativeLines];
+		const decorated = message.render(40);
+		assert.match(decorated.at(-1)!, /\[Copy\]/);
+		assert.deepEqual(nativeLines, original, "the native message cache must stay undecorated");
+		assert.strictEqual(message.render(40), decorated, "unchanged decorated frames should be shared");
+		enable(false);
+		assert.deepEqual(message.render(40), new UserMessageComponent("plain user text").render(40));
+		enable(true);
+		const code = markdown(md);
+		const framed = code.render(40);
+		const nativeCode = nativeMarkdownRender.call(code, 40);
+		assert.notStrictEqual(framed, nativeCode, "stripping Copy markers must not mutate Pi's cached Markdown array");
+		assert.strictEqual(code.render(40), framed);
+	} finally {
+		copy.cleanup();
+	}
+});
+
 // Actual clipboard transport and mouse release rules.
 test("scroll cache copies current user messages through real mouse handlers and OSC 52", {
 	skip: process.platform !== "linux" ? "Real clipboard clicks run in headless Linux to preserve the desktop clipboard" : false,
@@ -280,7 +305,6 @@ test("component Copy releases follow the current parent layout and clear an unmo
 	const native = tui as unknown as {
 		stopped: boolean;
 		altScreenActive: boolean;
-		doRender(): void;
 		handleMouseEvent(event: { button: number; x: number; y: number; release: boolean }): void;
 	};
 	native.stopped = false;
@@ -305,10 +329,10 @@ test("component Copy releases follow the current parent layout and clear an unmo
 	try {
 		setOffset(1);
 		tui.setLayoutRoot(root);
-		native.doRender();
+		tui.renderNow();
 		send(1);
 		setOffset(3);
-		native.doRender();
+		tui.renderNow();
 		send(1, true);
 		assert.deepEqual(copied, [], "releasing at the old screen position must not copy an unhit component");
 		assert.equal(tui.hasActiveSelection(), false);
@@ -318,11 +342,11 @@ test("component Copy releases follow the current parent layout and clear an unmo
 		assert.equal(tui.hasActiveSelection(), false);
 		send(3);
 		root.removeChild(component);
-		native.doRender();
+		tui.renderNow();
 		send(3, true);
 		assert.equal(copied.length, 1, "unmounted targets cannot complete a held press");
 		root.addChild(component);
-		native.doRender();
+		tui.renderNow();
 		send(3);
 		send(3, true);
 		assert.equal(copied.length, 2, "an invalidated gesture must not break the next normal Copy click");
@@ -343,7 +367,6 @@ test("fullscreen mouse routing preserves selection and copies only clicks", () =
 	const internals = tui as unknown as {
 		stopped: boolean;
 		altScreenActive: boolean;
-		doRender(): void;
 		handleMouseEvent(event: { button: number; x: number; y: number; release: boolean }): void;
 	};
 	internals.stopped = false;
@@ -359,7 +382,7 @@ test("fullscreen mouse routing preserves selection and copies only clicks", () =
 	const send = (button: number, x: number, y: number, release = false) => internals.handleMouseEvent({ button, x, y, release });
 	try {
 		tui.setLayoutRoot(component);
-		internals.doRender();
+		tui.renderNow();
 		send(0, 11, 0);
 		send(32, 2, 1);
 		assert.equal(tui.hasActiveSelection(), true, "Pi must receive the drag");

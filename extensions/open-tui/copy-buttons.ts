@@ -69,20 +69,21 @@ interface MarkdownInternals {
 	text?: unknown;
 	theme: MarkdownTheme;
 	invalidate(): void;
-	render(width: number): string[];
+	render(width: number): readonly string[];
 	renderToken(token: Token, width: number, nextTokenType?: string, styleContext?: unknown): string[];
 	handleMouse?(event: TuiMouseEvent): TuiMouseEventResult | undefined;
 }
 interface UserMessageInternals {
 	text?: unknown;
 	outputPad?: unknown;
-	render(width: number): string[];
+	render(width: number): readonly string[];
 	handleMouse?(event: TuiMouseEvent): TuiMouseEventResult | undefined;
 }
 
 interface MarkdownState {
 	active: boolean;
 	policy?: { frame: boolean; label: boolean };
+	source?: readonly string[];
 	lines?: readonly string[];
 	regions: CopyRegion[];
 	descriptors: Map<number, { text: string; label: boolean }>;
@@ -270,7 +271,7 @@ export function installCopyButtons(options: {
 	let installed = true;
 	const active = () => installed && options.isEnabled() && options.getTui()?.mode === "fullscreen";
 	let markdownRegions = new WeakMap<object, MarkdownState>();
-	let userRegions = new WeakMap<object, { region: CopyRegion; source: string; label: string; width: number; line: string }>();
+	let userRegions = new WeakMap<object, { region: CopyRegion; source: readonly string[]; label: string; width: number; lines: readonly string[] }>();
 	const markerPrefix = `${MARKER_PREFIX}${randomUUID()}:`;
 	const markerPattern = new RegExp(`${markerPrefix}(\\d+):([01])\x07`, "g");
 	const copy = (text: string) => {
@@ -366,14 +367,16 @@ export function installCopyButtons(options: {
 				finally { renderScope = outer; }
 			};
 			try {
-				let lines = run();
-				if (state.lines === lines) return lines;
+				let nativeLines = run();
+				if (state.source === nativeLines && state.lines) return state.lines;
 				// A retained native block can outlive its description after a renderer change.
-				const missing = lines.some((line) => [...line.matchAll(markerPattern)].some((match) => !state.descriptors.has(Number(match[1]))));
+				const missing = nativeLines.some((line) => [...line.matchAll(markerPattern)].some((match) => !state.descriptors.has(Number(match[1]))));
 				if (missing) {
 					this.invalidate();
-					lines = run();
+					nativeLines = run();
 				}
+				// Pi shares cached output across frames; strip markers only in our own array.
+				const lines = [...nativeLines];
 				const source = typeof this.text === "string" ? this.text : "";
 				const regions: CopyRegion[] = [];
 				const live = new Set<number>();
@@ -409,11 +412,13 @@ export function installCopyButtons(options: {
 				}
 				for (const id of state.descriptors.keys()) if (!live.has(id)) state.descriptors.delete(id);
 				cancelStalePress(this, regions);
+				state.source = nativeLines;
 				state.lines = lines;
 				state.regions = regions;
 				return lines;
 			} catch (error) {
 				cancelStalePress(this, []);
+				state.source = undefined;
 				state.lines = undefined;
 				state.regions = [];
 				state.descriptors.clear();
@@ -432,32 +437,30 @@ export function installCopyButtons(options: {
 		}),
 		patch(userProto, "render", function (this: UserMessageInternals, width) {
 			if (!installed) return originalUserRender.call(this, width);
-			const lines = originalUserRender.call(this, width);
+			const nativeLines = originalUserRender.call(this, width);
 			const pad = typeof this.outputPad === "number" ? this.outputPad : 1;
 			const col = width - pad - LABEL.length;
-			if (!active() || lines.length < 2 || col < 1 || typeof this.text !== "string") {
+			if (!active() || nativeLines.length < 2 || col < 1 || typeof this.text !== "string") {
 				cancelStalePress(this, []);
 				userRegions.delete(this);
-				return lines;
+				return nativeLines;
 			}
 			// The last row is the bubble's bottom padding, so the label never shares a row with a code-block label.
-			const row = lines.length - 1;
+			const row = nativeLines.length - 1;
 			const theme = options.getTheme();
 			const button = theme.bg("userMessageBg", label());
 			const cached = userRegions.get(this);
-			// UserMessage.render returns a fresh array, so compare its undecorated bottom row instead.
-			if (cached && cached.source === lines[row] && cached.label === button && cached.width === width
+			if (cached && cached.source === nativeLines && cached.label === button && cached.width === width
 				&& cached.region.row === row && cached.region.col === col && cached.region.text === this.text) {
-				lines[row] = cached.line;
-				return lines;
+				return cached.lines;
 			}
-			const source = lines[row]!;
-			lines[row] = compositeTuiLine(source, button, col, LABEL.length, width);
+			const lines = [...nativeLines];
+			lines[row] = compositeTuiLine(lines[row]!, button, col, LABEL.length, width);
 			const region = { row, col, width: LABEL.length, text: this.text };
 			cancelStalePress(this, [region]);
 			userRegions.set(this, {
 				region,
-				source, label: button, width, line: lines[row]!,
+				source: nativeLines, label: button, width, lines,
 			});
 			return lines;
 		}),

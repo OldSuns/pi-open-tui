@@ -1002,7 +1002,7 @@ test("expanded rows hand off to Pi's native card", () => {
 });
 
 // Code previews and real write/edit execution.
-function plain(rows: string[]): string[] {
+function plain(rows: readonly string[]): string[] {
 	return rows.map(stripAnsi);
 }
 

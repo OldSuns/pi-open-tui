@@ -20,7 +20,7 @@ A polished terminal interface for the [Pi](https://pi.dev) coding agent.
 
 ## Requirements
 
-- Pi 1.5.0 or later
+- Pi 1.6.1 or later
 - Node.js 22.19.0 or later (Pi's minimum)
 - A terminal with UTF-8 and color support
 - A [Nerd Font](https://www.nerdfonts.com/font-downloads) for the full icon set (optional; Unicode and ASCII modes are available)
@@ -70,6 +70,8 @@ Selecting **Tool view: Compact** reveals **Compact extension tools** as a child 
 The header provides model and project context with command hints. The two main footer rows keep location, Git state, runtime, a working/done timer, context usage, model details, tokens, and cost visible as space allows. Fields can be toggled individually; the layout shortens or hides lower-priority information in narrow terminals.
 
 Git status refreshes after tool execution, including commits on the current branch. Rapid tool activity is combined into periodic refreshes, with any pending refresh expedited when the agent run ends.
+
+In projects Pi marks as trusted, the footer reads the Python version recorded in `pyvenv.cfg` from `.venv` in the working directory, then from `VIRTUAL_ENV` if there is no project environment. This works with uv without activation or running the virtual environment's interpreter. If `.venv` is absent and `VIRTUAL_ENV` is unset or empty, the footer queries `python3 --version` using PATH, with the OS temporary directory as the working directory. Untrusted projects or unavailable versions show only the Python symbol. Reload Pi after changing environments to refresh the display.
 
 Footer token and cost totals include assistant responses, tool-reported usage, compaction and branch summaries, and cache warming. The cache-hit percentage describes the latest assistant response. Other extensions can use separate status rows or [contribute text directly to the main footer](./docs/footer-segments.md).
 
@@ -162,7 +164,7 @@ npm run typecheck
 pi -e .
 ```
 
-CI checks Pi 1.5.0 and the latest release on Node.js 22.19.0 and 24 across Linux, Windows, and macOS. Keep all Pi packages on the same version. Use `pi -e .` to check terminal fonts, mouse interaction, and cursor support interactively.
+CI checks Pi 1.6.1 and the latest release on Node.js 22.19.0 and 24 across Linux, Windows, and macOS. Keep all Pi packages on the same version. Use `pi -e .` to check terminal fonts, mouse interaction, and cursor support interactively.
 
 ## Acknowledgements
 
