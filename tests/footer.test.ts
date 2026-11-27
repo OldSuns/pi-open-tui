@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
+import { channel } from "node:diagnostics_channel";
 import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { hostname, tmpdir } from "node:os";
 import { dirname, isAbsolute, join } from "node:path";
@@ -786,6 +787,7 @@ test("Python runtime selects real virtual environments and refreshes changed int
 	const cwd = join(root, "project with spaces");
 	const active = join(root, "active environment");
 	const project = join(cwd, ".venv");
+	const readTrusted = () => readRuntimeInfo(cwd, true);
 	const executableIn = (directory: string) => process.platform === "win32"
 		? join(directory, "Scripts", "python.exe") : join(directory, "bin", "python");
 	const createEnvironment = (directory: string) => execFileSync(python!, ["-m", "venv", "--without-pip", directory], {
@@ -800,21 +802,37 @@ test("Python runtime selects real virtual environments and refreshes changed int
 	assert.ok(version);
 	preserveEnvironment(t, ["PATH", "VIRTUAL_ENV"]);
 	t.after(clearRuntimeCache);
+	let spawned = 0;
+	const onSpawn = () => { spawned++; };
+	const processes = channel("child_process");
+	processes.subscribe(onSpawn);
+	t.after(() => processes.unsubscribe(onSpawn));
+	const assertUntrusted = async () => {
+		const before = spawned;
+		for (const trusted of [false, undefined]) {
+			assert.deepEqual(await readRuntimeInfo(cwd, trusted), { name: "python", version: undefined });
+		}
+		assert.equal(spawned, before, "untrusted Python detection must not start a process");
+	};
 	// An empty PATH makes the old python3 lookup fail even when both interpreters have the same version.
 	process.env.PATH = "";
 	delete process.env.VIRTUAL_ENV;
-	assert.deepEqual(await readRuntimeInfo(cwd), { name: "python", version: undefined });
+	assert.deepEqual(await readTrusted(), { name: "python", version: undefined });
 
 	process.env.VIRTUAL_ENV = active;
-	assert.deepEqual(await readRuntimeInfo(cwd), { name: "python", version });
+	await assertUntrusted();
+	assert.deepEqual(await readTrusted(), { name: "python", version });
+	assert.ok(spawned > 0, "the observer must see real version probes");
 	process.env.VIRTUAL_ENV = join(root, "missing environment");
-	assert.deepEqual(await readRuntimeInfo(cwd), { name: "python", version: undefined });
+	assert.deepEqual(await readTrusted(), { name: "python", version: undefined });
 
 	createEnvironment(project);
 	delete process.env.VIRTUAL_ENV;
-	const detected = await readRuntimeInfo(cwd);
+	await assertUntrusted();
+	const detected = await readTrusted();
 	assert.deepEqual(detected, { name: "python", version });
-	assert.strictEqual(await readRuntimeInfo(cwd), detected, "unchanged interpreters reuse the cached result");
+	await assertUntrusted();
+	assert.strictEqual(await readTrusted(), detected, "trust changes must not expose or discard the trusted cache");
 	const { component, handle } = footerFixture({ state: { runtime: detected } });
 	assert.ok(component.render(160)[0]!.includes(`py ${version}`));
 	assert.ok(handle.renderInline(160)!.top.right.includes(`py ${version}`));
@@ -825,7 +843,7 @@ test("Python runtime selects real virtual environments and refreshes changed int
 	writeFileSync(activePython, "", "utf8");
 	process.env.VIRTUAL_ENV = active;
 	clearRuntimeCache();
-	assert.deepEqual(await readRuntimeInfo(cwd), { name: "python", version }, "the project environment wins over another active environment");
+	assert.deepEqual(await readTrusted(), { name: "python", version }, "the project environment wins over another active environment");
 	rmSync(activePython);
 	renameSync(savedActivePython, activePython);
 
@@ -833,17 +851,19 @@ test("Python runtime selects real virtual environments and refreshes changed int
 	const savedProjectPython = `${projectPython}.saved`;
 	renameSync(projectPython, savedProjectPython);
 	writeFileSync(projectPython, "", "utf8");
-	assert.deepEqual(await readRuntimeInfo(cwd), { name: "python", version: undefined }, "a broken project interpreter must not report another environment's version");
+	assert.deepEqual(await readTrusted(), { name: "python", version: undefined }, "a broken project interpreter must not report another environment's version");
 	rmSync(projectPython);
 	renameSync(savedProjectPython, projectPython);
-	assert.deepEqual(await readRuntimeInfo(cwd), { name: "python", version }, "repairing an interpreter invalidates the failed result");
+	assert.deepEqual(await readTrusted(), { name: "python", version }, "repairing an interpreter invalidates the failed result");
 
 	renameSync(project, join(root, "removed project environment"));
 	delete process.env.VIRTUAL_ENV;
-	assert.deepEqual(await readRuntimeInfo(cwd), { name: "python", version: undefined }, "removing the environment invalidates its cached version");
+	assert.deepEqual(await readTrusted(), { name: "python", version: undefined }, "removing the environment invalidates its cached version");
 	if (process.platform === "win32") copyFileSync(activePython, join(dirname(activePython), "python3.exe"));
 	process.env.PATH = dirname(activePython);
-	assert.deepEqual(await readRuntimeInfo(cwd), { name: "python", version }, "PATH remains the fallback when no virtual environment is selected");
+	await assertUntrusted();
+	assert.deepEqual(await readTrusted(), { name: "python", version }, "PATH remains the fallback when no virtual environment is selected");
+	await assertUntrusted();
 });
 
 test("detects runtime project suffixes and Java versions on either output stream", () => {

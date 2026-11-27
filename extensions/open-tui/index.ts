@@ -194,7 +194,7 @@ export default function (pi: ExtensionAPI) {
 		if (!sessionLifecycle.isCurrent()) return;
 		const generation = sessionLifecycle.currentGeneration();
 		const cwd = ctx.cwd;
-		const runtime = await readRuntimeInfo(cwd);
+		const runtime = await readRuntimeInfo(cwd, ctx.isProjectTrusted());
 		if (!sessionLifecycle.isCurrent(generation)) return;
 		state.runtime = runtime;
 		requestFooterRender?.();

@@ -6,6 +6,11 @@
 
 - Require Pi 1.6.1 or later and use its read-only component render results.
 
+### Fixed
+
+- Detect Python versions from project virtual environments without requiring activation (#105).
+- Skip Python version commands in untrusted projects.
+
 ## [0.4.7] - 2026-11-20
 
 ### Fixed

@@ -167,9 +167,11 @@ async function fetchVersion(command: RuntimeDef["versionCommand"], cwd: string):
 	}
 }
 
-export async function readRuntimeInfo(cwd: string): Promise<RuntimeInfo | null> {
+export async function readRuntimeInfo(cwd: string, projectTrusted = false): Promise<RuntimeInfo | null> {
 	for (const def of RUNTIMES) {
 		if (!matchesDef(cwd, def)) continue;
+		// Do not select or execute Python interpreters, or expose cached versions, without project trust.
+		if (def.name === "python" && !projectTrusted) return { name: def.name, version: undefined };
 		const command = def.name === "python" && def.versionCommand
 			? { ...def.versionCommand, cmd: pythonCommand(cwd) } : def.versionCommand;
 		const fp = fingerprint(cwd, def, command?.cmd);
