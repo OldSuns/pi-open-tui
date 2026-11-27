@@ -152,6 +152,31 @@ test("scroll cache keeps real user-message buttons current across resize, settin
 	}
 });
 
+test("Copy decoration preserves Pi's shared render arrays", () => {
+	const nativeUserRender = UserMessageComponent.prototype.render;
+	const nativeMarkdownRender = Markdown.prototype.render;
+	const { copy, enable } = installRealCopyButtons();
+	try {
+		const message = new UserMessageComponent("plain user text", undefined, 1, [markCopyScope]);
+		const nativeLines = nativeUserRender.call(message, 40);
+		const original = [...nativeLines];
+		const decorated = message.render(40);
+		assert.match(decorated.at(-1)!, /\[Copy\]/);
+		assert.deepEqual(nativeLines, original, "the native message cache must stay undecorated");
+		assert.strictEqual(message.render(40), decorated, "unchanged decorated frames should be shared");
+		enable(false);
+		assert.deepEqual(message.render(40), new UserMessageComponent("plain user text").render(40));
+		enable(true);
+		const code = markdown(md);
+		const framed = code.render(40);
+		const nativeCode = nativeMarkdownRender.call(code, 40);
+		assert.notStrictEqual(framed, nativeCode, "stripping Copy markers must not mutate Pi's cached Markdown array");
+		assert.strictEqual(code.render(40), framed);
+	} finally {
+		copy.cleanup();
+	}
+});
+
 // Actual clipboard transport and mouse release rules.
 test("scroll cache copies current user messages through real mouse handlers and OSC 52", {
 	skip: process.platform !== "linux" ? "Real clipboard clicks run in headless Linux to preserve the desktop clipboard" : false,
