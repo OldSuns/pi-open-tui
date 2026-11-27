@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import type { ChildProcess } from "node:child_process";
+import { channel } from "node:diagnostics_channel";
 import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { stripTypeScriptTypes } from "node:module";
 import { hostname, tmpdir } from "node:os";
@@ -22,6 +24,7 @@ import { Text, visibleWidth } from "@earendil-works/pi-tui";
 import openTui from "../extensions/open-tui/index.ts";
 import { DEFAULT_CONFIG, type OpenTuiConfig } from "../extensions/open-tui/config.ts";
 import type { FooterBuiltinSegment, FooterPosition, FooterSegment, FooterStateMessage } from "../extensions/open-tui/footer-segments.ts";
+import { clearRuntimeCache } from "../extensions/open-tui/runtime.ts";
 import { stripAnsi } from "../extensions/open-tui/utils.ts";
 
 interface Contributor {
@@ -235,6 +238,46 @@ function assertOrder(text: string, labels: readonly string[]): void {
 const anchors: readonly FooterBuiltinSegment[] = [
 	"cwd", "hostname", "sessionName", "git", "runtime", "timer", "context", "model", "tokens", "cost",
 ];
+
+test("real Pi skips hidden runtime probes and refreshes when the footer is enabled again", async (t) => {
+	const children: Array<{ child: ChildProcess; closed: Promise<void> }> = [];
+	const probes = () => children.filter(({ child }) => child.spawnfile === "node" && child.spawnargs?.[1] === "--version");
+	const processes = channel("child_process");
+	const onSpawn = (message: unknown) => {
+		const { process: child } = message as { process: ChildProcess };
+		children.push({ child, closed: new Promise((resolve) => child.once("close", () => resolve())) });
+	};
+	processes.subscribe(onSpawn);
+	t.after(() => {
+		processes.unsubscribe(onSpawn);
+		clearRuntimeCache();
+	});
+	const projectMarker: ExtensionFactory = (pi) => {
+		pi.on("session_start", async (_event, ctx) => {
+			await writeFile(join(ctx.cwd, "package.json"), "{}", "utf8");
+		});
+	};
+	await withHost(true, async ({ runtime, host, footer, toggle }) => {
+		const rendered = () => stripAnsi(footer().join("\n"));
+		const assertRuntime = async (count: number) => {
+			const runtimeProbes = probes();
+			await Promise.all(runtimeProbes.map(({ closed }) => closed));
+			await nextTurn();
+			assert.equal(runtimeProbes.length, count);
+			assert.match(rendered(), /node \d+\.\d+\.\d+/);
+		};
+		assert.equal(probes().length, 0, "a hidden runtime segment does not probe on session start");
+		await toggle("Footer", "Project runtime");
+		await assertRuntime(1);
+
+		await toggle("General", "Enabled");
+		clearRuntimeCache();
+		await runtime.session.reload({ beforeSessionStart: async () => host.resetExtensionUI() });
+		assert.equal(probes().length, 1, "a disabled extension does not probe on reload");
+		await toggle("General", "Enabled");
+		await assertRuntime(2);
+	}, [projectMarker]);
+});
 
 for (const contributorFirst of [false, true]) {
 	test(`real Pi footer protocol places, updates and fits segments with contributor ${contributorFirst ? "first" : "last"}`, async () => {

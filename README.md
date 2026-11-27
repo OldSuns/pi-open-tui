@@ -71,7 +71,7 @@ The header provides model and project context with command hints. The two main f
 
 Git status refreshes after tool execution, including commits on the current branch. Rapid tool activity is combined into periodic refreshes, with any pending refresh expedited when the agent run ends.
 
-In trusted projects, Python version detection prefers `.venv` in the working directory, then `VIRTUAL_ENV`, and otherwise uses `python3` from PATH. Project environments, including those created by uv, work without activation. Untrusted projects show only the Python symbol and do not run Python version commands. The version comes from the interpreter; reload Pi after changing environments to refresh it.
+In projects Pi marks as trusted, the footer reads the Python version recorded in `pyvenv.cfg` from `.venv` in the working directory, then from `VIRTUAL_ENV` if there is no project environment. This works with uv without activation or running the virtual environment's interpreter. If `.venv` is absent and `VIRTUAL_ENV` is unset or empty, the footer queries `python3 --version` using PATH, with the OS temporary directory as the working directory. Untrusted projects or unavailable versions show only the Python symbol. Reload Pi after changing environments to refresh the display.
 
 Footer token and cost totals include assistant responses, tool-reported usage, compaction and branch summaries, and cache warming. The cache-hit percentage describes the latest assistant response. Other extensions can use separate status rows or [contribute text directly to the main footer](./docs/footer-segments.md).
 
